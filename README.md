@@ -11,9 +11,10 @@ under a budget, record production and QC evidence, and pay the right party in US
 ## Status (honest)
 
 Built and unit-tested (local, simulated data): policy engine, payment state machine,
-order/quote/decision/evidence/acceptance/payment-intent API (`docs/API_CONTRACT.md`).
+order/quote/decision/evidence/acceptance/payment-intent API (`docs/API_CONTRACT.md`),
+seven agent tools with a decision log, and a rule-based planner standing in for the LLM.
 
-Not built or proven: LLM agent, printer status, Circle/Arc transfer and on-chain
+Not built or proven: LLM tool-calling loop, printer status, Circle/Arc transfer and on-chain
 verification, UI, real database, real order. See `docs/PILOT.md` and `docs/EVIDENCE_LABELS.md`.
 
 ## Design rules

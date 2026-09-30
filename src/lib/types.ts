@@ -97,3 +97,14 @@ export interface ApiError {
   error: string;
   reasons?: string[];
 }
+
+export interface AgentLogEntry {
+  id: number;
+  orderId: string;
+  actor: "agent" | "human";
+  tool: string;
+  input: unknown;
+  ok: boolean; // false when the tool refused or the policy blocked it
+  output: unknown;
+  at: string;
+}

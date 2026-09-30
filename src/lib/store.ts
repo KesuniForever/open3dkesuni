@@ -1,6 +1,6 @@
 // In-memory store for the prototype. Data is labelled "simulated" until real.
 // Replace with a database later; keep the function signatures.
-import type { Acceptance, Decision, Evidence, Order, PaymentIntent, Quote, Vendor } from "./types";
+import type { Acceptance, AgentLogEntry, Decision, Evidence, Order, PaymentIntent, Quote, Vendor } from "./types";
 import { usdcToMicro } from "./policy";
 
 interface Db {
@@ -11,12 +11,13 @@ interface Db {
   evidence: Evidence[];
   acceptances: Map<string, Acceptance>;
   intents: Map<string, PaymentIntent>;
+  agentLog: AgentLogEntry[];
 }
 
 function seed(): Db {
   const db: Db = {
     orders: new Map(), vendors: new Map(), quotes: new Map(),
-    decisions: [], evidence: [], acceptances: new Map(), intents: new Map(),
+    decisions: [], evidence: [], acceptances: new Map(), intents: new Map(), agentLog: [],
   };
   db.vendors.set("own", { id: "own", name: "Own studio", address: "0x0000000000000000000000000000000000000001", approved: true });
   db.vendors.set("partner-a", { id: "partner-a", name: "Partner printer A (simulated)", address: "0x0000000000000000000000000000000000000002", approved: true });
@@ -34,6 +35,7 @@ function seed(): Db {
 const g = globalThis as unknown as { __kesuniDb?: Db };
 export const db: Db = (g.__kesuniDb ??= seed());
 
+/** Reset in place: importers hold a reference to `db`, so the object must stay the same. */
 export function resetDb(): void {
-  g.__kesuniDb = seed();
+  Object.assign(db, seed());
 }

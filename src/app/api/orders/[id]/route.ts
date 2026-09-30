@@ -11,6 +11,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     decisions: db.decisions.filter((d) => d.orderId === order.id),
     evidence: db.evidence.filter((e) => e.orderId === order.id),
     acceptance: db.acceptances.get(order.id) ?? null,
+    agentLog: db.agentLog.filter((e) => e.orderId === order.id),
     paymentIntents: [...db.intents.values()].filter((i) => i.orderId === order.id),
   });
 }
