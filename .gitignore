@@ -40,7 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# --- TIMBAL: never commit secrets or local state ---
+# --- Kesuni 3D: never commit secrets or local state ---
 !.env.example
 wallet.yaml
 .arc-canteen/

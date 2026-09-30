@@ -1,8 +1,8 @@
-# TIMBAL Fabric
+# Kesuni 3D
 
 Hackathon project for the Tameion Agents Hackathon (Sep 27 to Oct 10, 2026).
 
-TIMBAL helps a small 3D-print business take an order, choose a production route
+Kesuni 3D helps a small 3D-print business take an order, choose a production route
 under a budget, record production and QC evidence, and pay the right party in USDC
 (Circle on Arc) only when acceptance rules are met.
 

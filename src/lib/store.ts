@@ -31,9 +31,9 @@ function seed(): Db {
   return db;
 }
 
-const g = globalThis as unknown as { __timbalDb?: Db };
-export const db: Db = (g.__timbalDb ??= seed());
+const g = globalThis as unknown as { __kesuniDb?: Db };
+export const db: Db = (g.__kesuniDb ??= seed());
 
 export function resetDb(): void {
-  g.__timbalDb = seed();
+  g.__kesuniDb = seed();
 }
