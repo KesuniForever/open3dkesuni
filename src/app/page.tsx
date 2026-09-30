@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { db } from "@/lib/store";
+import { listOrders } from "@/lib/store";
 import { microToUsdc } from "@/lib/policy";
+import NewOrderForm from "./components/NewOrderForm";
 
 export const dynamic = "force-dynamic";
 
 export default function Home() {
-  const orders = [...db.orders.values()];
+  const orders = listOrders();
   return (
     <main className="wrap">
       <header className="topbar">
@@ -16,6 +17,8 @@ export default function Home() {
         Take an order, let the agent choose a production route within budget, record evidence and QC,
         and pay only after acceptance.
       </p>
+      <div style={{ margin: "16px 0" }}><NewOrderForm /></div>
+      {orders.length === 0 && <p className="muted">No orders yet.</p>}
       <div className="orders">
         {orders.map((o) => (
           <Link key={o.id} href={`/orders/${o.id}`} className="card">

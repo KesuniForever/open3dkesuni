@@ -1,24 +1,17 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/store";
-import { fail, loadOrder, readJson, type Ctx } from "@/lib/http";
-import type { Quote } from "@/lib/types";
+import { addQuote } from "@/lib/actions";
+import { usdcToMicro } from "@/lib/policy";
+import { fail, failWith, readJson, str, type Ctx } from "@/lib/http";
 
-// Operator enters a partner quote manually. priceMicro is integer micro-USDC.
+// Operator enters a quote manually. Body: { vendorId, priceUsdc: "30", etaHours } or priceMicro (integer).
 export async function POST(req: Request, ctx: Ctx) {
-  const order = await loadOrder(ctx);
-  if (!order) return fail(404, "Order not found");
+  const { id } = await ctx.params;
   const b = await readJson(req);
   if (!b) return fail(400, "Invalid JSON body");
-  const { vendorId, priceMicro, etaHours } = b;
-  if (typeof vendorId !== "string" || !Number.isInteger(priceMicro) || !Number.isInteger(etaHours)) {
-    return fail(400, "Expected { vendorId: string, priceMicro: integer, etaHours: integer }");
+  let priceMicro = b.priceMicro as number;
+  if (b.priceUsdc !== undefined) {
+    try { priceMicro = usdcToMicro(str(b.priceUsdc)); } catch { return fail(400, "Price must be a USDC amount like 30 or 30.5"); }
   }
-  if (!db.vendors.has(vendorId)) return fail(400, "Unknown vendor");
-  const quote: Quote = {
-    id: `Q-${db.quotes.size + 1}`, orderId: order.id, vendorId,
-    priceMicro: priceMicro as number, etaHours: etaHours as number,
-    source: vendorId === "own" ? "own" : "partner",
-  };
-  db.quotes.set(quote.id, quote);
-  return NextResponse.json({ quote }, { status: 201 });
+  const r = addQuote(id, { vendorId: str(b.vendorId), priceMicro, etaHours: Number(b.etaHours) });
+  return r.ok ? NextResponse.json({ quote: r.quote }, { status: 201 }) : failWith(r);
 }

@@ -1,7 +1,7 @@
 // Agent tools. Reads are free; writes go through src/lib/actions.ts, the same code the
 // human API uses. Every call is logged. inputSchema is JSON Schema so an LLM can be
 // wired to these later with no changes to the tools themselves.
-import { db } from "../store";
+import * as store from "../store";
 import { checkPlan, microToUsdc } from "../policy";
 import { chooseQuote, createPaymentIntent } from "../actions";
 import type { AgentLogEntry } from "../types";
@@ -25,7 +25,7 @@ export const TOOLS: Tool[] = [
     description: "Read an order: product, quantity, deadline, design version, mandate, status.",
     inputSchema: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
     run: (i) => {
-      const o = db.orders.get(str(i.orderId));
+      const o = store.getOrder(str(i.orderId));
       return o ? { ok: true, data: o } : err("Order not found");
     },
   },
@@ -33,16 +33,16 @@ export const TOOLS: Tool[] = [
     name: "get_quotes",
     description: "List all quotes for an order (own studio and partners), prices in micro-USDC.",
     inputSchema: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
-    run: (i) => ({ ok: true, data: [...db.quotes.values()].filter((q) => q.orderId === str(i.orderId)) }),
+    run: (i) => ({ ok: true, data: store.listQuotes(str(i.orderId)) }),
   },
   {
     name: "get_available_budget",
     description: "Mandate minus amounts already committed in payment intents, in micro-USDC.",
     inputSchema: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
     run: (i) => {
-      const o = db.orders.get(str(i.orderId));
+      const o = store.getOrder(str(i.orderId));
       if (!o) return err("Order not found");
-      const committed = [...db.intents.values()].filter((p) => p.orderId === o.id).reduce((a, p) => a + p.amountMicro, 0);
+      const committed = store.listIntents(o.id).reduce((a, p) => a + p.amountMicro, 0);
       return { ok: true, data: { mandateMicro: o.mandateMicro, committedMicro: committed, availableMicro: o.mandateMicro - committed } };
     },
   },
@@ -51,11 +51,11 @@ export const TOOLS: Tool[] = [
     description: "Ask the policy engine whether a quote may be chosen. Returns ok and the reasons if not.",
     inputSchema: { type: "object", properties: { quoteId: { type: "string" } }, required: ["quoteId"] },
     run: (i) => {
-      const q = db.quotes.get(str(i.quoteId));
+      const q = store.getQuote(str(i.quoteId));
       if (!q) return err("Quote not found");
-      const o = db.orders.get(q.orderId);
+      const o = store.getOrder(q.orderId);
       if (!o) return err("Order not found");
-      const r = checkPlan(o, q, db.vendors.get(q.vendorId));
+      const r = checkPlan(o, q, store.getVendor(q.vendorId));
       return { ok: r.ok, data: r };
     },
   },
@@ -107,11 +107,11 @@ export const TOOLS: Tool[] = [
 export function callTool(name: string, input: Json, actor: "agent" | "human" = "agent"): ToolResult {
   const tool = TOOLS.find((t) => t.name === name);
   const result: ToolResult = tool ? tool.run(input) : err(`Unknown tool ${name}`);
-  const entry: AgentLogEntry = {
-    id: db.agentLog.length + 1, orderId: str(input.orderId) || (db.quotes.get(str(input.quoteId))?.orderId ?? ""),
+  const entry: Omit<AgentLogEntry, "id"> = {
+    orderId: str(input.orderId) || (store.getQuote(str(input.quoteId))?.orderId ?? ""),
     actor, tool: name, input, ok: result.ok, output: result.data, at: new Date().toISOString(),
   };
-  db.agentLog.push(entry);
+  store.addLog(entry);
   return result;
 }
 

@@ -1,7 +1,7 @@
 // Shared API contract types. Frontend and backend both import from here.
 // Money is always integer micro-USDC (6 decimals). Never floats.
 
-export type Label = "simulated" | "manual" | "local" | "testnet" | "mainnet";
+export type Label = "simulated" | "real" | "manual" | "local" | "testnet" | "mainnet";
 
 export type OrderStatus =
   | "CREATED"

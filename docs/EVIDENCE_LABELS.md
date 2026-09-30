@@ -5,6 +5,7 @@ Every piece of evidence in the UI and README must carry exactly one label:
 | Label | Meaning |
 |---|---|
 | `simulated` | Seed/mock data. Never counts as traction. |
+| `real` | An order placed by a real customer. Only these count as traction. |
 | `manual` | Entered by a human operator (e.g. printer status, QC result). |
 | `local` | Ran on a local ledger/state only. No chain transaction. |
 | `testnet` | Real transaction on Arc testnet (chain ID 5042002). |

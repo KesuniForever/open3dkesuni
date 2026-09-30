@@ -83,9 +83,9 @@ export default function OrderView({ id }: { id: string }) {
         <button
           disabled={busy}
           onClick={async () => { await post("/api/reset"); setNotice(null); load(); }}
-          title="Restore the simulated seed data"
+          title="Restore the simulated demo order. Real orders are not touched."
         >
-          Reset demo data
+          Reset simulated demo
         </button>
       </header>
 
@@ -142,8 +142,13 @@ export default function OrderView({ id }: { id: string }) {
             </tbody>
           </table>
         </div>
+        {order.status === "CREATED" && (
+          <QuoteForm vendors={vendors} disabled={busy}
+            onSubmit={(b) => act(`${base}/quotes`, b, "Quote added.")} />
+        )}
+        {quotes.length === 0 && <p className="muted">No quotes yet. Add at least one before running the agent.</p>}
         <div className="row" style={{ marginTop: 12 }}>
-          <button className="primary" disabled={busy || order.status !== "CREATED"}
+          <button className="primary" disabled={busy || order.status !== "CREATED" || quotes.length === 0}
             onClick={() => act(`${base}/agent-plan`, undefined, "Agent ran. See the decision log below.")}>
             Run agent
           </button>
@@ -180,7 +185,7 @@ export default function OrderView({ id }: { id: string }) {
             ))}
           </ul>
         )}
-        <EvidenceForm disabled={busy || !["PLAN_CHOSEN", "IN_PRODUCTION"].includes(order.status)}
+        <EvidenceForm disabled={busy || !["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status)}
           onSubmit={(b) => act(`${base}/evidence`, b, `Recorded ${b.kind} evidence.`)} />
       </section>
 
@@ -226,6 +231,38 @@ function summarize(e: AgentLogEntry): string {
   if (e.tool === "choose_plan") return `chose ${input.quoteId}`;
   if (e.tool === "request_human_decision") return "escalated to a person";
   return "";
+}
+
+function QuoteForm({ vendors, disabled, onSubmit }: {
+  vendors: Vendor[];
+  disabled: boolean;
+  onSubmit: (b: { vendorId: string; priceUsdc: string; etaHours: number }) => void;
+}) {
+  const [vendorId, setVendorId] = useState(vendors[0]?.id ?? "");
+  const [price, setPrice] = useState("");
+  const [eta, setEta] = useState("");
+  return (
+    <form className="form" style={{ marginTop: 12 }} onSubmit={(e) => {
+      e.preventDefault();
+      onSubmit({ vendorId, priceUsdc: price, etaHours: Number(eta) });
+      setPrice(""); setEta("");
+    }}>
+      <div className="row">
+        <label style={{ flex: "2 1 200px" }}>Who prints it
+          <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} disabled={disabled}>
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
+        </label>
+        <label style={{ flex: "1 1 110px" }}>Price (USDC)
+          <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" placeholder="30" disabled={disabled} required />
+        </label>
+        <label style={{ flex: "1 1 110px" }}>Time (hours)
+          <input type="number" min={1} value={eta} onChange={(e) => setEta(e.target.value)} placeholder="48" disabled={disabled} required />
+        </label>
+      </div>
+      <div><button disabled={disabled || !price || !eta}>Add quote</button></div>
+    </form>
+  );
 }
 
 function EvidenceForm({ disabled, onSubmit }: { disabled: boolean; onSubmit: (b: { kind: string; note: string; label: string }) => void }) {

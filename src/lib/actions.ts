@@ -1,51 +1,128 @@
-// The ONLY code paths that change order state. HTTP routes and agent tools both call
+// The ONLY code paths that change stored state. HTTP routes and agent tools both call
 // these, so an agent can never bypass validation a human would face.
-import { db } from "./store";
+import * as store from "./store";
 import { checkPaymentIntent, checkPlan } from "./policy";
-import type { Order, PaymentIntent } from "./types";
+import type { Acceptance, Evidence, Label, Order, PaymentIntent, Quote } from "./types";
 
 export type Fail = { ok: false; status: number; error: string; reasons?: string[] };
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
 
+const EVIDENCE_KINDS = ["log", "photo", "qc"] as const;
+const EVIDENCE_LABELS: Label[] = ["simulated", "manual", "local", "testnet", "mainnet"];
+
+export function createOrder(input: {
+  product: string; quantity: number; deadline: string; designVersion: string;
+  mandateMicro: number; label: "real" | "simulated";
+}): { ok: true; order: Order } | Fail {
+  const r: string[] = [];
+  if (!input.product.trim()) r.push("Product is required");
+  if (!Number.isInteger(input.quantity) || input.quantity < 1) r.push("Quantity must be a whole number, at least 1");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.deadline) || Number.isNaN(Date.parse(input.deadline))) r.push("Deadline must be a date (YYYY-MM-DD)");
+  if (!input.designVersion.trim()) r.push("Design version is required");
+  if (!Number.isInteger(input.mandateMicro) || input.mandateMicro <= 0) r.push("Budget must be a positive USDC amount");
+  if (input.label !== "real" && input.label !== "simulated") r.push("Label must be real or simulated");
+  if (r.length) return fail(400, "Invalid order", r);
+  const ids = store.nextOrderIds();
+  const order: Order = {
+    ...ids, product: input.product.trim(), quantity: input.quantity, deadline: input.deadline,
+    designVersion: input.designVersion.trim(), mandateMicro: input.mandateMicro, status: "CREATED", label: input.label,
+  };
+  store.saveOrder(order);
+  return { ok: true, order };
+}
+
+export function addQuote(
+  orderId: string, input: { vendorId: string; priceMicro: number; etaHours: number },
+): { ok: true; quote: Quote } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (order.status !== "CREATED") return fail(409, `Order is ${order.status}; quotes are closed`);
+  if (!store.getVendor(input.vendorId)) return fail(400, "Unknown vendor");
+  if (!Number.isInteger(input.priceMicro) || input.priceMicro <= 0) return fail(400, "Price must be a positive integer (micro-USDC)");
+  if (!Number.isInteger(input.etaHours) || input.etaHours <= 0) return fail(400, "ETA must be a positive whole number of hours");
+  const quote: Quote = {
+    id: store.nextQuoteId(), orderId, vendorId: input.vendorId, priceMicro: input.priceMicro,
+    etaHours: input.etaHours, source: input.vendorId === "own" ? "own" : "partner",
+  };
+  store.saveQuote(quote);
+  return { ok: true, quote };
+}
+
 export function chooseQuote(
   orderId: string, quoteId: string, decidedBy: "agent" | "human", reason: string,
 ): { ok: true; order: Order } | Fail {
-  const order = db.orders.get(orderId);
+  const order = store.getOrder(orderId);
   if (!order) return fail(404, "Order not found");
   if (order.status !== "CREATED") return fail(409, `Order is ${order.status}; plan already chosen`);
-  const quote = db.quotes.get(quoteId);
+  const quote = store.getQuote(quoteId);
   if (!quote) return fail(404, "Quote not found");
-  const policy = checkPlan(order, quote, db.vendors.get(quote.vendorId));
+  const policy = checkPlan(order, quote, store.getVendor(quote.vendorId));
   if (!policy.ok) return fail(422, "Plan rejected by policy", policy.reasons);
-  order.chosenQuoteId = quote.id;
-  order.status = "PLAN_CHOSEN";
-  db.decisions.push({ orderId, quoteId, decidedBy, reason, at: new Date().toISOString() });
-  return { ok: true, order };
+  const updated: Order = { ...order, chosenQuoteId: quote.id, status: "PLAN_CHOSEN" };
+  store.saveOrder(updated);
+  store.addDecision({ orderId, quoteId, decidedBy, reason, at: new Date().toISOString() });
+  return { ok: true, order: updated };
+}
+
+export function addEvidence(
+  orderId: string, input: { kind: string; note: string; label: string },
+): { ok: true; evidence: Evidence } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (!["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status)) {
+    return fail(409, order.status === "CREATED" ? "Choose a plan before submitting evidence" : `Order is ${order.status}; evidence is closed`);
+  }
+  if (!EVIDENCE_KINDS.includes(input.kind as Evidence["kind"]) || !input.note.trim() || !EVIDENCE_LABELS.includes(input.label as Label)) {
+    return fail(400, "Expected { kind: 'log'|'photo'|'qc', note, label }");
+  }
+  const evidence: Evidence = {
+    id: store.nextEvidenceId(), orderId, kind: input.kind as Evidence["kind"], note: input.note.trim(),
+    label: input.label as Label, at: new Date().toISOString(),
+  };
+  store.addEvidence(evidence);
+  const reachedQc = evidence.kind === "qc" || order.status === "EVIDENCE_SUBMITTED";
+  store.saveOrder({ ...order, status: reachedQc ? "EVIDENCE_SUBMITTED" : "IN_PRODUCTION" });
+  return { ok: true, evidence };
+}
+
+// Acceptance is a human decision. It is never derived from model output.
+export function recordAcceptance(
+  orderId: string, input: { accepted: boolean; by: string; note: string },
+): { ok: true; acceptance: Acceptance; order: Order } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (order.status !== "EVIDENCE_SUBMITTED") return fail(409, `Order is ${order.status}; QC evidence required first`);
+  if (!input.by.trim()) return fail(400, "Who accepted is required");
+  const acceptance: Acceptance = { orderId, accepted: input.accepted, by: input.by.trim(), note: input.note, at: new Date().toISOString() };
+  store.saveAcceptance(acceptance);
+  const updated: Order = { ...order, status: input.accepted ? "ACCEPTED" : "REJECTED" };
+  store.saveOrder(updated);
+  return { ok: true, acceptance, order: updated };
 }
 
 export function createPaymentIntent(
   orderId: string, proposed: { recipient: string; amountMicro: number; idempotencyKey: string },
 ): { ok: true; intent: PaymentIntent; replayed: boolean } | Fail {
-  const order = db.orders.get(orderId);
+  const order = store.getOrder(orderId);
   if (!order) return fail(404, "Order not found");
-  const existing = [...db.intents.values()];
-  const replay = existing.find((i) => i.orderId === orderId && i.idempotencyKey === proposed.idempotencyKey);
+  const existing = store.listIntents(orderId);
+  const replay = existing.find((i) => i.idempotencyKey === proposed.idempotencyKey);
   if (replay) return { ok: true, intent: replay, replayed: true };
 
-  const quote = order.chosenQuoteId ? db.quotes.get(order.chosenQuoteId) : undefined;
+  const quote = order.chosenQuoteId ? store.getQuote(order.chosenQuoteId) : undefined;
   const policy = checkPaymentIntent({
-    order, chosenQuote: quote, vendor: quote ? db.vendors.get(quote.vendorId) : undefined,
-    evidence: db.evidence.filter((e) => e.orderId === orderId),
-    acceptance: db.acceptances.get(orderId), existingIntents: existing, proposed,
+    order, chosenQuote: quote, vendor: quote ? store.getVendor(quote.vendorId) : undefined,
+    evidence: store.listEvidence(orderId), acceptance: store.getAcceptance(orderId),
+    existingIntents: existing, proposed,
   });
   if (!policy.ok) return fail(422, "Payment blocked by policy", policy.reasons);
 
   const intent: PaymentIntent = {
-    id: `PI-${existing.length + 1}`, orderId, recipient: proposed.recipient,
+    id: store.nextIntentId(), orderId, recipient: proposed.recipient,
     amountMicro: proposed.amountMicro, token: "USDC", network: "ARC-TESTNET",
     idempotencyKey: proposed.idempotencyKey, state: "PAYMENT_INTENT_CREATED", label: "local",
     createdAt: new Date().toISOString(),
   };
-  db.intents.set(intent.id, intent);
+  store.insertIntent(intent);
   return { ok: true, intent, replayed: false };
 }

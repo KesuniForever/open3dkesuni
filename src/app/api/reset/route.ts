@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { resetDb } from "@/lib/store";
+import { resetSimulated } from "@/lib/store";
 
-// Restores the simulated seed data. Only affects the in-memory demo store.
+// Restores the simulated demo order. Orders labelled "real" are never touched.
 export async function POST() {
-  resetDb();
+  resetSimulated();
   return NextResponse.json({ ok: true });
 }

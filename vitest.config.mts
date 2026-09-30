@@ -3,5 +3,5 @@ import path from "node:path";
 
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
-  test: { environment: "node" },
+  test: { environment: "node", env: { KESUNI_DB_PATH: ":memory:" } },
 });

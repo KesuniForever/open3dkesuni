@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/store";
+import { listLog } from "@/lib/store";
 import { planOrder } from "@/lib/agent/planner";
 import type { Ctx } from "@/lib/http";
 
@@ -7,5 +7,5 @@ import type { Ctx } from "@/lib/http";
 export async function POST(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
   const result = planOrder(id);
-  return NextResponse.json({ result, log: db.agentLog.filter((e) => e.orderId === id) });
+  return NextResponse.json({ result, log: listLog(id) });
 }

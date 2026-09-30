@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
-import { db } from "./store";
-import type { ApiError, Order } from "./types";
+import type { ApiError } from "./types";
+import type { Fail } from "./actions";
 
 export const fail = (status: number, error: string, reasons?: string[]) =>
   NextResponse.json({ error, reasons } satisfies ApiError, { status });
 
-export type Ctx = { params: Promise<{ id: string }> };
+export const failWith = (r: Fail) => fail(r.status, r.error, r.reasons);
 
-export async function loadOrder(ctx: Ctx): Promise<Order | null> {
-  const { id } = await ctx.params;
-  return db.orders.get(id) ?? null;
-}
+export type Ctx = { params: Promise<{ id: string }> };
 
 export async function readJson(req: Request): Promise<Record<string, unknown> | null> {
   try {
@@ -20,3 +17,5 @@ export async function readJson(req: Request): Promise<Record<string, unknown> | 
     return null;
   }
 }
+
+export const str = (v: unknown): string => (typeof v === "string" ? v : "");

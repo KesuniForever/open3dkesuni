@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/store";
-import { fail, loadOrder, type Ctx } from "@/lib/http";
+import * as store from "@/lib/store";
+import { fail, type Ctx } from "@/lib/http";
 
 export async function GET(_req: Request, ctx: Ctx) {
-  const order = await loadOrder(ctx);
+  const { id } = await ctx.params;
+  const order = store.getOrder(id);
   if (!order) return fail(404, "Order not found");
   return NextResponse.json({
     order,
-    vendors: [...db.vendors.values()],
-    quotes: [...db.quotes.values()].filter((q) => q.orderId === order.id),
-    decisions: db.decisions.filter((d) => d.orderId === order.id),
-    evidence: db.evidence.filter((e) => e.orderId === order.id),
-    acceptance: db.acceptances.get(order.id) ?? null,
-    agentLog: db.agentLog.filter((e) => e.orderId === order.id),
-    paymentIntents: [...db.intents.values()].filter((i) => i.orderId === order.id),
+    vendors: store.listVendors(),
+    quotes: store.listQuotes(id),
+    decisions: store.listDecisions(id),
+    evidence: store.listEvidence(id),
+    acceptance: store.getAcceptance(id) ?? null,
+    agentLog: store.listLog(id),
+    paymentIntents: store.listIntents(id),
   });
 }
