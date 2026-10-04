@@ -16,5 +16,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     agentLog: store.listLog(id),
     paymentIntents: store.listIntents(id),
     escrow: store.getEscrow(id) ?? null,
+    tasks: store.listTasks(id),
+    printers: store.listPrinters(),
   });
 }

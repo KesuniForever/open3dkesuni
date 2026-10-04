@@ -1,7 +1,8 @@
 // Shared API contract types. Frontend and backend both import from here.
 // Money is always integer micro-USDC (6 decimals). Never floats.
+import type { PrinterSnapshot } from "./printer/bambu";
 
-export type Label = "simulated" | "real" | "manual" | "local" | "testnet" | "mainnet";
+export type Label = "simulated" | "real" | "manual" | "device" | "local" | "testnet" | "mainnet";
 
 export type OrderStatus =
   | "CREATED"
@@ -127,6 +128,29 @@ export interface Escrow {
   network: string; // e.g. "ARC-TESTNET"
   label: Label;    // "testnet" while on Arc testnet
   createdAt: string;
+}
+
+// ---------- printer + operator tasks ----------
+
+export interface Printer {
+  id: string;            // e.g. "a1"
+  name: string;
+  currentOrderId?: string; // the order this printer is printing for (linked by a person)
+  snapshot?: PrinterSnapshot;
+  lastSeen?: string;
+}
+
+/** Work only a person can do (change filament, collect the print, QC). Created by the agent or a person. */
+export interface OperatorTask {
+  id: string;
+  orderId: string;
+  kind: "change_filament" | "check_printer" | "collect_and_qc" | "reprint";
+  text: string;
+  status: "open" | "done";
+  createdBy: "agent" | "human";
+  at: string;
+  doneAt?: string;
+  doneBy?: string;
 }
 
 export interface PolicyResult {

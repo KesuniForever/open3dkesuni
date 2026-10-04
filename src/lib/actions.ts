@@ -8,7 +8,7 @@ export type Fail = { ok: false; status: number; error: string; reasons?: string[
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
 
 const EVIDENCE_KINDS = ["log", "photo", "qc"] as const;
-const EVIDENCE_LABELS: Label[] = ["simulated", "manual", "local", "testnet", "mainnet"];
+const EVIDENCE_LABELS: Label[] = ["simulated", "manual", "device", "local", "testnet", "mainnet"];
 
 export function createOrder(input: {
   product: string; quantity: number; deadline: string; designVersion: string;

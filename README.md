@@ -21,7 +21,11 @@ wallets (customer pays into escrow, release to Kesuni only after the customer ac
 approves, refund on rejection). Unit tests use a fake Circle; `RUN_ARC_E2E=1 npx vitest run src/lib/escrow.e2e.test.ts`
 runs the real flow. One-time setup: `node scripts/circle-setup.mjs` (see `.env.example`).
 
-Not built or proven: LLM tool-calling loop, printer status, independent on-chain verification of releases,
+Built, tested with simulated reports (not yet on the real printer): a read-only Bambu A1 LAN bridge
+(`node scripts/printer-bridge.mjs`, MQTT) that posts printer status to the app; the agent turns it into
+`device` evidence and operator tasks (change filament, collect + QC). Field names match `bambulabs_api`.
+
+Not built or proven: LLM tool-calling loop, bridge on the real A1, independent on-chain verification of releases,
 hosted database for the live link, real order. See `docs/PILOT.md` and `docs/EVIDENCE_LABELS.md`.
 
 ## Design rules

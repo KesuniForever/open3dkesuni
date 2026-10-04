@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { microToUsdc } from "@/lib/policy";
 import type {
-  Acceptance, AgentLogEntry, Decision, Escrow, Evidence, Order, OrderStatus, PaymentIntent, Quote, Vendor,
+  Acceptance, AgentLogEntry, Decision, Escrow, Evidence, OperatorTask, Order, OrderStatus, PaymentIntent, Printer, Quote, Vendor,
 } from "@/lib/types";
 import EscrowPanel from "./EscrowPanel";
+import PrinterPanel from "./PrinterPanel";
 
 interface OrderData {
   order: Order;
@@ -18,6 +19,8 @@ interface OrderData {
   agentLog: AgentLogEntry[];
   paymentIntents: PaymentIntent[];
   escrow: Escrow | null;
+  tasks: OperatorTask[];
+  printers: Printer[];
 }
 
 type Notice = { kind: "ok" | "bad"; text: string; reasons?: string[] } | null;
@@ -178,6 +181,8 @@ export default function OrderView({ id }: { id: string }) {
       </section>
 
       <EscrowPanel order={order} escrow={escrow} hasPlan={Boolean(chosen)} busy={busy} act={act} onChange={load} />
+
+      <PrinterPanel order={order} printers={data.printers} tasks={data.tasks} busy={busy} act={act} onChange={load} />
 
       {/* 3. Evidence */}
       <section className="card">

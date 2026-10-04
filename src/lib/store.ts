@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
-  Acceptance, AgentLogEntry, Decision, Escrow, Evidence, Order, PaymentIntent, Quote, Vendor,
+  Acceptance, AgentLogEntry, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, Printer, Quote, Vendor,
 } from "./types";
 import { usdcToMicro } from "./policy";
 
@@ -20,8 +20,10 @@ CREATE TABLE IF NOT EXISTS intents     (id TEXT PRIMARY KEY, order_id TEXT NOT N
                                         data TEXT NOT NULL, UNIQUE (order_id, idempotency_key));
 CREATE TABLE IF NOT EXISTS agent_log   (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS escrows     (order_id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS printers    (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS tasks       (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, data TEXT NOT NULL);
 `;
-const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows"] as const;
+const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks"] as const;
 
 function open(): DatabaseSync {
   const file = process.env.KESUNI_DB_PATH ?? path.join(process.cwd(), "data", "local", "kesuni.db");
@@ -140,6 +142,24 @@ export function saveEscrow(e: Escrow): void {
     .run(e.orderId, JSON.stringify(e));
 }
 
+// ---------- printers ----------
+export const listPrinters = (): Printer[] => parse(conn().prepare("SELECT data FROM printers ORDER BY rowid").all());
+export const getPrinter = (id: string): Printer | undefined => one(conn().prepare("SELECT data FROM printers WHERE id = ?").get(id));
+export function savePrinter(p: Printer): void {
+  conn().prepare("INSERT INTO printers (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+    .run(p.id, JSON.stringify(p));
+}
+
+// ---------- operator tasks ----------
+export const listTasks = (orderId: string): OperatorTask[] =>
+  parse(conn().prepare("SELECT data FROM tasks WHERE order_id = ? ORDER BY rowid").all(orderId));
+export const getTask = (id: string): OperatorTask | undefined => one(conn().prepare("SELECT data FROM tasks WHERE id = ?").get(id));
+export const nextTaskId = (): string => `T-${count("tasks") + 1}-${Date.now().toString(36)}`;
+export function saveTask(t: OperatorTask): void {
+  conn().prepare("INSERT INTO tasks (id, order_id, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+    .run(t.id, t.orderId, JSON.stringify(t));
+}
+
 // ---------- agent log ----------
 export const listLog = (orderId: string): AgentLogEntry[] =>
   parse(conn().prepare("SELECT data FROM agent_log WHERE order_id = ? ORDER BY id").all(orderId));
@@ -190,7 +210,7 @@ export function resetSimulated(): void {
 /** Tests only: wipe everything, including real orders. */
 export function resetDb(): void {
   const c = conn();
-  for (const t of [...ORDER_TABLES, "orders", "vendors"]) c.exec(`DELETE FROM ${t}`);
+  for (const t of [...ORDER_TABLES, "orders", "vendors", "printers"]) c.exec(`DELETE FROM ${t}`);
   seedSimulated(c);
   syncOwnVendorAddress(c);
 }
