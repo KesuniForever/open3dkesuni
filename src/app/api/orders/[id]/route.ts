@@ -15,5 +15,6 @@ export async function GET(_req: Request, ctx: Ctx) {
     acceptance: store.getAcceptance(id) ?? null,
     agentLog: store.listLog(id),
     paymentIntents: store.listIntents(id),
+    escrow: store.getEscrow(id) ?? null,
   });
 }

@@ -48,3 +48,10 @@ wallet.yaml
 *.db
 *.sqlite
 data/local/
+
+# Terminal Paste Image folder
+.cp-images/
+
+# Circle entity secret recovery files (keep outside the repo)
+recovery_file_*.dat
+*-recovery*.dat

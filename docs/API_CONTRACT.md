@@ -16,11 +16,26 @@ Data is stored in SQLite (`src/lib/store.ts`, file `data/local/kesuni.db`, git-i
 | `POST /api/orders/:id/agent-plan` | none | 200 `{ result, log }`: rule-based planner (no LLM yet) picks the cheapest allowed quote or escalates; `log` lists every tool call |
 | `POST /api/orders/:id/payment-intent` | `{ recipient, amountMicro, idempotencyKey }` | 201 `{ intent, replayed:false }`, replay 200 `replayed:true`, or **422** |
 
+| `GET /api/orders/:id/escrow` | none | Asks Circle once about pending transfers, then `{ escrow }` |
+| `POST /api/orders/:id/escrow` | `{ action: "open" \| "topup" \| "deposit" \| "release" \| "refund" }` | `{ ok, escrow }` (+ `intent` on release), or **422** with policy reasons |
 | `POST /api/reset` | none | Resets the `simulated` demo order. `real` orders are never touched |
 
 ## Order status flow
-`CREATED → PLAN_CHOSEN → IN_PRODUCTION → EVIDENCE_SUBMITTED → ACCEPTED | REJECTED`
-(`PAID` is set only after a verified on-chain transfer; not built yet.)
+`CREATED → PLAN_CHOSEN → IN_PRODUCTION → EVIDENCE_SUBMITTED → ACCEPTED | REJECTED`, then `ACCEPTED → PAID`
+when the escrow release is `COMPLETE` on Arc.
+
+## Escrow (`src/lib/escrow.ts`, Circle developer-controlled SCA wallets on Arc)
+`AWAITING_DEPOSIT → FUNDED → RELEASED | REFUNDED`
+- `open`: needs a chosen quote. Creates a customer wallet and a per-order escrow wallet. Amount = quote price.
+- `topup` (testnet only): Kesuni's demo-funds wallet sends test USDC to the customer wallet.
+- `deposit`: customer wallet → escrow wallet.
+- `release`: policy `checkRelease` (customer accepted, QC evidence, escrow funded with at least the amount, recipient = the
+  approved vendor's real address, never a placeholder, nothing released before), then creates/reuses the payment intent and
+  sends escrow → vendor. Intent goes `SUBMITTED → CONFIRMED` with the tx hash.
+- `refund`: policy `checkRefund` (customer rejected), escrow → customer.
+- Every transfer saves a UUID idempotency key before calling Circle. A lost call stays `NOT_SUBMITTED` and the next
+  sync retries with the same key, so Circle never executes it twice. SCA wallets have gas paid by Circle Gas Station,
+  so an escrow can hold exactly the order amount.
 
 ## Who may change what
 - **decision**: agent or human. Policy engine checks budget, approved vendor, order match.
@@ -42,5 +57,5 @@ later. Writes go through `src/lib/actions.ts`, the same code the HTTP routes use
 cannot bypass policy. Every call is stored in `agentLog` (returned by `GET /api/orders/:id`).
 
 ## Not built yet
-Sending USDC on Arc, on-chain verification (chain, token, recipient, amount, job link),
-the LLM tool-calling loop (a rule-based planner stands in), printer bridge, vendor management, and hosted storage for the live link.
+Independent on-chain verification of the release (we trust Circle's COMPLETE + tx hash), Circle webhooks,
+agent tools for escrow, the LLM tool-calling loop (a rule-based planner stands in), printer bridge, vendor management, and hosted storage for the live link.

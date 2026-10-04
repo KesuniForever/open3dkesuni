@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
-  Acceptance, AgentLogEntry, Decision, Evidence, Order, PaymentIntent, Quote, Vendor,
+  Acceptance, AgentLogEntry, Decision, Escrow, Evidence, Order, PaymentIntent, Quote, Vendor,
 } from "./types";
 import { usdcToMicro } from "./policy";
 
@@ -19,8 +19,9 @@ CREATE TABLE IF NOT EXISTS acceptances (order_id TEXT PRIMARY KEY, data TEXT NOT
 CREATE TABLE IF NOT EXISTS intents     (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
                                         data TEXT NOT NULL, UNIQUE (order_id, idempotency_key));
 CREATE TABLE IF NOT EXISTS agent_log   (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS escrows     (order_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 `;
-const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log"] as const;
+const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows"] as const;
 
 function open(): DatabaseSync {
   const file = process.env.KESUNI_DB_PATH ?? path.join(process.cwd(), "data", "local", "kesuni.db");
@@ -33,9 +34,29 @@ function open(): DatabaseSync {
   return conn;
 }
 
-// Reuse one connection across Next.js hot reloads.
-const g = globalThis as unknown as { __kesuniSqlite?: DatabaseSync };
-const conn = (): DatabaseSync => (g.__kesuniSqlite ??= open());
+/** The "own" vendor is Kesuni itself: its payout address comes from KESUNI_PAYOUT_ADDRESS when set. */
+function syncOwnVendorAddress(c: DatabaseSync): void {
+  const address = process.env.KESUNI_PAYOUT_ADDRESS;
+  if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) return;
+  const own = one<Vendor>(c.prepare("SELECT data FROM vendors WHERE id = 'own'").get());
+  if (own && own.address !== address) saveVendor(c, { ...own, name: "Kesuni studio", address });
+}
+
+// Reuse one connection across Next.js hot reloads. Re-sync the payout address whenever the
+// env value changes (a long-running dev server keeps its connection across .env edits).
+const g = globalThis as unknown as { __kesuniSqlite?: DatabaseSync; __kesuniPayout?: string; __kesuniSchema?: string };
+function conn(): DatabaseSync {
+  const c = (g.__kesuniSqlite ??= open());
+  if (g.__kesuniSchema !== SCHEMA) {
+    c.exec(SCHEMA); // new tables after a hot reload (CREATE IF NOT EXISTS)
+    g.__kesuniSchema = SCHEMA;
+  }
+  if (g.__kesuniPayout !== process.env.KESUNI_PAYOUT_ADDRESS) {
+    g.__kesuniPayout = process.env.KESUNI_PAYOUT_ADDRESS;
+    syncOwnVendorAddress(c);
+  }
+  return c;
+}
 
 const parse = <T>(rows: unknown[]): T[] => rows.map((r) => JSON.parse((r as { data: string }).data) as T);
 const one = <T>(row: unknown): T | undefined => (row ? (JSON.parse((row as { data: string }).data) as T) : undefined);
@@ -107,6 +128,18 @@ export function insertIntent(p: PaymentIntent): void {
     .run(p.id, p.orderId, p.idempotencyKey, JSON.stringify(p));
 }
 
+export function updateIntent(p: PaymentIntent): void {
+  conn().prepare("UPDATE intents SET data = ? WHERE id = ?").run(JSON.stringify(p), p.id);
+}
+
+// ---------- escrow ----------
+export const getEscrow = (orderId: string): Escrow | undefined =>
+  one(conn().prepare("SELECT data FROM escrows WHERE order_id = ?").get(orderId));
+export function saveEscrow(e: Escrow): void {
+  conn().prepare("INSERT INTO escrows (order_id, data) VALUES (?, ?) ON CONFLICT(order_id) DO UPDATE SET data = excluded.data")
+    .run(e.orderId, JSON.stringify(e));
+}
+
 // ---------- agent log ----------
 export const listLog = (orderId: string): AgentLogEntry[] =>
   parse(conn().prepare("SELECT data FROM agent_log WHERE order_id = ? ORDER BY id").all(orderId));
@@ -159,4 +192,5 @@ export function resetDb(): void {
   const c = conn();
   for (const t of [...ORDER_TABLES, "orders", "vendors"]) c.exec(`DELETE FROM ${t}`);
   seedSimulated(c);
+  syncOwnVendorAddress(c);
 }

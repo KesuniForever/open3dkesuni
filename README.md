@@ -16,8 +16,13 @@ seven agent tools with a decision log, a rule-based planner standing in for the 
 a basic UI (create orders, add quotes, walk the whole flow), and SQLite storage
 (`data/local/kesuni.db`, git-ignored) so data survives restarts.
 
-Not built or proven: LLM tool-calling loop, printer status, Circle/Arc transfer and on-chain
-verification, hosted database for the live link, real order. See `docs/PILOT.md` and `docs/EVIDENCE_LABELS.md`.
+Built and tested on Arc testnet (4 Oct 2026): per-order USDC escrow through Circle developer-controlled
+wallets (customer pays into escrow, release to Kesuni only after the customer accepts and the policy engine
+approves, refund on rejection). Unit tests use a fake Circle; `RUN_ARC_E2E=1 npx vitest run src/lib/escrow.e2e.test.ts`
+runs the real flow. One-time setup: `node scripts/circle-setup.mjs` (see `.env.example`).
+
+Not built or proven: LLM tool-calling loop, printer status, independent on-chain verification of releases,
+hosted database for the live link, real order. See `docs/PILOT.md` and `docs/EVIDENCE_LABELS.md`.
 
 ## Design rules
 

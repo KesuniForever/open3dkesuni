@@ -88,6 +88,47 @@ export interface PaymentIntent {
   createdAt: string;
 }
 
+// ---------- escrow (Circle developer-controlled SCA wallets on Arc) ----------
+
+/** Circle transaction states. COMPLETE / FAILED / DENIED / CANCELLED are final. */
+export type ChainTxState =
+  | "NOT_SUBMITTED" // key saved, Circle call not confirmed yet (retry with the SAME key)
+  | "INITIATED" | "CLEARED" | "QUEUED" | "SENT" | "CONFIRMED"
+  | "COMPLETE" | "FAILED" | "DENIED" | "CANCELLED";
+
+export interface ChainTx {
+  kind: "customer_topup" | "deposit" | "release" | "refund";
+  from: string;
+  to: string;
+  amountMicro: number;
+  idempotencyKey: string; // UUID v4, saved before calling Circle
+  circleTxId?: string;
+  state: ChainTxState;
+  txHash?: string;
+  errorReason?: string;
+  at: string;
+}
+
+export type EscrowState =
+  | "AWAITING_DEPOSIT" // wallets exist, customer has not paid
+  | "FUNDED"           // escrow holds the order amount
+  | "RELEASED"         // paid to the shop after acceptance
+  | "REFUNDED";        // returned to the customer after rejection
+
+export interface Escrow {
+  orderId: string;
+  amountMicro: number; // = accepted quote price
+  escrowWalletId: string;
+  escrowAddress: string;
+  customerWalletId: string;
+  customerAddress: string;
+  state: EscrowState;
+  txs: ChainTx[];
+  network: string; // e.g. "ARC-TESTNET"
+  label: Label;    // "testnet" while on Arc testnet
+  createdAt: string;
+}
+
 export interface PolicyResult {
   ok: boolean;
   reasons: string[]; // empty when ok

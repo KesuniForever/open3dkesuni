@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { microToUsdc } from "@/lib/policy";
 import type {
-  Acceptance, AgentLogEntry, Decision, Evidence, Order, OrderStatus, PaymentIntent, Quote, Vendor,
+  Acceptance, AgentLogEntry, Decision, Escrow, Evidence, Order, OrderStatus, PaymentIntent, Quote, Vendor,
 } from "@/lib/types";
+import EscrowPanel from "./EscrowPanel";
 
 interface OrderData {
   order: Order;
@@ -16,6 +17,7 @@ interface OrderData {
   acceptance: Acceptance | null;
   agentLog: AgentLogEntry[];
   paymentIntents: PaymentIntent[];
+  escrow: Escrow | null;
 }
 
 type Notice = { kind: "ok" | "bad"; text: string; reasons?: string[] } | null;
@@ -69,7 +71,7 @@ export default function OrderView({ id }: { id: string }) {
   if (missing) return <main className="wrap"><p>Order not found. <Link href="/">Back</Link></p></main>;
   if (!data) return <main className="wrap"><p className="muted">Loading…</p></main>;
 
-  const { order, quotes, vendors, evidence, acceptance, agentLog, paymentIntents } = data;
+  const { order, quotes, vendors, evidence, acceptance, agentLog, paymentIntents, escrow } = data;
   const base = `/api/orders/${order.id}`;
   const vendorName = (vid: string) => vendors.find((v) => v.id === vid)?.name ?? vid;
   const chosen = quotes.find((q) => q.id === order.chosenQuoteId);
@@ -175,6 +177,8 @@ export default function OrderView({ id }: { id: string }) {
         ))}
       </section>
 
+      <EscrowPanel order={order} escrow={escrow} hasPlan={Boolean(chosen)} busy={busy} act={act} onChange={load} />
+
       {/* 3. Evidence */}
       <section className="card">
         <h2><span className="step">3</span> Production evidence and QC</h2>
@@ -207,14 +211,23 @@ export default function OrderView({ id }: { id: string }) {
           <div key={p.id} className="alert ok">
             <b>{p.id}</b> {microToUsdc(p.amountMicro)} {p.token} to <code>{p.recipient}</code> on {p.network}. State <b>{p.state}</b>{" "}
             <span className="badge">{p.label}</span>
+            {p.txHash && <> <a href={`https://explorer.testnet.arc.io/tx/${p.txHash}`} target="_blank" rel="noreferrer">view proof</a></>}
           </div>
         ))}
-        <PaymentForm key={chosen?.id ?? "none"} disabled={busy}
-          defaults={{ recipient: chosenVendor?.address ?? "", amount: chosen ? microToUsdc(chosen.priceMicro) : "" }}
-          onSubmit={(b) => act(`${base}/payment-intent`, b, "Payment intent created (local only, no USDC sent).")} />
-        <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
-          This creates a payment intent only. No USDC is sent on Arc yet. Try changing the address or amount to see the policy block it.
-        </p>
+        {escrow ? (
+          <p className="muted" style={{ fontSize: 13 }}>
+            This order pays through the escrow above. Its release creates the payment intent and needs the policy engine to approve it.
+          </p>
+        ) : (
+          <>
+            <PaymentForm key={chosen?.id ?? "none"} disabled={busy}
+              defaults={{ recipient: chosenVendor?.address ?? "", amount: chosen ? microToUsdc(chosen.priceMicro) : "" }}
+              onSubmit={(b) => act(`${base}/payment-intent`, b, "Payment intent created (local only, no USDC sent).")} />
+            <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>
+              Without an escrow this creates a payment intent only; no USDC is sent. Try changing the address or amount to see the policy block it.
+            </p>
+          </>
+        )}
       </section>
     </main>
   );
