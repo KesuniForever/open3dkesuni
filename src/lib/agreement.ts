@@ -1,0 +1,139 @@
+// The agreement between Kesuni and the customer: what will be made (spec), how quality is checked,
+// and the price, fixed by a SHA-256 fingerprint. The customer approves it before paying; changing
+// the spec, product, quantity, deadline or price changes the fingerprint and needs a new approval.
+// Also: Kesuni's own quote from the cost calculator, and the operator's report of what production
+// actually used (plan vs actual).
+import { createHash } from "node:crypto";
+import * as store from "./store";
+import { addQuote, type Fail } from "./actions";
+import { calculate, idrToMicro, parseCostInput, type CostResult } from "./costing";
+import type { ActualReport, Agreement, Order, Quote, Spec } from "./types";
+
+const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
+const PAYABLE = ["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"];
+
+/** Money has started moving into (or out of) escrow: the agreement can no longer change. */
+function locked(orderId: string): boolean {
+  const e = store.getEscrow(orderId);
+  if (!e) return false;
+  return e.state !== "AWAITING_DEPOSIT" || e.txs.some((t) => t.kind === "deposit" && !["FAILED", "DENIED", "CANCELLED"].includes(t.state));
+}
+
+export function agreementHash(order: Order, quote: Quote): string {
+  const doc = {
+    orderId: order.id, product: order.product, quantity: order.quantity, deadline: order.deadline,
+    designVersion: order.designVersion, spec: order.spec ?? null, quoteId: quote.id, priceMicro: quote.priceMicro,
+  };
+  return createHash("sha256").update(JSON.stringify(doc)).digest("hex");
+}
+
+/** The agreement the customer approved still matches the order as it is now. */
+export function agreementCurrent(order: Order): boolean {
+  const quote = order.chosenQuoteId ? store.getQuote(order.chosenQuoteId) : undefined;
+  return Boolean(order.agreement && quote && order.agreement.hash === agreementHash(order, quote));
+}
+
+// ---------- spec ----------
+
+export function setSpec(orderId: string, raw: Record<string, unknown>): { ok: true; order: Order } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (locked(orderId)) return fail(409, "The customer has paid on this agreement; the spec can no longer change");
+  if (!["CREATED", ...PAYABLE].includes(order.status)) return fail(409, `Order is ${order.status}; the spec is closed`);
+  const text = (k: string, max = 200) => String(raw[k] ?? "").trim().slice(0, max);
+  const num = (k: string) => Number(raw[k]);
+  const spec: Spec = {
+    dimensions: text("dimensions"), toleranceMm: num("toleranceMm"), material: text("material") || "PLA",
+    color: text("color"), layerMm: num("layerMm"), infillPct: num("infillPct"),
+    finishing: text("finishing") || "Standar", promise: text("promise", 500),
+  };
+  const r: string[] = [];
+  if (!spec.dimensions) r.push("Dimensions are required");
+  if (!(spec.toleranceMm >= 0 && spec.toleranceMm <= 10)) r.push("Tolerance must be 0–10 mm");
+  if (!(spec.layerMm > 0 && spec.layerMm <= 1)) r.push("Layer height must be above 0 and at most 1 mm");
+  if (!(spec.infillPct >= 0 && spec.infillPct <= 100)) r.push("Infill must be 0–100%");
+  if (!spec.promise) r.push("Say how the result will be checked (the quality promise)");
+  if (r.length) return fail(400, "Invalid spec", r);
+  const updated = { ...order, spec };
+  store.saveOrder(updated);
+  return { ok: true, order: updated };
+}
+
+// ---------- price from the calculator ----------
+
+export function quoteFromCosting(
+  orderId: string, raw: Record<string, unknown>,
+): { ok: true; quote: Quote; result: CostResult; overBudget: boolean } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  const parsed = parseCostInput({ ...raw, quantity: raw.quantity ?? order.quantity });
+  if (!parsed.ok) return fail(400, "Invalid cost input", parsed.reasons);
+  const input = parsed.input;
+  if (input.quantity !== order.quantity) return fail(400, `Quantity must match the order (${order.quantity})`);
+  const result = calculate(input);
+  if (result.revenueIdr <= 0) return fail(400, "Price must be above zero");
+  const etaHours = Math.max(1, Math.ceil(Number(raw.etaHours) || input.machineHours + input.laborHours + 24));
+  const q = addQuote(orderId, { vendorId: "own", priceMicro: idrToMicro(result.revenueIdr), etaHours });
+  if (!q.ok) return q;
+  store.saveOrder({ ...store.getOrder(orderId)!, costing: { input, quoteId: q.quote.id, at: new Date().toISOString() } });
+  store.addLog({
+    orderId, actor: "human", tool: "price_from_costing", ok: true, at: new Date().toISOString(),
+    input: { unitPriceIdr: input.unitPriceIdr, quantity: input.quantity },
+    output: { quoteId: q.quote.id, revenueIdr: result.revenueIdr, costIdr: result.businessCostIdr, marginPct: result.marginPct },
+  });
+  return { ok: true, quote: q.quote, result, overBudget: q.quote.priceMicro > order.mandateMicro };
+}
+
+/** The calculation behind the chosen quote, if Kesuni priced it with the calculator. */
+export function costingForChosen(order: Order): CostResult | null {
+  if (!order.costing || order.costing.quoteId !== order.chosenQuoteId) return null;
+  return calculate(order.costing.input);
+}
+
+// ---------- customer approval ----------
+
+export function customerAgree(orderId: string, by: string): { ok: true; agreement: Agreement } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Pesanan tidak ditemukan");
+  if (!PAYABLE.includes(order.status)) return fail(409, "Harga belum siap untuk disetujui");
+  const quote = order.chosenQuoteId ? store.getQuote(order.chosenQuoteId) : undefined;
+  if (!quote) return fail(409, "Harga belum siap untuk disetujui");
+  if (!by.trim()) return fail(400, "Nama wajib diisi");
+  const hash = agreementHash(order, quote);
+  if (order.agreement?.hash === hash) return { ok: true, agreement: order.agreement };
+  if (locked(orderId)) return fail(409, "Pembayaran sudah berjalan; kesepakatan tidak bisa diubah");
+  const agreement: Agreement = {
+    version: (order.agreement?.version ?? 0) + 1, hash, quoteId: quote.id, priceMicro: quote.priceMicro,
+    by: by.trim().slice(0, 80), at: new Date().toISOString(),
+  };
+  store.saveOrder({ ...order, agreement });
+  store.addLog({ orderId, actor: "human", tool: "customer_agreement", input: { version: agreement.version }, ok: true, output: { hash }, at: agreement.at });
+  return { ok: true, agreement };
+}
+
+// ---------- plan vs actual ----------
+
+export function recordActual(orderId: string, raw: Record<string, unknown>): { ok: true; actual: ActualReport } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (!["IN_PRODUCTION", "EVIDENCE_SUBMITTED", "ACCEPTED", "REJECTED", "PAID"].includes(order.status)) {
+    return fail(409, "Report what production used after printing has started");
+  }
+  const n = (k: string) => Number(raw[k]);
+  const actual: ActualReport = {
+    filamentGrams: n("filamentGrams"), machineHours: n("machineHours"), costIdr: Math.round(n("costIdr")),
+    maxDeviationMm: n("maxDeviationMm"), unitsPassed: n("unitsPassed"),
+    note: String(raw.note ?? "").trim().slice(0, 500), by: String(raw.by ?? "").trim().slice(0, 80), at: new Date().toISOString(),
+  };
+  const r: string[] = [];
+  for (const k of ["filamentGrams", "machineHours", "costIdr", "maxDeviationMm"] as const) {
+    if (!Number.isFinite(actual[k]) || actual[k] < 0) r.push(`${k} must be a number, 0 or more`);
+  }
+  if (!Number.isInteger(actual.unitsPassed) || actual.unitsPassed < 0 || actual.unitsPassed > order.quantity) {
+    r.push(`unitsPassed must be a whole number from 0 to ${order.quantity}`);
+  }
+  if (!actual.by) r.push("Who measured it is required");
+  if (r.length) return fail(400, "Invalid report", r);
+  store.saveOrder({ ...order, actual });
+  return { ok: true, actual };
+}

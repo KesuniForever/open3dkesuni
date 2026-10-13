@@ -1,16 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { microToUsdc } from "@/lib/policy";
 import type {
-  Acceptance, AgentLogEntry, Decision, Escrow, Evidence, OperatorTask, Order, OrderStatus, PaymentIntent, Printer, Quote, Vendor,
+  Acceptance, AgentLogEntry, Attachment, Decision, Escrow, Evidence, OperatorTask, Order, OrderStatus, PaymentIntent, Printer, Quote, Vendor,
 } from "@/lib/types";
 import EscrowPanel from "./EscrowPanel";
 import PrinterPanel from "./PrinterPanel";
+import FilesPanel from "./FilesPanel";
+import AgreementPanel from "./AgreementPanel";
+import ActualPanel from "./ActualPanel";
 
 interface OrderData {
   order: Order;
+  customerLink: string;
+  agreementCurrent: boolean;
+  idrPerUsdc: number;
   vendors: Vendor[];
   quotes: Quote[];
   decisions: Decision[];
@@ -21,6 +27,7 @@ interface OrderData {
   escrow: Escrow | null;
   tasks: OperatorTask[];
   printers: Printer[];
+  attachments: Attachment[];
 }
 
 type Notice = { kind: "ok" | "bad"; text: string; reasons?: string[] } | null;
@@ -112,6 +119,8 @@ export default function OrderView({ id }: { id: string }) {
         </div>
       )}
 
+      <CustomerLink path={data.customerLink} name={order.customerName} note={order.customerNote} />
+
       {/* 1. Order */}
       <section className="card">
         <h2><span className="step">1</span> Order</h2>
@@ -124,6 +133,8 @@ export default function OrderView({ id }: { id: string }) {
           <div><dt>Status</dt><dd><b>{order.status}</b></dd></div>
         </dl>
       </section>
+
+      <AgreementPanel order={order} quotes={quotes} agreementCurrent={data.agreementCurrent} idrPerUsdc={data.idrPerUsdc} busy={busy} act={act} />
 
       {/* 2. Options + agent */}
       <section className="card">
@@ -182,6 +193,7 @@ export default function OrderView({ id }: { id: string }) {
 
       <EscrowPanel order={order} escrow={escrow} hasPlan={Boolean(chosen)} busy={busy} act={act} onChange={load} />
 
+      <FilesPanel order={order} attachments={data.attachments} onChange={load} />
       <PrinterPanel order={order} printers={data.printers} tasks={data.tasks} busy={busy} act={act} onChange={load} />
 
       {/* 3. Evidence */}
@@ -190,13 +202,16 @@ export default function OrderView({ id }: { id: string }) {
         {evidence.length === 0 ? <p className="muted">No evidence yet.</p> : (
           <ul>
             {evidence.map((e) => (
-              <li key={e.id}><b>{e.kind.toUpperCase()}</b> {e.note} <span className="badge">{e.label}</span></li>
+              <li key={e.id}><b>{e.kind.toUpperCase()}</b> {e.note} <span className="badge">{e.label}</span>
+                {e.attachmentId && <> <a href={`/api/files/${e.attachmentId}`} target="_blank" rel="noreferrer">view photo</a></>}</li>
             ))}
           </ul>
         )}
         <EvidenceForm disabled={busy || !["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status)}
           onSubmit={(b) => act(`${base}/evidence`, b, `Recorded ${b.kind} evidence.`)} />
       </section>
+
+      <ActualPanel key={order.actual?.at ?? "none"} order={order} busy={busy} act={act} />
 
       {/* 4. Acceptance */}
       <section className="card">
@@ -238,6 +253,26 @@ export default function OrderView({ id }: { id: string }) {
   );
 }
 
+function CustomerLink({ path, name, note }: { path: string; name?: string; note?: string }) {
+  const [copied, setCopied] = useState(false);
+  const origin = useSyncExternalStore(() => () => {}, () => window.location.origin, () => "");
+  const url = origin + path;
+  return (
+    <section className="card">
+      <h2>Customer{name && `: ${name}`}</h2>
+      {note && <p style={{ marginTop: 0 }}>“{note}”</p>}
+      <div className="row">
+        <code style={{ flex: "1 1 260px", overflowWrap: "anywhere" }}>{url}</code>
+        <button onClick={async () => { await navigator.clipboard.writeText(url); setCopied(true); }}>{copied ? "Copied" : "Copy customer link"}</button>
+        <a href={path} target="_blank" rel="noreferrer">Open as customer</a>
+      </div>
+      <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>
+        Send this link to the customer (WhatsApp). They can pay into escrow, follow the print live, and accept or reject. Anyone with the link can see this order.
+      </p>
+    </section>
+  );
+}
+
 function summarize(e: AgentLogEntry): string {
   const out = e.output as Record<string, unknown> | undefined;
   if (!e.ok && out) {
@@ -248,6 +283,11 @@ function summarize(e: AgentLogEntry): string {
   if (e.tool === "check_vendor_policy") return `${input.quoteId} allowed`;
   if (e.tool === "choose_plan") return `chose ${input.quoteId}`;
   if (e.tool === "request_human_decision") return "escalated to a person";
+  if (e.tool === "customer_agreement") return `customer approved price + spec (v${input.version})`;
+  if (e.tool === "price_from_costing") return `quote ${(out as Record<string, unknown>)?.quoteId} from the cost calculator, margin ${(out as Record<string, unknown>)?.marginPct}%`;
+  if (e.tool === "customer_review") return "customer left a review";
+  if (e.tool === "customer_decision") return (input.accepted ? "customer accepted" : "customer rejected");
+  if (e.tool === "release_escrow" || e.tool === "refund_escrow") return "sent on the agent's own, after the policy check";
   return "";
 }
 

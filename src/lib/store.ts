@@ -5,7 +5,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
-  Acceptance, AgentLogEntry, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, Printer, Quote, Vendor,
+  Acceptance, AgentLogEntry, Attachment, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, Printer, Quote, Vendor,
 } from "./types";
 import { usdcToMicro } from "./policy";
 
@@ -22,8 +22,9 @@ CREATE TABLE IF NOT EXISTS agent_log   (id INTEGER PRIMARY KEY AUTOINCREMENT, or
 CREATE TABLE IF NOT EXISTS escrows     (order_id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS printers    (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tasks       (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, data TEXT NOT NULL);
 `;
-const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks"] as const;
+const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks", "attachments"] as const;
 
 function open(): DatabaseSync {
   const file = process.env.KESUNI_DB_PATH ?? path.join(process.cwd(), "data", "local", "kesuni.db");
@@ -68,6 +69,8 @@ const count = (table: string): number =>
 // ---------- orders ----------
 export const listOrders = (): Order[] => parse(conn().prepare("SELECT data FROM orders ORDER BY rowid").all());
 export const getOrder = (id: string): Order | undefined => one(conn().prepare("SELECT data FROM orders WHERE id = ?").get(id));
+export const getOrderByToken = (token: string): Order | undefined =>
+  one(conn().prepare("SELECT data FROM orders WHERE json_extract(data, '$.customerToken') = ?").get(token));
 export function saveOrder(o: Order): void {
   conn().prepare("INSERT INTO orders (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
     .run(o.id, JSON.stringify(o));
@@ -153,11 +156,22 @@ export function savePrinter(p: Printer): void {
 // ---------- operator tasks ----------
 export const listTasks = (orderId: string): OperatorTask[] =>
   parse(conn().prepare("SELECT data FROM tasks WHERE order_id = ? ORDER BY rowid").all(orderId));
+export const listOpenTasks = (): OperatorTask[] =>
+  parse<OperatorTask>(conn().prepare("SELECT data FROM tasks ORDER BY rowid").all()).filter((t) => t.status === "open");
 export const getTask = (id: string): OperatorTask | undefined => one(conn().prepare("SELECT data FROM tasks WHERE id = ?").get(id));
 export const nextTaskId = (): string => `T-${count("tasks") + 1}-${Date.now().toString(36)}`;
 export function saveTask(t: OperatorTask): void {
   conn().prepare("INSERT INTO tasks (id, order_id, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
     .run(t.id, t.orderId, JSON.stringify(t));
+}
+
+// ---------- attachments ----------
+export const listAttachments = (orderId: string): Attachment[] =>
+  parse(conn().prepare("SELECT data FROM attachments WHERE order_id = ? ORDER BY rowid").all(orderId));
+export const getAttachment = (id: string): Attachment | undefined =>
+  one(conn().prepare("SELECT data FROM attachments WHERE id = ?").get(id));
+export function saveAttachment(a: Attachment): void {
+  conn().prepare("INSERT INTO attachments (id, order_id, data) VALUES (?, ?, ?)").run(a.id, a.orderId, JSON.stringify(a));
 }
 
 // ---------- agent log ----------

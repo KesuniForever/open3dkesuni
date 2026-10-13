@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as store from "../store";
 import { chooseQuote } from "../actions";
-import { completeTask, ingestReport, linkPrinter } from "./actions";
+import { choosePrinter, clearBed, completeTask, ingestReport, linkPrinter } from "./actions";
 import { detectEvents, mergeReport, type PrinterSnapshot } from "./bambu";
 import { POST as report } from "@/app/api/printers/report/route";
 
@@ -33,9 +33,9 @@ describe("printer -> evidence and operator tasks", () => {
     const ev = store.listEvidence(ORDER);
     expect(ev.every((e) => e.label === "device")).toBe(true);
     expect(ev.map((e) => e.note)).toEqual([
-      "Bambu Lab A1: mulai mencetak (clicker_aini)",
-      "Bambu Lab A1: progres 25%",
-      "Bambu Lab A1: progres 50%",
+      "A1 Combo #1: mulai mencetak (clicker_aini)",
+      "A1 Combo #1: progres 25%",
+      "A1 Combo #1: progres 50%",
     ]);
   });
 
@@ -59,8 +59,12 @@ describe("printer -> evidence and operator tasks", () => {
     expect(store.getOrder(ORDER)!.status).toBe("IN_PRODUCTION");
     expect(store.getPrinter("a1")!.currentOrderId).toBeUndefined();
 
+    // the bed holds the part until the collect task is done
+    expect(store.getPrinter("a1")!.bedOccupiedBy).toBe(ORDER);
+    expect(linkPrinter("a1", ORDER).ok).toBe(false);
     expect(completeTask(tasks[1].id, "Khelda").ok).toBe(true);
     expect(store.getTask(tasks[1].id)!.status).toBe("done");
+    expect(store.getPrinter("a1")!.bedOccupiedBy).toBeUndefined();
   });
 
   it("an unlinked printer only updates its status, never an order", () => {
@@ -73,6 +77,67 @@ describe("printer -> evidence and operator tasks", () => {
   it("cannot link a printer before a plan is chosen", () => {
     store.saveOrder({ ...store.getOrder(ORDER)!, status: "CREATED" });
     expect(linkPrinter("a1", ORDER).ok).toBe(false);
+  });
+});
+
+describe("several printers", () => {
+  const report = (id: string, print: Record<string, unknown>, prev?: PrinterSnapshot) => {
+    const next = mergeReport(prev, { print }, new Date().toISOString())!;
+    return { next, r: ingestReport(id, next, detectEvents(prev, next)) };
+  };
+
+  it("the agent picks a ready printer and explains the others", () => {
+    report("a1", { gcode_state: "RUNNING", mc_percent: 50 });          // busy printing
+    report("a1-2", { gcode_state: "IDLE", mc_percent: 0 });            // ready
+    store.savePrinter({ ...store.getPrinter("a1-3") ?? { id: "a1-3", name: "A1 Combo #3" }, lastSeen: "2026-01-01T00:00:00Z" }); // offline
+    const r = choosePrinter(ORDER);
+    expect(r.ok && r.printer.id).toBe("a1-2");
+    expect(r.ok && r.reasons.join(" | ")).toMatch(/A1 Combo #1: printer state is RUNNING.*A1 Combo #2: ready.*A1 Combo #3: offline/);
+    expect(store.listLog(ORDER).at(-1)).toMatchObject({ tool: "choose_printer", ok: true });
+  });
+
+  it("escalates to a person when no printer is ready", () => {
+    report("a1", { gcode_state: "RUNNING", mc_percent: 10 });
+    const r = choosePrinter(ORDER);
+    expect(r.ok).toBe(false);
+    expect(store.listTasks(ORDER)[0]).toMatchObject({ kind: "check_printer", status: "open" });
+  });
+
+  it("a failed print suggests rerouting to a ready printer", () => {
+    report("a1-2", { gcode_state: "IDLE" });
+    linkPrinter("a1", ORDER);
+    const { next } = report("a1", { gcode_state: "RUNNING", mc_percent: 30 });
+    report("a1", { gcode_state: "FAILED", print_error: 0x0300400c }, next);
+    const task = store.listTasks(ORDER).find((t) => t.kind === "reprint")!;
+    expect(task.text).toContain("A1 Combo #2 (siap, bed kosong)");
+    expect(store.getPrinter("a1")!.bedOccupiedBy).toBe(ORDER);
+  });
+
+  it("warns when a print starts on a bed that still holds a part", () => {
+    store.savePrinter({ id: "a1", name: "A1 Combo #1", bedOccupiedBy: ORDER });
+    const { next } = report("a1", { gcode_state: "IDLE" });
+    report("a1", { gcode_state: "RUNNING", mc_percent: 1 }, next);
+    expect(store.listTasks(ORDER).some((t) => t.kind === "check_printer" && t.text.startsWith("PERIKSA SEKARANG"))).toBe(true);
+  });
+});
+
+describe("bed state without an order", () => {
+  it("a print sent straight from the slicer still marks the bed as holding a part", () => {
+    const first = mergeReport(undefined, { print: { gcode_state: "RUNNING", mc_percent: 90 } }, new Date().toISOString())!;
+    ingestReport("a1-2", first, []);
+    const next = mergeReport(first, { print: { gcode_state: "FINISH", mc_percent: 100 } }, new Date().toISOString())!;
+    ingestReport("a1-2", next, detectEvents(first, next));
+    expect(store.getPrinter("a1-2")!.bedOccupiedBy).toBe("a print without an order");
+  });
+
+  it("a printer first seen in FINISH is assumed to still hold its part", () => {
+    const s = mergeReport(undefined, { print: { gcode_state: "FINISH", mc_percent: 100 } }, new Date().toISOString())!;
+    ingestReport("a1", s, []);
+    expect(store.getPrinter("a1")!.bedOccupiedBy).toBeTruthy();
+    // after a person clears it, later FINISH reports do not mark it again
+    expect(clearBed("a1", "Khelda").ok).toBe(true);
+    ingestReport("a1", { ...s, at: new Date().toISOString() }, []);
+    expect(store.getPrinter("a1")!.bedOccupiedBy).toBeUndefined();
   });
 });
 

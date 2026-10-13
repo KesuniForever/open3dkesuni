@@ -1,5 +1,6 @@
 // The ONLY code paths that change stored state. HTTP routes and agent tools both call
 // these, so an agent can never bypass validation a human would face.
+import { randomBytes } from "node:crypto";
 import * as store from "./store";
 import { checkPaymentIntent, checkPlan } from "./policy";
 import type { Acceptance, Evidence, Label, Order, PaymentIntent, Quote } from "./types";
@@ -12,7 +13,7 @@ const EVIDENCE_LABELS: Label[] = ["simulated", "manual", "device", "local", "tes
 
 export function createOrder(input: {
   product: string; quantity: number; deadline: string; designVersion: string;
-  mandateMicro: number; label: "real" | "simulated";
+  mandateMicro: number; label: "real" | "simulated"; customerName?: string; customerNote?: string;
 }): { ok: true; order: Order } | Fail {
   const r: string[] = [];
   if (!input.product.trim()) r.push("Product is required");
@@ -21,14 +22,30 @@ export function createOrder(input: {
   if (!input.designVersion.trim()) r.push("Design version is required");
   if (!Number.isInteger(input.mandateMicro) || input.mandateMicro <= 0) r.push("Budget must be a positive USDC amount");
   if (input.label !== "real" && input.label !== "simulated") r.push("Label must be real or simulated");
+  if ((input.customerName ?? "").length > 80) r.push("Customer name is too long");
+  if ((input.customerNote ?? "").length > 1000) r.push("Note is too long");
   if (r.length) return fail(400, "Invalid order", r);
   const ids = store.nextOrderIds();
   const order: Order = {
     ...ids, product: input.product.trim(), quantity: input.quantity, deadline: input.deadline,
     designVersion: input.designVersion.trim(), mandateMicro: input.mandateMicro, status: "CREATED", label: input.label,
+    customerName: input.customerName?.trim() || undefined, customerNote: input.customerNote?.trim() || undefined,
+    customerToken: newCustomerToken(),
   };
   store.saveOrder(order);
   return { ok: true, order };
+}
+
+const newCustomerToken = () => randomBytes(18).toString("base64url");
+
+/** The customer's link token for an order, created on first use for orders made before links existed. */
+export function ensureCustomerToken(orderId: string): string | undefined {
+  const order = store.getOrder(orderId);
+  if (!order) return undefined;
+  if (order.customerToken) return order.customerToken;
+  const customerToken = newCustomerToken();
+  store.saveOrder({ ...order, customerToken });
+  return customerToken;
 }
 
 export function addQuote(

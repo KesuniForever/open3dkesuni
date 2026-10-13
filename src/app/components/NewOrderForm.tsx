@@ -9,7 +9,7 @@ export default function NewOrderForm() {
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [f, setF] = useState({
-    product: "", quantity: "1", deadline: "", designVersion: "v1", budgetUsdc: "", label: "real",
+    customerName: "", product: "", quantity: "1", deadline: "", designVersion: "v1", budgetUsdc: "", label: "real",
   });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF({ ...f, [k]: e.target.value });
@@ -39,6 +39,9 @@ export default function NewOrderForm() {
   return (
     <form className="card form" onSubmit={submit}>
       <h2>New order</h2>
+      <label>Customer name (no phone or address)
+        <input value={f.customerName} onChange={set("customerName")} placeholder="e.g. Aini" maxLength={80} />
+      </label>
       <label>Product
         <input value={f.product} onChange={set("product")} placeholder="e.g. Custom lamp side table, walnut top, 4 printed legs" required />
       </label>

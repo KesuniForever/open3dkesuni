@@ -22,6 +22,7 @@ export async function POST(req: Request) {
     product: str(b.product), quantity: Number(b.quantity), deadline: str(b.deadline),
     designVersion: str(b.designVersion), mandateMicro,
     label: str(b.label) as "real" | "simulated", // validated in createOrder
+    customerName: str(b.customerName),
   });
   return r.ok ? NextResponse.json({ order: r.order }, { status: 201 }) : failWith(r);
 }
