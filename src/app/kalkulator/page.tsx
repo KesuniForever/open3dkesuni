@@ -7,21 +7,21 @@ export const dynamic = "force-dynamic";
 
 export default function Kalkulator() {
   return (
-    <main className="wrap wide" lang="id">
+    <main className="wrap wide" lang="en">
       <header className="page-head">
         <div>
-          <p className="eyebrow">Kalkulator harga</p>
-          <h1>Harga resmi per gram.</h1>
-          <p className="page-sub">Berat per buah dari slicer (Bambu Studio) × harga per gram. Di bawahnya: cek apakah harga itu masih menutup biaya.</p>
+          <p className="eyebrow">Price calculator</p>
+          <h1>The official price, per gram.</h1>
+          <p className="page-sub">Weight per piece from the slicer (Bambu Studio) × price per gram. Below it: a check that the price still covers the costs.</p>
         </div>
       </header>
       <WeightCalculator pricing={pricingConfig()} />
       <div className="section-head">
-        <p className="eyebrow">Cek biaya</p>
-        <h2>Cek: kenali biaya sesungguhnya.</h2>
+        <p className="eyebrow">Cost check</p>
+        <h2>Check: know your real costs.</h2>
         <p className="page-sub">
-          Kalkulator panjang ini hanya untuk mengecek apakah harga per gram masih menutup biaya. Harga resmi tetap per gram (di atas);
-          untuk penawaran, buka pesanannya dan isi berat per buah di sana.
+          This long calculator only checks whether the price per gram still covers the costs. The official price stays per gram (above);
+          for a quote, open the order and enter the weight per piece there.
         </p>
       </div>
       <CostCalculator idrPerUsdc={idrPerUsdc()} />

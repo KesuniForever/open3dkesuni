@@ -173,14 +173,14 @@ export function costingForChosen(order: Order): CostResult | null {
 
 export function customerAgree(orderId: string, by: string): { ok: true; agreement: Agreement } | Fail {
   const order = store.getOrder(orderId);
-  if (!order) return fail(404, "Pesanan tidak ditemukan");
-  if (!PAYABLE.includes(order.status)) return fail(409, "Harga belum siap untuk disetujui");
+  if (!order) return fail(404, "Order not found");
+  if (!PAYABLE.includes(order.status)) return fail(409, "The price is not ready to approve yet");
   const quote = order.chosenQuoteId ? store.getQuote(order.chosenQuoteId) : undefined;
-  if (!quote) return fail(409, "Harga belum siap untuk disetujui");
-  if (!by.trim()) return fail(400, "Nama wajib diisi");
+  if (!quote) return fail(409, "The price is not ready to approve yet");
+  if (!by.trim()) return fail(400, "Name is required");
   const hash = agreementHash(order, quote);
   if (order.agreement?.hash === hash) return { ok: true, agreement: order.agreement };
-  if (locked(orderId)) return fail(409, "Pembayaran sudah berjalan; kesepakatan tidak bisa diubah");
+  if (locked(orderId)) return fail(409, "Payment has started; the agreement can no longer change");
   const agreement: Agreement = {
     version: (order.agreement?.version ?? 0) + 1, hash, quoteId: quote.id, priceMicro: quote.priceMicro,
     by: by.trim().slice(0, 80), at: new Date().toISOString(),

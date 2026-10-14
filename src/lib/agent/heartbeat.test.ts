@@ -73,7 +73,7 @@ describe("checks (code only)", () => {
     store.saveOrder({ ...store.getOrder(ORDER)!, customerName: "Aini Rahmawati", product: "Casing korek untuk Aini 0812-3456-7890" });
     const text = JSON.stringify(checkHeartbeat());
     expect(text).not.toMatch(/Aini|0812/);
-    expect(text).toContain("Casing korek untuk [nama pelanggan] [nomor disembunyikan]");
+    expect(text).toContain("Casing korek untuk [customer name] [number hidden]");
   });
 
   it("an operator task open for more than 6 hours is a finding without a wake", () => {
@@ -116,7 +116,7 @@ describe("heartbeat run", () => {
     });
     const s = await beat();
     expect(s.findings.map((f) => f.kind)).toEqual(["start_production"]);
-    expect(fromHeartbeat()[0].trigger).toContain("belum ada printer");
+    expect(fromHeartbeat()[0].trigger).toContain("has no printer yet");
     // a printer holding it ends the problem
     store.savePrinter({ id: "a1", name: "A1 Combo #1", currentOrderId: ORDER, lastSeen: new Date().toISOString() });
     expect(checkHeartbeat().some((f) => f.kind === "start_production")).toBe(false);
@@ -209,12 +209,12 @@ describe("heartbeat run", () => {
     const s = await beat(new Date("2026-10-20T10:00:00+07:00"));
     expect(s.findings.map((f) => f.kind).sort()).toEqual(["deadline_risk", "needs_plan"]);
     expect(fromHeartbeat()).toHaveLength(1);
-    expect(fromHeartbeat()[0].trigger).toContain("kurang dari 24 jam");
+    expect(fromHeartbeat()[0].trigger).toContain("less than 24 hours away");
     expect(store.listTasks(ORDER)).toMatchObject([{ kind: "needs_info", status: "open" }]);
     // the question to a person silences "needs a plan"; the deadline problem is unchanged
     const s2 = await beat(new Date("2026-10-21T08:00:00+07:00"));
     expect(s2.findings.filter((f) => f.kind !== "task_stale")) // the task was saved with the real clock
-      .toMatchObject([{ kind: "deadline_risk", text: expect.stringContaining("sudah lewat") }]);
+      .toMatchObject([{ kind: "deadline_risk", text: expect.stringContaining("has passed") }]);
     expect(fromHeartbeat()).toHaveLength(1);
     expect(store.listTasks(ORDER)).toHaveLength(1);
   });

@@ -37,7 +37,7 @@ describe("persistence", () => {
     expect(store.getOrder(id)?.product).toBe("Lamp for Ibu Rina");
     expect(store.getOrder("ORD-001")?.label).toBe("simulated"); // seeded once, not duplicated
     expect(store.listOrders()).toHaveLength(2);
-  });
+  }, 20_000); // a real SQLite file on Windows can take seconds to create (antivirus, busy disk)
 });
 
 describe("resetSimulated", () => {

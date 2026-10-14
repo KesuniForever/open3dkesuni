@@ -278,7 +278,7 @@ export interface CustomerMessage {
 export interface DailyReview {
   day: string;              // YYYY-MM-DD, Asia/Jakarta
   facts: unknown;
-  text: string;             // simple Indonesian, sections as "## Heading" lines
+  text: string;             // simple English, sections as "## Heading" lines
   mode: "claude" | "template";
   model: string | null;     // null for the code template
   at: string;

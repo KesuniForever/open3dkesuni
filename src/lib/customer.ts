@@ -50,7 +50,7 @@ export interface CustomerView {
   /** The chain this order's money is on (the escrow's, else the configured one). */
   network: PublicNetwork;
   actual: Pick<ActualReport, "filamentGrams" | "machineHours" | "maxDeviationMm" | "unitsPassed" | "note" | "at"> | null;
-  /** The measured size deviation is above the agreed tolerance: a warning before "Terima", never a block. */
+  /** The measured size deviation is above the agreed tolerance: a warning before "Accept", never a block. */
   overTolerance: boolean;
   review: Review | null;
 }
@@ -125,7 +125,7 @@ function costsFor(order: Order): CustomerView["costs"] {
 
 /**
  * Bring the order's payment up to date: refresh pending Circle transfers, and once the customer's
- * test USDC has arrived, send their payment into escrow (the customer already pressed "Bayar").
+ * test USDC has arrived, send their payment into escrow (the customer already pressed "Pay").
  */
 export async function refreshPayment(orderId: string): Promise<void> {
   const escrow = store.getEscrow(orderId);
@@ -140,14 +140,14 @@ export async function refreshPayment(orderId: string): Promise<void> {
   if (now.state === "AWAITING_DEPOSIT" && toppedUp && !depositing) await deposit(orderId);
 }
 
-/** The customer presses "Bayar": open the escrow if needed, then pay (on testnet, test USDC first). */
+/** The customer presses "Pay": open the escrow if needed, then pay (on testnet, test USDC first). */
 export async function customerPay(orderId: string): Promise<{ ok: true } | Fail> {
   const order = store.getOrder(orderId);
-  if (!order) return fail(404, "Pesanan tidak ditemukan");
-  if (!PAYABLE.includes(order.status)) return fail(409, "Pesanan ini belum bisa dibayar");
+  if (!order) return fail(404, "Order not found");
+  if (!PAYABLE.includes(order.status)) return fail(409, "This order cannot be paid yet");
   let escrow = store.getEscrow(orderId);
   const paid = escrow && escrow.state !== "AWAITING_DEPOSIT";
-  if (!paid && !agreementCurrent(order)) return fail(409, "Setujui kesepakatan (harga dan spesifikasi) dulu sebelum membayar");
+  if (!paid && !agreementCurrent(order)) return fail(409, "Approve the agreement (price and spec) before paying");
   if (!escrow) {
     const r = await openEscrow(orderId);
     if (!r.ok) return r;
@@ -163,13 +163,13 @@ export async function customerPay(orderId: string): Promise<{ ok: true } | Fail>
   if (escrow.txs.some((t) => t.kind === "customer_topup" && live(t))) return { ok: true }; // deposit follows on refresh
   // Mainnet: no test USDC. Funding a customer wallet with real USDC is not built yet (docs/PILOT.md).
   if (!isTestnetChain(escrow.network)) {
-    return fail(409, "Dompet pembayaranmu belum berisi cukup USDC. Hubungi Kesuni untuk cara mengisinya.");
+    return fail(409, "Your payment wallet does not hold enough USDC yet. Contact Kesuni to learn how to top it up.");
   }
   const r = await topUpCustomer(orderId);
   return r.ok ? { ok: true } : r;
 }
 
-const mm = (n: number) => String(n).replace(".", ",");
+const mm = (n: number) => String(n);
 
 /**
  * Quality gate: the operator's measured max deviation is above the tolerance in the agreed spec. Returns the two
@@ -192,14 +192,14 @@ export async function customerDecide(
   orderId: string, input: { accepted: boolean; by: string; note: string; checked?: boolean },
 ): Promise<{ ok: true; settled: boolean; reasons?: string[] } | Fail> {
   const escrow = store.getEscrow(orderId);
-  if (!escrow || escrow.state !== "FUNDED") return fail(409, "Pembayaran belum masuk escrow, jadi belum bisa diputuskan");
+  if (!escrow || escrow.state !== "FUNDED") return fail(409, "The payment is not in escrow yet, so you cannot decide yet");
   if (input.accepted && input.checked !== true) {
-    return fail(400, "Centang dulu bahwa kamu sudah memeriksa ukuran, warna, finishing, dan fungsi barang yang kamu terima");
+    return fail(400, "First tick the box that you checked the size, colour, finish and function of the item you received");
   }
   const order = store.getOrder(orderId);
   const over = input.accepted && order ? overTolerance(order) : null;
   const note = over
-    ? `${input.note.trim() ? `${input.note.trim()} ` : ""}[Diterima walau selisih ukuran ${mm(over.maxDeviationMm)} mm melebihi batas ±${mm(over.toleranceMm)} mm]`
+    ? `${input.note.trim() ? `${input.note.trim()} ` : ""}[Accepted although the size deviation of ${mm(over.maxDeviationMm)} mm exceeds the ±${mm(over.toleranceMm)} mm limit]`
     : input.note;
   const r = recordAcceptance(orderId, { accepted: input.accepted, by: input.by, note });
   if (!r.ok) return r;
@@ -217,7 +217,7 @@ export async function customerDecide(
   if (!s.ok) {
     store.saveTask({
       id: store.nextTaskId(), orderId, kind: "check_printer", status: "open", createdBy: "agent", at: new Date().toISOString(),
-      text: `Pembayaran ${orderId} ditahan policy: ${(s.reasons ?? [s.error]).join("; ")}. Periksa sebelum mencoba lagi.`,
+      text: `Payment for ${orderId} held by policy: ${(s.reasons ?? [s.error]).join("; ")}. Check before trying again.`,
     });
     return { ok: true, settled: false, reasons: s.reasons ?? [s.error] };
   }
@@ -229,10 +229,10 @@ export function customerCreateOrder(input: {
   name: string; product: string; quantity: number; deadline: string; budgetIdr: number; note: string;
 }): { ok: true; order: Order } | Fail {
   const r: string[] = [];
-  if (!input.name.trim()) r.push("Nama wajib diisi");
-  if (input.product.trim().length > 200) r.push("Nama produk terlalu panjang (paling banyak 200 huruf)");
+  if (!input.name.trim()) r.push("Name is required");
+  if (input.product.trim().length > 200) r.push("Product name is too long (at most 200 characters)");
   if (!Number.isFinite(input.budgetIdr) || input.budgetIdr < 1000) r.push("Budget minimal Rp1.000");
-  if (r.length) return fail(400, "Pesanan belum lengkap", r);
+  if (r.length) return fail(400, "The order is incomplete", r);
   const mandateMicro = Math.round((input.budgetIdr / idrPerUsdc()) * 1e6);
   return createOrder({
     product: input.product, quantity: input.quantity, deadline: input.deadline, designVersion: "v1",

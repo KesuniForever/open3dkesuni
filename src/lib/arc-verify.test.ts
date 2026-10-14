@@ -323,8 +323,8 @@ describe("heartbeat Arc check", () => {
     expect(s.actions).toContain(`Arc mismatch on release of ${ORDER}: task opened`);
     const tasks = store.listTasks(ORDER).filter((t) => t.kind === "needs_info");
     expect(tasks).toHaveLength(1);
-    expect(tasks[0].text).toContain("pencairan ke Kesuni 12.5 USDC");
-    expect(tasks[0].text).toContain("Escrow tidak diubah");
+    expect(tasks[0].text).toContain("(release to Kesuni) of 12.5 USDC");
+    expect(tasks[0].text).toContain("The escrow was not changed");
     const logs = store.listLog(ORDER).filter((e) => e.tool === "arc_verify");
     expect(logs.map((e) => e.ok).sort()).toEqual([false, true]);
     expect(store.getEscrow(ORDER)!.state).toBe("RELEASED");
@@ -403,8 +403,8 @@ describe("POST /api/arc/verify and the customer page", () => {
     await post({ orderId: ORDER, idempotencyKey: "key-release" }); // a second click: same text, no second task
     const tasks = store.listTasks(ORDER).filter((t) => t.kind === "needs_info");
     expect(tasks).toHaveLength(1);
-    expect(tasks[0].text).toContain("pencairan ke Kesuni 12.5 USDC");
-    expect(tasks[0].text).toContain("Escrow tidak diubah");
+    expect(tasks[0].text).toContain("(release to Kesuni) of 12.5 USDC");
+    expect(tasks[0].text).toContain("The escrow was not changed");
     expect(store.getEscrow(ORDER)!.state).toBe("RELEASED");
 
     await runHeartbeat({ trigger: "button" }); // already checked: the heartbeat adds nothing

@@ -10,7 +10,7 @@ const rp = (n: number) => `Rp${Math.round(n).toLocaleString("id-ID")}`;
 
 const EMPTY_SPEC: Spec = {
   dimensions: "", toleranceMm: 0.3, material: "PLA", color: "", layerMm: 0.2, infillPct: 20, finishing: "Standar",
-  promise: "Semua unit dicek dimensi, warna, finishing, dan fungsinya sebelum diserahkan.",
+  promise: "Every unit is checked for size, colour, finish and function before hand-over.",
 };
 
 /** Price (cost calculator → Kesuni quote), spec and quality promise, and whether the customer approved them. */
@@ -29,7 +29,7 @@ export default function AgreementPanel({ order, quotes, agreementCurrent, idrPer
       {order.agreement ? (
         <div className={`alert ${agreementCurrent ? "ok" : "bad"}`}>
           {agreementCurrent
-            ? <>Customer <b>{order.agreement.by}</b> approved version {order.agreement.version} on {new Date(order.agreement.at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}.</>
+            ? <>Customer <b>{order.agreement.by}</b> approved version {order.agreement.version} on {new Date(order.agreement.at).toLocaleString("en-GB", { timeZone: "Asia/Jakarta" })}.</>
             : <>The spec or price changed after the customer approved version {order.agreement.version}. They must approve again before paying.</>}
           <div className="fingerprint">SHA-256 {order.agreement.hash}</div>
         </div>

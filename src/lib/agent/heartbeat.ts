@@ -23,7 +23,7 @@ export interface Finding {
   key: string;          // the same for the same unchanged problem
   orderId?: string;
   kind: FindingKind;
-  text: string;         // simple Indonesian, for people
+  text: string;         // simple English, for people
   wake: boolean;        // needs the Chief (Claude) to decide
   /** Code action: open this operator task (text = the finding's text) when the problem first appears. */
   task?: { kind: OperatorTask["kind"]; printerId?: string };
@@ -79,16 +79,16 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
     // Payments are synced for every order, also rejected ones waiting for their refund.
     if (escrow?.txs.some((x) => !FINAL.includes(x.state))) {
       findings.push({ key: `payment_pending:${o.id}`, orderId: o.id, kind: "payment_pending", wake: false,
-        text: `Pembayaran ${o.id} masih diproses di jaringan; dicek otomatis.` });
+        text: `Payment for ${o.id} is still processing on the network; checked automatically.` });
     }
     if (o.status === "REJECTED" || o.status === "PAID") continue;
 
     if (o.status === "CREATED" && !hasOpen(o.id, "needs_info")) {
       findings.push(store.listQuotes(o.id).length === 0
         ? { key: `needs_price:${o.id}`, orderId: o.id, kind: "needs_price", wake: true,
-            text: `${label} belum punya harga. Hitung harga per gram, atau tanya gram per unit dari slicer.` }
+            text: `${label} has no price yet. Price it by weight, or ask for the grams per unit from the slicer.` }
         : { key: `needs_plan:${o.id}`, orderId: o.id, kind: "needs_plan", wake: true,
-            text: `${label} sudah punya penawaran tapi belum ada rencana. Pilih rencana atau minta persetujuan pemilik.` });
+            text: `${label} has quotes but no plan yet. Choose a plan or ask the owner for approval.` });
     }
 
     const onPrinter = printers.some((p) => p.currentOrderId === o.id || p.bedOccupiedBy === o.id);
@@ -96,7 +96,7 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
     if (escrow?.state === "FUNDED" && (o.status === "PLAN_CHOSEN" || o.status === "IN_PRODUCTION")
       && !onPrinter && !hasOpen(o.id, "check_printer") && !printFinished(o.id)) {
       findings.push({ key: `start_production:${o.id}`, orderId: o.id, kind: "start_production", wake: true,
-        text: `${label} sudah dibayar ke escrow tapi belum ada printer. Mulai produksi.` });
+        text: `${label} is paid into escrow but has no printer yet. Start production.` });
     }
 
     const end = deadlineEnd(o);
@@ -104,8 +104,8 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
       findings.push({
         key: `deadline_risk:${o.id}:${o.deadline}`, orderId: o.id, kind: "deadline_risk", wake: true,
         text: end <= t
-          ? `Tenggat ${label} sudah lewat (${o.deadline}) dan pesanan belum selesai. Periksa dan kabari pelanggan.`
-          : `Tenggat ${label} kurang dari 24 jam lagi (${o.deadline}) dan pesanan belum selesai. Periksa apakah bisa tepat waktu.`,
+          ? `The deadline of ${label} has passed (${o.deadline}) and the order is not finished. Check it and tell the customer.`
+          : `The deadline of ${label} is less than 24 hours away (${o.deadline}) and the order is not finished. Check whether it can be on time.`,
         task: { kind: o.status === "CREATED" ? "needs_info" : "check_printer" },
       });
     }
@@ -115,7 +115,7 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
     if (!p.currentOrderId || !(notReadyReason(p, t) ?? "").startsWith("offline")) continue;
     findings.push({
       key: `printer_offline:${p.id}:${p.currentOrderId}`, orderId: p.currentOrderId, kind: "printer_offline", wake: false,
-      text: `${p.name} offline padahal dipakai untuk ${p.currentOrderId}. Periksa listrik, Wi-Fi dan bridge LAN printer.`,
+      text: `${p.name} is offline while in use for ${p.currentOrderId}. Check the power, Wi-Fi and the printer's LAN bridge.`,
       task: { kind: "check_printer", printerId: p.id },
     });
   }
@@ -124,7 +124,7 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
     if (t - Date.parse(task.at) <= 6 * HOUR) continue;
     const short = task.text.length > 140 ? `${task.text.slice(0, 140)}…` : task.text;
     findings.push({ key: `task_stale:${task.id}`, orderId: task.orderId, kind: "task_stale", wake: false,
-      text: `Tugas untuk ${task.orderId} terbuka lebih dari 6 jam: "${short}"` });
+      text: `Task for ${task.orderId} has been open for more than 6 hours: "${short}"` });
   }
   return findings;
 }

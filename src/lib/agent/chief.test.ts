@@ -53,7 +53,7 @@ describe("Chief Kesuni Officer (Claude, faked)", () => {
     await runChief(ORDER);
     const all = JSON.stringify(sent);
     expect(all).not.toMatch(/Aini|081234567890/);
-    expect(all).toContain("nomor disembunyikan");
+    expect(all).toContain("number hidden");
   });
 
   it("has no payment tool, and a made-up one is refused", async () => {
@@ -153,7 +153,7 @@ describe("Chief Kesuni Officer (Claude, faked)", () => {
         return call("get_order", { orderId: ORDER });
       },
       (req) => {
-        expect(lastResults(req)[0].content).toContain("[nama pelanggan], desainmu sudah kami terima");
+        expect(lastResults(req)[0].content).toContain("[customer name], desainmu sudah kami terima");
         return call("message_customer", { orderId: "ORD-999", text: "Harga sudah siap. Silakan cek dan setujui di halaman ini." });
       },
       (req) => {

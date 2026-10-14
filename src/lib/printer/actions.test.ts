@@ -33,7 +33,7 @@ describe("printer -> evidence and operator tasks", () => {
     const ev = store.listEvidence(ORDER);
     expect(ev.every((e) => e.label === "device")).toBe(true);
     expect(ev.map((e) => e.note)).toEqual([
-      "A1 Combo #1: mulai mencetak (clicker_aini)",
+      "A1 Combo #1: started printing (clicker_aini)",
       "A1 Combo #1: progres 25%",
       "A1 Combo #1: progres 50%",
     ]);
@@ -109,7 +109,7 @@ describe("several printers", () => {
     const { next } = report("a1", { gcode_state: "RUNNING", mc_percent: 30 });
     report("a1", { gcode_state: "FAILED", print_error: 0x0300400c }, next);
     const task = store.listTasks(ORDER).find((t) => t.kind === "reprint")!;
-    expect(task.text).toContain("A1 Combo #2 (siap, bed kosong)");
+    expect(task.text).toContain("A1 Combo #2 (ready, bed empty)");
     expect(store.getPrinter("a1")!.bedOccupiedBy).toBe(ORDER);
   });
 
@@ -117,7 +117,7 @@ describe("several printers", () => {
     store.savePrinter({ id: "a1", name: "A1 Combo #1", bedOccupiedBy: ORDER });
     const { next } = report("a1", { gcode_state: "IDLE" });
     report("a1", { gcode_state: "RUNNING", mc_percent: 1 }, next);
-    expect(store.listTasks(ORDER).some((t) => t.kind === "check_printer" && t.text.startsWith("PERIKSA SEKARANG"))).toBe(true);
+    expect(store.listTasks(ORDER).some((t) => t.kind === "check_printer" && t.text.startsWith("CHECK NOW"))).toBe(true);
   });
 });
 

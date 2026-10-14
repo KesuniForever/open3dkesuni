@@ -10,7 +10,7 @@ type Ctx = { params: Promise<{ token: string }> };
 export async function GET(_req: Request, ctx: Ctx) {
   const { token } = await ctx.params;
   const order = orderForToken(token);
-  if (!order) return fail(404, "Pesanan tidak ditemukan");
+  if (!order) return fail(404, "Order not found");
   await refreshPayment(order.id).catch(() => undefined); // Circle hiccup: show the last known state
   return NextResponse.json(customerView(orderForToken(token)!, token));
 }
@@ -21,7 +21,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 export async function POST(req: Request, ctx: Ctx) {
   const { token } = await ctx.params;
   const order = orderForToken(token);
-  if (!order) return fail(404, "Pesanan tidak ditemukan");
+  if (!order) return fail(404, "Order not found");
   const b = await readJson(req);
   const action = str(b?.action);
   if (action === "agree" || (action === "pay" && b?.agree === true)) {

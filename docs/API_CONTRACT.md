@@ -44,8 +44,8 @@ Data is stored in SQLite (`src/lib/store.ts`, file `data/local/kesuni.db`, git-i
 `facts` are counted by code (`dailyFacts` in `src/lib/agent/daily-review.ts`): orders, plans (agent vs human), agreements,
 escrow money (real and simulated orders apart, each labelled with its network: testnet = test USDC), operator tasks, the
 Chief's activity (runs, heartbeat wake-ups, decisions, escalations, policy refusals, customer messages), deadlines, printers,
-reputation and logged Claude tokens. No customer names, phones or addresses. `text` has five sections in simple Indonesian
-("Ringkasan", "Yang berjalan baik", "Risiko & yang perlu diperhatikan", "Saran Chief", "Butuh keputusanmu"); Claude writes
+reputation and logged Claude tokens. No customer names, phones or addresses. `text` has five sections in simple English
+("Summary", "What went well", "Risks & things to watch", "Chief's advice", "Needs your decision"); Claude writes
 it with no tools from the facts only, or a code template does (rules mode, Claude error or refusal: `error` says why).
 
 ## The Chief's heartbeat and daily review

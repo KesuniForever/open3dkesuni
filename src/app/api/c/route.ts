@@ -21,11 +21,11 @@ function clientIp(req: Request): string {
 export async function POST(req: Request) {
   const code = process.env.CUSTOMER_INVITE_CODE;
   const b = await readJson(req);
-  if (!code || !b || !sameSecret(str(b.invite), code)) return fail(404, "Link pemesanan tidak berlaku");
+  if (!code || !b || !sameSecret(str(b.invite), code)) return fail(404, "This order link is not valid");
   const ip = clientIp(req);
   const now = Date.now();
   const recent = (byIp.get(ip) ?? []).filter((t) => now - t < 3_600_000);
-  if (recent.length >= ORDERS_PER_IP_PER_HOUR) return fail(429, "Terlalu banyak pesanan dalam satu jam. Coba lagi nanti atau hubungi Kesuni.");
+  if (recent.length >= ORDERS_PER_IP_PER_HOUR) return fail(429, "Too many orders in one hour. Try again later or contact Kesuni.");
   const r = customerCreateOrder({
     name: str(b.name), product: str(b.product), quantity: Number(b.quantity), deadline: str(b.deadline),
     budgetIdr: Number(b.budgetIdr), note: str(b.note),

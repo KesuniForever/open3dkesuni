@@ -26,7 +26,7 @@ export default function WeightPricePanel({ order, quotes, pricing, budgetIdr, mi
           × {w.quantity} = <b>{rp(w.totalIdr)}</b> · cost {rp(w.costIdr)} · margin {w.totalIdr > 0 ? Math.round(((w.totalIdr - w.costIdr) / w.totalIdr) * 1000) / 10 : 0}%
           {quote && <> · ETA {quote.etaHours} h</>}
           <div className="muted" style={{ fontSize: 13 }}>
-            Grams from: {w.source} · priced by {w.by === "agent" ? "the Chief" : "a person"} · {new Date(w.at).toLocaleString("id-ID", { timeZone: "Asia/Jakarta" })}
+            Grams from: {w.source} · priced by {w.by === "agent" ? "the Chief" : "a person"} · {new Date(w.at).toLocaleString("en-GB", { timeZone: "Asia/Jakarta" })}
           </div>
         </div>
       )}

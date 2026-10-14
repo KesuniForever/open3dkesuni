@@ -19,8 +19,8 @@ export const metadata: Metadata = {
   description: "Order, production evidence and USDC payment for a 3D-print business.",
 };
 
-// Operator pages are English (lang="en" here); customer pages (/c, /pesan) and /kalkulator are Indonesian and set
-// lang="id" on their own <main>. AppShell adds the operator sidebar everywhere except the customer pages.
+// The whole site is English (lang="en" here). AppShell adds the operator sidebar everywhere except the customer pages
+// (/c, /pesan).
 export default function RootLayout({ children }: LayoutProps<"/">) {
   const net = publicNetwork();
   return (

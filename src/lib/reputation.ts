@@ -13,9 +13,9 @@ const PRIOR_WEIGHT = 3;
 
 export function customerReview(orderId: string, raw: Record<string, unknown>): { ok: true; review: Review } | Fail {
   const order = store.getOrder(orderId);
-  if (!order) return fail(404, "Pesanan tidak ditemukan");
-  if (!["ACCEPTED", "PAID"].includes(order.status)) return fail(409, "Ulasan dibuka setelah barang diterima");
-  if (order.review) return fail(409, "Ulasan untuk pesanan ini sudah ada");
+  if (!order) return fail(404, "Order not found");
+  if (!["ACCEPTED", "PAID"].includes(order.status)) return fail(409, "Reviews open after the item is accepted");
+  if (order.review) return fail(409, "This order already has a review");
   const star = (k: string) => Number(raw[k]);
   const review: Review = {
     quality: star("quality"), communication: star("communication"), value: star("value"),
@@ -25,8 +25,8 @@ export function customerReview(orderId: string, raw: Record<string, unknown>): {
   for (const k of ["quality", "communication", "value"] as const) {
     if (!Number.isInteger(review[k]) || review[k] < 1 || review[k] > 5) r.push(`Nilai ${k} harus 1 sampai 5`);
   }
-  if (!review.by) r.push("Nama wajib diisi");
-  if (r.length) return fail(400, "Ulasan belum lengkap", r);
+  if (!review.by) r.push("Name is required");
+  if (r.length) return fail(400, "The review is incomplete", r);
   store.saveOrder({ ...order, review });
   store.addLog({ orderId, actor: "human", tool: "customer_review", input: { quality: review.quality }, ok: true, output: {}, at: review.at });
   return { ok: true, review };

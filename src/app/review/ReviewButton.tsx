@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 /** Writes (or rewrites) a day's review now. The Chief uses Claude when it is on, else the code template. */
-export default function ReviewButton({ day, label = "Buat review sekarang" }: { day?: string; label?: string }) {
+export default function ReviewButton({ day, label = "Write review now" }: { day?: string; label?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

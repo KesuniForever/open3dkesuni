@@ -23,44 +23,44 @@ export default function OrderForm({ code }: { code: string }) {
       });
       const data = await res.json();
       if (!res.ok) return setErrors(data.reasons ?? [data.error]);
-      router.push(`${data.link}?baru=1`);
+      router.push(`${data.link}?new=1`);
     } catch {
-      setErrors(["Koneksi terputus. Coba lagi."]);
+      setErrors(["Connection lost. Please try again."]);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <main className="cust" lang="id">
-      <header className="cust-top"><span className="brand"><BrandMark size={30} />Open3DKesuni</span><span className="muted">Pesan cetak 3D</span></header>
+    <main className="cust" lang="en">
+      <header className="cust-top"><span className="brand"><BrandMark size={30} />Open3DKesuni</span><span className="muted">Order a 3D print</span></header>
       <section className="cust-hero">
-        <h1>Mau cetak apa?</h1>
-        <p className="muted">Isi pesananmu. Kesuni menyiapkan harga, lalu kamu bisa membayar dan memantau cetakannya dari halaman pesananmu.</p>
+        <h1>What would you like printed?</h1>
+        <p className="muted">Fill in your order. Kesuni prepares the price, then you can pay and follow the print from your order page.</p>
         <form className="form" onSubmit={submit} style={{ marginTop: 16 }}>
-          <label>Nama
-            <input value={f.name} onChange={set("name")} placeholder="Nama kamu atau usahamu" required maxLength={80} />
+          <label>Name
+            <input value={f.name} onChange={set("name")} placeholder="Your name or business" required maxLength={80} />
           </label>
-          <label>Barang yang dipesan
-            <input value={f.product} onChange={set("product")} placeholder="Misalnya: casing korek api, warna hitam" required maxLength={200} />
+          <label>What to print
+            <input value={f.product} onChange={set("product")} placeholder="For example: lighter case, black" required maxLength={200} />
           </label>
           <div className="row">
-            <label style={{ flex: "1 1 100px" }}>Jumlah
+            <label style={{ flex: "1 1 100px" }}>Quantity
               <input type="number" min={1} value={f.quantity} onChange={set("quantity")} required />
             </label>
-            <label style={{ flex: "2 1 160px" }}>Butuh paling lambat
+            <label style={{ flex: "2 1 160px" }}>Needed by
               <input type="date" value={f.deadline} onChange={set("deadline")} required />
             </label>
           </div>
-          <label>Budget maksimal (Rupiah)
+          <label>Maximum budget (Rupiah)
             <input value={f.budgetIdr} onChange={set("budgetIdr")} inputMode="numeric" placeholder="50000" required />
           </label>
-          <label>Catatan (ukuran, warna, desain)
-            <textarea value={f.note} onChange={set("note")} rows={3} maxLength={1000} placeholder="Boleh kosong" />
+          <label>Notes (size, colour, design)
+            <textarea value={f.note} onChange={set("note")} rows={3} maxLength={1000} placeholder="Optional" />
           </label>
-          <p className="cust-note">Jangan tulis alamat atau nomor HP di sini. Kesuni menanyakannya langsung lewat WhatsApp.</p>
+          <p className="cust-note">Do not write your address or phone number here. Kesuni asks for them directly on WhatsApp.</p>
           {errors.length > 0 && <div className="alert bad"><ul>{errors.map((m) => <li key={m}>{m}</li>)}</ul></div>}
-          <button className="primary cust-cta" disabled={busy}>{busy ? "Mengirim…" : "Kirim pesanan"}</button>
+          <button className="primary cust-cta" disabled={busy}>{busy ? "Sending…" : "Send order"}</button>
         </form>
       </section>
     </main>

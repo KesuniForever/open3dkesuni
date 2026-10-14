@@ -162,7 +162,7 @@ describe("owner approval (Aini: 50 × 16 g = Rp1.200.000, above the Rp1.000.000 
     expect((await approvalRoute(json({ by: "Khelda", note: "OK 1,2 juta" }), ctxOf(id))).status).toBe(200); // the only approvable quote
     await settle();
     expect(store.getOrder(id)!.ownerApproval).toMatchObject({ quoteId: q.quote.id, priceMicro: q.quote.priceMicro, by: "Khelda" });
-    expect(store.getTask("T-q")).toMatchObject({ status: "done", doneBy: "Khelda (disetujui pemilik)" });
+    expect(store.getTask("T-q")).toMatchObject({ status: "done", doneBy: "Khelda (approved by the owner)" });
     expect(woken.join()).toMatch(/owner approved an exception/);
     expect((await approvalRoute(json({ quoteId: "Q-nope", by: "Khelda", note: "x" }), ctxOf(id))).status).toBe(400);
   });

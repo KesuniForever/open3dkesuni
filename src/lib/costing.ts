@@ -98,14 +98,14 @@ export function calculate(i: CostInput): CostResult {
   const keep = 1 - i.feePct / 100;
   const r = Math.round;
   const lines: CostLine[] = [
-    { key: "material", label: "Bahan + support/limbah", idr: r(material) },
-    { key: "power", label: "Listrik", idr: r(power) },
-    { key: "labor", label: "Tenaga kerja", idr: r(labor) },
-    { key: "machine", label: "Mesin & perawatan", idr: r(machine) },
+    { key: "material", label: "Material + support/waste", idr: r(material) },
+    { key: "power", label: "Electricity", idr: r(power) },
+    { key: "labor", label: "Labour", idr: r(labor) },
+    { key: "machine", label: "Machine & upkeep", idr: r(machine) },
     { key: "finishing", label: "Finishing", idr: r(i.finishingIdr) },
-    { key: "reserve", label: "Cadangan cetak ulang", idr: r(reserve) },
-    { key: "packing", label: "Kemasan + pengiriman", idr: r(i.packagingIdr + i.shippingIdr) },
-    { key: "overhead", label: "Alokasi overhead", idr: r(i.overheadIdr) },
+    { key: "reserve", label: "Reprint reserve", idr: r(reserve) },
+    { key: "packing", label: "Packaging + shipping", idr: r(i.packagingIdr + i.shippingIdr) },
+    { key: "overhead", label: "Overhead share", idr: r(i.overheadIdr) },
   ];
   const businessCostIdr = r(businessCost);
   return {

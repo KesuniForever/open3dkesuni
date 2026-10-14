@@ -290,16 +290,16 @@ export async function verifyStoredTx(
 }
 
 const TX_KIND_ID: Record<ChainTx["kind"], string> = {
-  customer_topup: "isi saldo uji (internal)", deposit: "pembayaran ke escrow", release: "pencairan ke Kesuni", refund: "pengembalian dana",
+  customer_topup: "test top-up (internal)", deposit: "payment into escrow", release: "release to Kesuni", refund: "refund",
 };
 
 /**
- * Open one needs_info task (simple Indonesian) for a transfer that does not match on Arc, unless an open task with
+ * Open one needs_info task (simple English) for a transfer that does not match on Arc, unless an open task with
  * the same text already exists. Used by the heartbeat and by the manual "Check now". Never touches escrow or money.
  */
 export function openArcMismatchTask(orderId: string, tx: ChainTx, saved: TxVerification): { task: OperatorTask; opened: boolean } {
-  const text = `Transaksi ${TX_KIND_ID[tx.kind]} ${microToUsdc(tx.amountMicro)} USDC untuk ${orderId} tidak cocok di Arc ` +
-    `(hash ${(tx.txHash ?? "").slice(0, 10)}…): ${saved.reason}. Cek di explorer dan di Circle. Escrow tidak diubah.`;
+  const text = `Transfer (${TX_KIND_ID[tx.kind]}) of ${microToUsdc(tx.amountMicro)} USDC for ${orderId} does not match on Arc ` +
+    `(hash ${(tx.txHash ?? "").slice(0, 10)}…): ${saved.reason}. Check it in the explorer and in Circle. The escrow was not changed.`;
   const existing = store.listTasks(orderId).find((x) => x.status === "open" && x.text === text);
   if (existing) return { task: existing, opened: false };
   return { task: createTask(orderId, "needs_info", text), opened: true };

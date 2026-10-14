@@ -193,7 +193,7 @@ describe("what the agent may see", () => {
     });
     const json = JSON.stringify(callTool("get_order", { orderId: "ORD-001" }).data);
     expect(json).not.toMatch(/Aini|Rahmawati|0812|3456|Griya|0751/);
-    expect(json).toContain("Casing korek untuk [nama pelanggan]");
+    expect(json).toContain("Casing korek untuk [customer name]");
   });
 
   it("get_order does not include the customer name", () => {

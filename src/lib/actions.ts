@@ -121,7 +121,7 @@ export function approveByOwner(orderId: string, input: { quoteId: string; by: st
   const updated: Order = { ...order, ownerApproval: { quoteId: quote.id, priceMicro: quote.priceMicro, by, note: input.note.trim().slice(0, 300), at } };
   store.saveOrder(updated);
   for (const t of store.listTasks(orderId)) {
-    if (t.status === "open" && t.kind === "needs_info") store.saveTask({ ...t, status: "done", doneAt: at, doneBy: `${by} (disetujui pemilik)` });
+    if (t.status === "open" && t.kind === "needs_info") store.saveTask({ ...t, status: "done", doneAt: at, doneBy: `${by} (approved by the owner)` });
   }
   store.addLog({ orderId, actor: "human", tool: "owner_approval", input: { quoteId: quote.id, note: updated.ownerApproval!.note }, ok: true, output: { by }, at });
   return { ok: true, order: updated };

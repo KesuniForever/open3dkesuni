@@ -99,7 +99,7 @@ describe("customer pays, accepts, and the agent settles", () => {
     const r = await customerDecide(ORDER, { accepted: true, by: "Aini", note: "" });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.status).toBe(400);
-    expect(!r.ok && r.error).toMatch(/Centang dulu/);
+    expect(!r.ok && r.error).toMatch(/First tick the box/);
     expect(store.getOrder(ORDER)!.status).toBe("EVIDENCE_SUBMITTED"); // nothing recorded, no money moved
     expect(store.getEscrow(ORDER)!.state).toBe("FUNDED");
     expect(store.getAcceptance(ORDER)).toBeUndefined();
@@ -127,7 +127,7 @@ describe("customer pays, accepts, and the agent settles", () => {
     expect(customerView(store.getOrder(ORDER)!, token).overTolerance).toBe(true);
     const r = await customerDecide(ORDER, { accepted: true, by: "Aini", note: "tidak apa-apa", checked: true });
     expect(r.ok && r.settled).toBe(true);
-    expect(store.getAcceptance(ORDER)!.note).toBe("tidak apa-apa [Diterima walau selisih ukuran 0,6 mm melebihi batas ±0,3 mm]");
+    expect(store.getAcceptance(ORDER)!.note).toBe("tidak apa-apa [Accepted although the size deviation of 0.6 mm exceeds the ±0.3 mm limit]");
     expect(store.listLog(ORDER).find((e) => e.tool === "customer_decision")!.input)
       .toEqual({ accepted: true, checked: true, acceptedOverTolerance: { maxDeviationMm: 0.6, toleranceMm: 0.3 } });
     await refreshPayment(ORDER);
@@ -187,7 +187,7 @@ describe("ordering through the invite link", () => {
     for (let i = 0; i < 5; i++) expect((await createViaInvite(req("203.0.113.9"))).status).toBe(201);
     const sixth = await createViaInvite(req("203.0.113.9"));
     expect(sixth.status).toBe(429);
-    expect((await sixth.json()).error).toMatch(/Terlalu banyak pesanan/);
+    expect((await sixth.json()).error).toMatch(/Too many orders/);
     expect((await createViaInvite(req("198.51.100.7"))).status).toBe(201);
   });
 

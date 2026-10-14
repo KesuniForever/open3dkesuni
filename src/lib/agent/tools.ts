@@ -32,11 +32,11 @@ export function redactNote(note: string | undefined): string | undefined {
   if (!note) return note;
   return note
     .split(/\r?\n/)
-    .map((line) => (/\b(jl|jln|jalan|alamat|gang|gg|rt|rw|kel|kec|kelurahan|kecamatan|kode pos|no\. rumah|perum|perumahan|komplek|kompleks|komp|blok|no\.?\s*\d+)\b/i.test(line) ? "[alamat disembunyikan]" : line))
+    .map((line) => (/\b(jl|jln|jalan|alamat|gang|gg|rt|rw|kel|kec|kelurahan|kecamatan|kode pos|no\. rumah|perum|perumahan|komplek|kompleks|komp|blok|street|road|address|zip|postcode|no\.?\s*\d+)\b/i.test(line) ? "[address hidden]" : line))
     .join("\n")
     // Runs of 8+ digits, also with brackets, spaces, dots or dashes: "0812-3456-7890", "(0751) 123-456".
-    .replace(/\+?\(?\d[\d ().-]*\d/g, (m) => (m.replace(/\D/g, "").length >= 8 ? "[nomor disembunyikan]" : m))
-    .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, "[email disembunyikan]");
+    .replace(/\+?\(?\d[\d ().-]*\d/g, (m) => (m.replace(/\D/g, "").length >= 8 ? "[number hidden]" : m))
+    .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, "[email hidden]");
 }
 
 /** Text the customer typed (product, note, file names), as the agent may see it: no name, phone, address or email. */
@@ -65,7 +65,7 @@ function orderForAgent(o: Order) {
 /** Hide each part of the customer's name (3+ letters) in text the agent reads. */
 export function hideName(text: string, name?: string): string {
   const parts = (name ?? "").split(/\s+/).filter((p) => p.length >= 3).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  return parts.length ? text.replace(new RegExp(`\\b(${parts.join("|")})\\b`, "gi"), "[nama pelanggan]") : text;
+  return parts.length ? text.replace(new RegExp(`\\b(${parts.join("|")})\\b`, "gi"), "[customer name]") : text;
 }
 const err = (message: string, reasons?: string[]): ToolResult => ({ ok: false, data: { error: message, reasons } });
 
@@ -125,7 +125,7 @@ export const TOOLS: Tool[] = [
   {
     name: "request_human_decision",
     description: "Escalate to a person: the owner (approval of an exception to the owner's rules) or the operator " +
-      "(a missing number such as grams or print hours, or anything unclear). Creates a task. Write it in Indonesian, " +
+      "(a missing number such as grams or print hours, or anything unclear). Creates a task. Write it in English, " +
       "say exactly what you need and why.",
     inputSchema: {
       type: "object",
@@ -135,7 +135,7 @@ export const TOOLS: Tool[] = [
     run: (i) => {
       const orderId = str(i.orderId);
       if (!store.getOrder(orderId)) return { ok: true, data: { escalated: true, question: str(i.question) } };
-      const text = str(i.question).trim().slice(0, 600) || "Agen butuh keputusan manusia.";
+      const text = str(i.question).trim().slice(0, 600) || "The agent needs a human decision.";
       const open = store.listTasks(orderId).find((t) => t.status === "open" && t.kind === "needs_info" && t.text === text);
       const task = open ?? createTask(orderId, "needs_info", text);
       return { ok: true, data: { escalated: true, taskId: task.id, question: task.text } };
@@ -278,7 +278,7 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "create_operator_task",
-    description: "Ask the Kesuni operator for physical work: change filament, check a printer, collect and QC a print, reprint. Indonesian.",
+    description: "Ask the Kesuni operator for physical work: change filament, check a printer, collect and QC a print, reprint. English.",
     inputSchema: {
       type: "object",
       properties: {
@@ -302,12 +302,12 @@ export const TOOLS: Tool[] = [
   {
     name: "message_customer",
     description: "Customer skill: post a short update on the customer's order page. Short (1-3 sentences), polite, " +
-      "simple Indonesian, facts only. No prices other than the agreed price, no payment instructions, no links, " +
+      "simple English, facts only. No prices other than the agreed price, no payment instructions, no links, " +
       "contacts or addresses. At most one message per event. Code refuses links, wallet addresses, phone numbers, " +
       "emails, a repeat of the last message, and more than one message per order every 10 minutes.",
     inputSchema: {
       type: "object",
-      properties: { orderId: { type: "string" }, text: { type: "string", description: "The message, in Indonesian, at most 500 characters" } },
+      properties: { orderId: { type: "string" }, text: { type: "string", description: "The message, in English, at most 500 characters" } },
       required: ["orderId", "text"],
     },
     run: (i) => {

@@ -114,7 +114,7 @@ describe("facts (code only)", () => {
     seedDay();
     const json = JSON.stringify(dailyFacts(DAY, NOW));
     expect(json).not.toMatch(/Aini|081234567890|Sudirman/);
-    expect(json).toContain("[nomor disembunyikan]");
+    expect(json).toContain("[number hidden]");
   });
 
   it("an empty day is all zeros", () => {
@@ -150,14 +150,14 @@ describe("generate", () => {
     if (!r.ok) throw new Error(r.error);
     expect(r.review).toMatchObject({ mode: "template", model: null, error: expect.stringContaining("overloaded") });
     for (const s of SECTIONS) expect(r.review.text).toContain(`## ${s}`);
-    expect(r.review.text).toContain("bukan uang sungguhan");
+    expect(r.review.text).toContain("not real money");
     expect(r.review.text).toContain("ORD-003"); // overdue
     expect(r.review.text).toContain("Berapa gram per unit"); // the open question for the owner
     expect(r.review.text).not.toMatch(/Aini|081234567890/);
   });
 
   it("uses the template when Claude refuses or skips a section, and in rules mode without calling Claude", async () => {
-    fakeClaude(async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: "## Ringkasan\n- singkat" }] }));
+    fakeClaude(async () => ({ stop_reason: "end_turn", content: [{ type: "text", text: "## Summary\n- short" }] }));
     expect((await generateDailyReview(DAY, { trigger: "button", now: NOW })).ok).toBe(true);
     expect(store.getDailyReview(DAY)).toMatchObject({ mode: "template", error: expect.stringContaining("sections") });
 

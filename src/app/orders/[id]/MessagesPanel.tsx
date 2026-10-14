@@ -4,7 +4,7 @@ import { useState } from "react";
 import type { CustomerMessage, Order } from "@/lib/types";
 
 const when = (iso: string) =>
-  new Date(iso).toLocaleString("id-ID", { timeZone: "Asia/Jakarta", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  new Date(iso).toLocaleString("en-GB", { timeZone: "Asia/Jakarta", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 /** Updates shown on the customer's page ("Kabar dari Kesuni"), by the Chief (AI) or a person. */
 export default function MessagesPanel({ order, messages, busy, onChange }: {
@@ -50,9 +50,9 @@ export default function MessagesPanel({ order, messages, busy, onChange }: {
         </ul>
       )}
       <form className="form" onSubmit={(e) => { e.preventDefault(); void send(); }}>
-        <label>Write to the customer (simple Indonesian; shown on their page as &quot;dari tim Kesuni&quot;)
+        <label>Write to the customer (simple English; shown on their page as &quot;from the Kesuni team&quot;)
           <textarea value={text} onChange={(e) => setText(e.target.value)} maxLength={500} rows={2}
-            placeholder="Contoh: Cetakan sedang berjalan, besok sore kami kirim foto hasilnya." disabled={disabled} />
+            placeholder="Example: Printing is under way; we will send photos of the result tomorrow afternoon." disabled={disabled} />
         </label>
         {error && (
           <div className="alert bad" role="status">

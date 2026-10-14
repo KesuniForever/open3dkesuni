@@ -84,7 +84,7 @@ export function choosePrinter(orderId: string): { ok: true; printer: Printer; re
   const ready = printers.filter((p) => notReadyReason(p) === null);
   if (ready.length === 0) {
     store.addLog({ orderId, actor: "agent", tool: "choose_printer", input: {}, ok: false, output: { reasons }, at });
-    createTask(orderId, "check_printer", `Tidak ada printer yang siap untuk ${orderId}. ${reasons.join("; ")}.`);
+    createTask(orderId, "check_printer", `No printer is ready for ${orderId}. ${reasons.join("; ")}.`);
     return fail(409, "No printer is ready", reasons);
   }
   const pick = ready[0];
@@ -127,38 +127,38 @@ function react(printer: Printer, orderId: string, e: PrinterEvent): void {
   const code = e.errorCode ? ` kode ${errorCodeText(e.errorCode)}` : "";
   switch (e.kind) {
     case "started":
-      log(`mulai mencetak${job(e)}`);
+      log(`started printing${job(e)}`);
       break;
     case "progress":
       log(`progres ${pct(e)}`);
       break;
     case "needs_operator":
-      log(`berhenti di ${pct(e)}${code}, butuh operator`);
+      log(`stopped at ${pct(e)}${code}, needs an operator`);
       createTask(orderId, "change_filament",
-        `${printer.name} berhenti di ${pct(e)}${code}. Kemungkinan filament habis: cek printer, ganti filament, lalu lanjutkan cetak dari layar printer.`,
+        `${printer.name} stopped at ${pct(e)}${code}. Probably out of filament: check the printer, change the filament, then resume the print from the printer screen.`,
         printer.id);
       break;
     case "resumed":
-      log(`lanjut mencetak dari ${pct(e)}`);
+      log(`resumed printing from ${pct(e)}`);
       for (const t of store.listTasks(orderId)) {
         if (t.status === "open" && t.kind === "change_filament" && (!t.printerId || t.printerId === printer.id)) {
-          store.saveTask({ ...t, status: "done", doneAt: e.at, doneBy: `${printer.name} (lanjut mencetak)` });
+          store.saveTask({ ...t, status: "done", doneAt: e.at, doneBy: `${printer.name} (resumed printing)` });
         }
       }
       break;
     case "finished":
-      log(`selesai mencetak${job(e)}`);
+      log(`finished printing${job(e)}`);
       createTask(orderId, "collect_and_qc",
-        `Cetak selesai di ${printer.name}. Ambil barang, cek kualitas, lalu catat hasil QC dengan foto. Selesai cetak belum berarti boleh dibayar.`,
+        `Print finished on ${printer.name}. Collect the item, check the quality, then log the QC result with a photo. A finished print does not mean it may be paid yet.`,
         printer.id);
       break;
     case "failed": {
-      log(`cetak gagal di ${pct(e)}${code}`);
+      log(`print failed at ${pct(e)}${code}`);
       const alt = alternative(printer.id);
       const suggestion = alt
-        ? ` Saran agen: setelah bed dibersihkan, cetak ulang di ${alt.name} (siap, bed kosong), atau ulangi di ${printer.name}.`
-        : " Belum ada printer lain yang siap.";
-      createTask(orderId, "reprint", `Cetak gagal di ${printer.name} (${pct(e)}${code}). Bersihkan bed dan putuskan cetak ulang.${suggestion}`, printer.id);
+        ? ` Agent suggestion: after clearing the bed, reprint on ${alt.name} (ready, bed empty), or repeat on ${printer.name}.`
+        : " No other printer is ready yet.";
+      createTask(orderId, "reprint", `Print failed on ${printer.name} (${pct(e)}${code}). Clear the bed and decide on a reprint.${suggestion}`, printer.id);
       store.addLog({ orderId, actor: "agent", tool: "suggest_reroute", input: { failed: printer.name }, ok: true,
         output: { suggestion: alt ? alt.name : null }, at: e.at });
       break;
@@ -186,7 +186,7 @@ export function ingestReport(
   const startedOnFullBed = events.some((e) => e.kind === "started") && printer.bedOccupiedBy;
   if (startedOnFullBed) {
     createTask(printer.bedOccupiedBy!, "check_printer",
-      `PERIKSA SEKARANG: ${printer.name} mulai mencetak, padahal hasil ${printer.bedOccupiedBy} belum ditandai diambil.`, printer.id);
+      `CHECK NOW: ${printer.name} started printing, but the print for ${printer.bedOccupiedBy} was not marked as collected.`, printer.id);
   }
 
   const orderId = printer.currentOrderId;

@@ -12,24 +12,24 @@ export default function WeightCalculator({ pricing }: { pricing: PricingConfig }
   const r = priceByWeight(Number(grams), Number(qty), pricing);
   return (
     <section className="card">
-      <h2>Harga per gram (resmi)</h2>
+      <h2>Price per gram (official)</h2>
       <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-        Harga jual {rp(pricing.pricePerGramIdr)} per gram, dibulatkan ke atas ke {rp(pricing.roundIdr)} per buah.
-        Berat per buah diambil dari slicer (Bambu Studio).
+        Selling price {rp(pricing.pricePerGramIdr)} per gram, rounded up to {rp(pricing.roundIdr)} per piece.
+        Weight per piece comes from the slicer (Bambu Studio).
       </p>
       <div className="row">
-        <label style={{ flex: "1 1 140px" }}>Berat per buah (gram)
+        <label style={{ flex: "1 1 140px" }}>Weight per piece (grams)
           <input type="number" step="0.01" min={0.01} value={grams} onChange={(e) => setGrams(e.target.value)} />
         </label>
-        <label style={{ flex: "1 1 120px" }}>Jumlah
+        <label style={{ flex: "1 1 120px" }}>Quantity
           <input type="number" min={1} step={1} value={qty} onChange={(e) => setQty(e.target.value)} />
         </label>
       </div>
       {r.ok ? (
         <dl className="calc-kv">
-          <div><dt>Harga per buah</dt><dd>{rp(r.price.unitPriceIdr)}</dd></div>
-          <div><dt>Total ({r.price.quantity} buah)</dt><dd><b>{rp(r.price.totalIdr)}</b></dd></div>
-          <div><dt>Perkiraan selesai</dt><dd>± {r.price.etaHours} jam</dd></div>
+          <div><dt>Price per piece</dt><dd>{rp(r.price.unitPriceIdr)}</dd></div>
+          <div><dt>Total ({r.price.quantity} pieces)</dt><dd><b>{rp(r.price.totalIdr)}</b></dd></div>
+          <div><dt>Estimated time</dt><dd>± {r.price.etaHours} hours</dd></div>
         </dl>
       ) : (
         <p className="muted">{r.reasons.join("; ")}</p>

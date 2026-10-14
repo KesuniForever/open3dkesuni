@@ -7,24 +7,24 @@ const rp = (n: number) => `Rp${Math.round(n).toLocaleString("id-ID")}`;
 
 type Field = { key: keyof CostInput; label: string; unit: string; step?: string };
 const PRODUCTION: Field[] = [
-  { key: "quantity", label: "Jumlah barang", unit: "unit" },
-  { key: "gramsPerUnit", label: "Bahan per unit", unit: "gram", step: "0.1" },
-  { key: "filamentIdrPerKg", label: "Harga filament", unit: "Rp / kg" },
-  { key: "machineHours", label: "Waktu mesin", unit: "jam, seluruh pesanan", step: "0.1" },
-  { key: "avgWatts", label: "Daya rata-rata", unit: "watt (perkiraan)" },
-  { key: "idrPerKwh", label: "Tarif listrik", unit: "Rp / kWh" },
+  { key: "quantity", label: "Quantity", unit: "units" },
+  { key: "gramsPerUnit", label: "Material per unit", unit: "grams", step: "0.1" },
+  { key: "filamentIdrPerKg", label: "Filament price", unit: "Rp / kg" },
+  { key: "machineHours", label: "Machine time", unit: "hours, whole order", step: "0.1" },
+  { key: "avgWatts", label: "Average power", unit: "watts (estimate)" },
+  { key: "idrPerKwh", label: "Electricity rate", unit: "Rp / kWh" },
 ];
 const BUSINESS: Field[] = [
-  { key: "laborHours", label: "Jam kerja orang", unit: "jam / pesanan", step: "0.1" },
-  { key: "laborIdrPerHour", label: "Upah per jam", unit: "Rp / jam" },
-  { key: "machineIdrPerHour", label: "Biaya mesin per jam", unit: "Rp (penyusutan + perawatan)" },
-  { key: "finishingIdr", label: "Finishing", unit: "Rp / pesanan" },
-  { key: "packagingIdr", label: "Kemasan", unit: "Rp / pesanan" },
-  { key: "shippingIdr", label: "Pengiriman", unit: "Rp / pesanan" },
-  { key: "overheadIdr", label: "Overhead", unit: "Rp (alokasi biaya usaha)" },
+  { key: "laborHours", label: "Labour hours", unit: "hours / order", step: "0.1" },
+  { key: "laborIdrPerHour", label: "Wage per hour", unit: "Rp / hour" },
+  { key: "machineIdrPerHour", label: "Machine cost per hour", unit: "Rp (depreciation + upkeep)" },
+  { key: "finishingIdr", label: "Finishing", unit: "Rp / order" },
+  { key: "packagingIdr", label: "Packaging", unit: "Rp / order" },
+  { key: "shippingIdr", label: "Shipping", unit: "Rp / order" },
+  { key: "overheadIdr", label: "Overhead", unit: "Rp (share of business costs)" },
   { key: "supportWastePct", label: "Support & limbah", unit: "%" },
-  { key: "reprintRiskPct", label: "Risiko cetak ulang", unit: "%" },
-  { key: "feePct", label: "Fee pembayaran", unit: "% dari harga" },
+  { key: "reprintRiskPct", label: "Reprint risk", unit: "%" },
+  { key: "feePct", label: "Payment fee", unit: "% of price" },
 ];
 
 /**
@@ -74,24 +74,24 @@ export default function CostCalculator({ initial, lockQuantity, budgetIdr, idrPe
     <div className="calc">
       <div className="calc-inputs">
         <fieldset>
-          <legend>Biaya produksi</legend>
+          <legend>Production costs</legend>
           <div className="calc-grid">{PRODUCTION.map(field)}</div>
         </fieldset>
         <details>
-          <summary>Tenaga kerja, mesin & risiko</summary>
+          <summary>Labour, machine & risk</summary>
           <div className="calc-grid">{BUSINESS.map(field)}</div>
         </details>
         <button type="button" onClick={() => setV((s) => ({ ...s, filamentIdrPerKg: String(Math.round(Number(s.filamentIdrPerKg) * 0.9)) }))}>
-          Uji harga bahan −10%
+          Test material price −10%
         </button>
       </div>
 
       <aside className="calc-result">
-        <div className="muted calc-eyebrow">EKONOMI SATU PESANAN</div>
+        <div className="muted calc-eyebrow">ECONOMICS OF ONE ORDER</div>
         <div className="calc-price">{rp(c.revenueIdr)}</div>
         <div className="muted">{input.quantity} × {rp(input.unitPriceIdr)} ≈ {(c.revenueIdr / idrPerUsdc).toFixed(2)} USDC</div>
         <div className="calc-grid two">
-          <label>Harga per unit
+          <label>Price per unit
             <input type="number" min={0} value={v.unitPriceIdr} onChange={set("unitPriceIdr")} />
           </label>
           <label>Target margin (%)
@@ -99,35 +99,35 @@ export default function CostCalculator({ initial, lockQuantity, budgetIdr, idrPe
           </label>
         </div>
         <button type="button" onClick={() => setV((s) => ({ ...s, unitPriceIdr: String(c.targetUnitPriceIdr) }))}>
-          Pakai harga target · {rp(c.targetUnitPriceIdr)}
+          Use target price · {rp(c.targetUnitPriceIdr)}
         </button>
         <dl className="calc-kv">
-          <div><dt>Biaya usaha + cadangan</dt><dd>{rp(c.businessCostIdr)}</dd></div>
+          <div><dt>Business cost + reserve</dt><dd>{rp(c.businessCostIdr)}</dd></div>
           {c.feeIdr > 0 && <div><dt>Fee ({input.feePct}%)</dt><dd>{rp(c.feeIdr)}</dd></div>}
-          <div><dt>Sisa usaha (sebelum pajak)</dt><dd className={loss ? "bad-text" : ""}>{rp(c.profitIdr)}</dd></div>
-          <div><dt>Margin dari omzet</dt><dd className={loss ? "bad-text" : ""}>{c.marginPct}%</dd></div>
-          <div><dt>Harga impas per unit</dt><dd>{rp(c.breakEvenUnitPriceIdr)}</dd></div>
+          <div><dt>Profit (before tax)</dt><dd className={loss ? "bad-text" : ""}>{rp(c.profitIdr)}</dd></div>
+          <div><dt>Margin on revenue</dt><dd className={loss ? "bad-text" : ""}>{c.marginPct}%</dd></div>
+          <div><dt>Break-even price per unit</dt><dd>{rp(c.breakEvenUnitPriceIdr)}</dd></div>
         </dl>
-        {loss && <div className="alert bad">Harga ini rugi. Naikkan harga per unit minimal ke {rp(c.breakEvenUnitPriceIdr)}.</div>}
-        {overBudget && <div className="alert bad">Melebihi budget pelanggan ({rp(budgetIdr!)}). Agen akan menolak penawaran ini.</div>}
+        {loss && <div className="alert bad">This price loses money. Raise the price per unit to at least {rp(c.breakEvenUnitPriceIdr)}.</div>}
+        {overBudget && <div className="alert bad">Over the customer&apos;s budget ({rp(budgetIdr!)}). The agent will refuse this quote.</div>}
 
-        <h3 className="calc-h">Rincian yang transparan</h3>
+        <h3 className="calc-h">Transparent breakdown</h3>
         <dl className="calc-kv">
           {c.lines.map((l) => <div key={l.key}><dt>{l.label}</dt><dd>{rp(l.idr)}</dd></div>)}
         </dl>
         <p className="muted calc-foot">
-          {c.filamentGrams} g filament · {c.kwh} kWh (perkiraan Bambu Lab A1, bukan meteran).
-          Cadangan = biaya produksi × risiko ÷ (1 − risiko). Belum termasuk pajak.
+          {c.filamentGrams} g filament · {c.kwh} kWh (Bambu Lab A1 estimate, not a meter).
+          Reserve = production cost × risk ÷ (1 − risk). Tax not included.
         </p>
 
         {onUse && (
           <div className="calc-use">
-            <label>Estimasi selesai (jam)
+            <label>Estimated time (hours)
               <input type="number" min={1} value={eta} placeholder={String(etaDefault)} onChange={(e) => setEta(e.target.value)} />
             </label>
             <button className="primary" type="button" disabled={busy || loss || c.revenueIdr <= 0}
               onClick={() => onUse({ ...input, etaHours: Number(eta) || etaDefault })}>
-              Jadikan penawaran Kesuni
+              Make this Kesuni&apos;s quote
             </button>
           </div>
         )}
