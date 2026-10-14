@@ -126,6 +126,14 @@ describe("know your limits", () => {
     expect(open[0].text).toBe("The note asks for PETG. Which material?\nChief's recommendation: Print in PLA; PETG is not priced");
   });
 
+  it("the daily review gets a long question with its recommendation, not cut off before it", () => {
+    const id = order("Casing korek");
+    const question = `ORD facts: ${"the data does not fit together. ".repeat(14)}Did the customer pay?`;
+    callTool("request_human_decision", { orderId: id, question, recommendation: "Hold the order until payment is proven" });
+    const q = dailyFacts(jakartaDay(), new Date()).tasks.questions.find((x) => x.orderId === id)!;
+    expect(q.text).toContain("Chief's recommendation: Hold the order until payment is proven");
+  });
+
   it("a reprint is a QC decision: the Chief may suggest it, not order it", () => {
     const id = order("Casing korek");
     const r = callTool("create_operator_task", { orderId: id, kind: "reprint", text: "Reprint, the corners lifted" });
