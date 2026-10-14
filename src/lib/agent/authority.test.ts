@@ -57,6 +57,9 @@ describe("Chief authority card", () => {
     log("choose_plan", true, at("10:00"), "human");     // a person
     store.addMessage({ id: "M-1", orderId: "ORD-001", text: "Harga siap", by: "agent", at: at("10:05") });
     const t = chiefAuthority(NOW).today;
-    expect(t).toEqual({ day: "2026-10-14", decisions: 3, escalations: 1, messages: 1, settlements: 1, refusals: 2 });
+    expect(t).toEqual({
+      day: "2026-10-14", decisions: 3, escalations: 1, messages: 1, settlements: 1, refusals: 2,
+      bySkill: { Finance: 2, Operations: 2, Machines: 1, Quality: 0, Customer: 1 },
+    });
   });
 });

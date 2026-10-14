@@ -11,6 +11,7 @@ import { notReadyReason } from "../printer/actions";
 import { reputation, type Reputation } from "../reputation";
 import { agentMode, agentModel, llmGateway, type LlmRequest } from "./chief";
 import { hideName, redactNote } from "./tools";
+import { countableRows } from "./skills";
 import type { ChainTx, DailyReview, Order, OperatorTask } from "../types";
 
 const HOUR = 3_600_000;
@@ -156,7 +157,7 @@ export function dailyFacts(day: string, now: Date = new Date()): DailyFacts {
 
   // the Chief's activity, from the decision log
   const log = store.listLogBetween(new Date(from).toISOString(), new Date(to).toISOString()).filter((e) => e.actor === "agent");
-  const tools = log.filter((e) => !META.includes(e.tool));
+  const tools = countableRows(log.filter((e) => !META.includes(e.tool))); // one row per action, see countableRows
   const starts = log.filter((e) => e.tool === "agent_start");
   const refusals = tools.filter((e) => !e.ok);
   const reasons = [...new Set(refusals.map((e) => {

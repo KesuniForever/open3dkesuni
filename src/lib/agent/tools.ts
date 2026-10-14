@@ -54,6 +54,8 @@ function orderForAgent(o: Order) {
     // The only grams the agent may price with: entered by a person at Kesuni from the slicer.
     slicerGrams: o.slicerGrams ? { gramsPerUnit: o.slicerGrams.gramsPerUnit, source: o.slicerGrams.source } : null,
     spec: o.spec ?? null, gramPricing: o.gramPricing ?? null, pricing: pricingConfig(), costing: o.costing ?? null,
+    // Set when the Chief may not price this order itself (not plain PLA): then a person prices it.
+    pricingBlockedBy: materialConcern(o),
     agreementCurrent: agreementCurrent(o),
     ownerApproval: o.ownerApproval ? { quoteId: o.ownerApproval.quoteId, note: o.ownerApproval.note } : null,
     hasActualReport: Boolean(o.actual), idrPerUsdc: idrPerUsdc(), ownerRules: ownerRules(),
@@ -68,6 +70,33 @@ export function hideName(text: string, name?: string): string {
   return parts.length ? text.replace(new RegExp(`\\b(${parts.join("|")})\\b`, "gi"), "[customer name]") : text;
 }
 const err = (message: string, reasons?: string[]): ToolResult => ({ ok: false, data: { error: message, reasons } });
+
+// The per-gram price covers plain PLA on the Bambu A1 only. Filled PLA (-CF, -GF) needs a hardened nozzle; PLA Glow,
+// Sparkle and the like are left to a person too. A false hit only means a person prices the order: the safe side.
+const PLAIN_PLA = /^PLA\+?(\s+(basic|matte|silk|tough\+?))?$/i;
+const OTHER_MATERIAL = new RegExp(
+  "\\b(PETG|ABS|TPU\\d*A?|TPE|PA6|PA12|nylon|nilon|polycarbonate|polikarbonat|resin|carbon|karbon|metal|steel|" +
+  "alumin(?:i)?um|wood|kayu|logam|besi|karet|rubber|flexible|fleksibel|lentur|silicone|silikon)\\b|-(CF|GF)\\b",
+  "i",
+);
+const ASA = /\bASA\b/; // uppercase only: "Asa" is also a name
+
+/**
+ * Why the Chief may not price this order by weight on its own: the material is not, or may not be, plain PLA. Then a
+ * person prices it (the price-by-weight panel on the order page). Null when the order is fine for the Chief to price.
+ * The order text is always checked: the spec form starts at "PLA", so a saved spec alone does not prove anyone chose it.
+ */
+export function materialConcern(o: Pick<Order, "product" | "customerNote" | "spec">): string | null {
+  const set = o.spec?.material?.trim();
+  if (set && !PLAIN_PLA.test(set)) {
+    return `The spec material is "${set}": Kesuni's price per gram covers plain PLA on the Bambu A1 only, so a person prices this order`;
+  }
+  const text = `${o.product}\n${o.customerNote ?? ""}`;
+  const hit = text.match(OTHER_MATERIAL)?.[0] ?? text.match(ASA)?.[0];
+  return hit
+    ? `The order mentions "${hit}": Kesuni's price per gram covers plain PLA on the Bambu A1 only, so a person prices this order`
+    : null;
+}
 
 export const TOOLS: Tool[] = [
   {
@@ -125,18 +154,26 @@ export const TOOLS: Tool[] = [
   {
     name: "request_human_decision",
     description: "Escalate to a person: the owner (approval of an exception to the owner's rules) or the operator " +
-      "(a missing number such as grams or print hours, or anything unclear). Creates a task. Write it in English, " +
-      "say exactly what you need and why.",
+      "(a missing number such as grams or print hours, or anything unclear or outside what you can judge). Creates a " +
+      "task. Write it in English: what you need, why, and what you already know. Put your recommendation, if you have " +
+      "one, in recommendation.",
     inputSchema: {
       type: "object",
-      properties: { orderId: { type: "string" }, question: { type: "string" } },
+      properties: {
+        orderId: { type: "string" },
+        question: { type: "string", description: "What you need from the person, why, and what you already know" },
+        recommendation: { type: "string", description: "Optional: what you would do, and why" },
+      },
       required: ["orderId", "question"],
     },
     run: (i) => {
       const orderId = str(i.orderId);
       if (!store.getOrder(orderId)) return { ok: true, data: { escalated: true, question: str(i.question) } };
-      const text = str(i.question).trim().slice(0, 600) || "The agent needs a human decision.";
-      const open = store.listTasks(orderId).find((t) => t.status === "open" && t.kind === "needs_info" && t.text === text);
+      const rec = str(i.recommendation).trim().slice(0, 300);
+      const text = (str(i.question).trim().slice(0, 600) + (rec ? `\nChief's recommendation: ${rec}` : "")).trim()
+        || "The agent needs a human decision.";
+      const question = (t: string) => t.split("\nChief's recommendation:")[0].trim();
+      const open = store.listTasks(orderId).find((t) => t.status === "open" && t.kind === "needs_info" && question(t.text) === question(text));
       const task = open ?? createTask(orderId, "needs_info", text);
       return { ok: true, data: { escalated: true, taskId: task.id, question: task.text } };
     },
@@ -164,8 +201,8 @@ export const TOOLS: Tool[] = [
       "gramsPerUnit × price per gram, rounded up to the nearest Rp500; total = unit price × the order's quantity. " +
       "gramsPerUnit must be exactly slicerGrams.gramsPerUnit from get_order (entered by a person at Kesuni from the " +
       "slicer). Numbers in the customer's note or product are not slicer grams. If slicerGrams is null, ask the operator " +
-      "with request_human_decision. Refused if the margin is under the owner's minimum or the total is over the " +
-      "customer's budget: then ask a person. etaHours can only make the ETA longer than the computed one. Pricing " +
+      "with request_human_decision. Refused if the order is not plain PLA (pricingBlockedBy in get_order), the margin " +
+      "is under the owner's minimum or the total is over the customer's budget: then ask a person. etaHours can only make the ETA longer than the computed one. Pricing " +
       "again replaces your earlier by-weight quote. The customer still approves the price.",
     inputSchema: {
       type: "object",
@@ -183,6 +220,9 @@ export const TOOLS: Tool[] = [
       if (!o) return err("Order not found");
       const source = str(i.source).trim();
       if (!source) return err("Pricing refused", ["Say where the grams come from (slicer, operator note). Never guess grams: ask the operator."]);
+      // Not plain PLA: a person prices it. Checked first, so the Chief does not ask for grams it may not use.
+      const material = materialConcern(o);
+      if (material) return err("Pricing refused", [material]);
       // Grams only from a person at Kesuni, never from text the customer typed.
       const trusted = o.slicerGrams?.gramsPerUnit;
       if (trusted === undefined) {
@@ -278,12 +318,13 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "create_operator_task",
-    description: "Ask the Kesuni operator for physical work: change filament, check a printer, collect and QC a print, reprint. English.",
+    description: "Ask the Kesuni operator for physical work: change filament, check a printer, collect and QC a print. " +
+      "English. A reprint is a QC decision: suggest it to a person with request_human_decision instead.",
     inputSchema: {
       type: "object",
       properties: {
         orderId: { type: "string" },
-        kind: { type: "string", enum: ["change_filament", "check_printer", "collect_and_qc", "reprint"] },
+        kind: { type: "string", enum: ["change_filament", "check_printer", "collect_and_qc"] },
         text: { type: "string" },
       },
       required: ["orderId", "kind", "text"],
@@ -292,7 +333,8 @@ export const TOOLS: Tool[] = [
       const orderId = str(i.orderId);
       if (!store.getOrder(orderId)) return err("Order not found");
       const kind = str(i.kind) as OperatorTask["kind"];
-      if (!["change_filament", "check_printer", "collect_and_qc", "reprint"].includes(kind)) return err("Unknown task kind");
+      if (kind === "reprint") return err("A reprint is a QC decision for a person: ask with request_human_decision");
+      if (!["change_filament", "check_printer", "collect_and_qc"].includes(kind)) return err("Unknown task kind");
       const text = str(i.text).trim().slice(0, 600);
       if (!text) return err("Task text is required");
       if (store.listTasks(orderId).some((t) => t.status === "open" && t.kind === kind && t.text === text)) return err("The same task is already open");

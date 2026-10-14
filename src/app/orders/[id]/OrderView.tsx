@@ -15,6 +15,8 @@ import WeightPricePanel from "./WeightPricePanel";
 import MessagesPanel from "./MessagesPanel";
 import type { PricingConfig } from "@/lib/pricing";
 import type { PublicNetwork } from "@/lib/network";
+import SkillChip from "@/app/components/SkillChip";
+import { skillOf } from "@/lib/agent/skills";
 
 interface OrderData {
   order: Order;
@@ -205,7 +207,8 @@ export default function OrderView({ id }: { id: string }) {
                 <ol className="log">
                   {agentLog.map((e) => (
                     <li key={e.id}>
-                      <code>{e.tool}</code>{" "}
+                      <SkillChip skill={skillOf(e.tool, e.input)} />{" "}
+                      <code>{e.tool}</code>{e.actor === "human" && <span className="muted"> (person)</span>}{" "}
                       <span className={`badge ${e.ok ? "ok" : "bad"}`}>{e.ok ? "ok" : "refused"}</span>{" "}
                       <span className="muted">{summarize(e)}</span>
                     </li>

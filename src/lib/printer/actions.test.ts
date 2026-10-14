@@ -34,8 +34,8 @@ describe("printer -> evidence and operator tasks", () => {
     expect(ev.every((e) => e.label === "device")).toBe(true);
     expect(ev.map((e) => e.note)).toEqual([
       "A1 Combo #1: started printing (clicker_aini)",
-      "A1 Combo #1: progres 25%",
-      "A1 Combo #1: progres 50%",
+      "A1 Combo #1: progress 25%",
+      "A1 Combo #1: progress 50%",
     ]);
   });
 

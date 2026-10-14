@@ -124,13 +124,13 @@ function alternative(exceptId: string): Printer | undefined {
  */
 function react(printer: Printer, orderId: string, e: PrinterEvent): void {
   const log = (note: string) => addEvidence(orderId, { kind: "log", note: `${printer.name}: ${note}`, label: "device" });
-  const code = e.errorCode ? ` kode ${errorCodeText(e.errorCode)}` : "";
+  const code = e.errorCode ? ` code ${errorCodeText(e.errorCode)}` : "";
   switch (e.kind) {
     case "started":
       log(`started printing${job(e)}`);
       break;
     case "progress":
-      log(`progres ${pct(e)}`);
+      log(`progress ${pct(e)}`);
       break;
     case "needs_operator":
       log(`stopped at ${pct(e)}${code}, needs an operator`);

@@ -189,6 +189,17 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; overf
 .badge.testnet { background: var(--blue-bg); color: var(--blue); border-color: transparent; }
 .badge.bad { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
 
+/* One Chief, five skills: the label on each decision-log step (src/lib/agent/skills.ts) */
+.skill { font-size: 10px; padding: 0 6px; border-color: transparent; min-width: 84px; justify-content: center; }
+.skill.finance { background: var(--ok-bg); color: var(--ok); }
+.skill.operations { background: var(--blue-bg); color: var(--blue); }
+.skill.machines { background: var(--warn-bg); color: var(--warn); }
+.skill.quality { background: #f3eefa; color: #6b4f96; }
+.skill.customer { background: #fdf0ea; color: #a4552e; }
+.skill-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.skill-group { margin-bottom: 10px; }
+.skill-group ul { margin: 4px 0 0; padding-left: 18px; }
+
 button {
   font: inherit; font-size: 14px; font-weight: 500; line-height: 1.3;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
