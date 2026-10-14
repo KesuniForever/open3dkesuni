@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { microToUsdc } from "@/lib/policy";
 import type { ChainTx, Escrow, Order } from "@/lib/types";
+import type { PublicNetwork } from "@/lib/network";
 
-const EXPLORER = "https://explorer.testnet.arc.io/tx/";
 const FINAL = ["COMPLETE", "FAILED", "DENIED", "CANCELLED"];
 const KIND_LABEL: Record<ChainTx["kind"], string> = {
   customer_topup: "Test USDC to customer (from Kesuni demo funds)",
@@ -21,9 +21,10 @@ const STATE_TEXT: Record<Escrow["state"], string> = {
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-export default function EscrowPanel({ order, escrow, hasPlan, busy, act, onChange }: {
+export default function EscrowPanel({ order, escrow, network, hasPlan, busy, act, onChange }: {
   order: Order;
   escrow: Escrow | null;
+  network: PublicNetwork; // the escrow's chain, else the configured one (explorer links)
   hasPlan: boolean;
   busy: boolean;
   act: (url: string, body: unknown, success: string) => Promise<void>;
@@ -48,8 +49,8 @@ export default function EscrowPanel({ order, escrow, hasPlan, busy, act, onChang
   const toppedUp = escrow?.txs.some((t) => t.kind === "customer_topup" && !["FAILED", "DENIED", "CANCELLED"].includes(t.state)) ?? false;
 
   return (
-    <section className="card">
-      <h2><span className="step">$</span> Customer payment (escrow on Arc via Circle)</h2>
+    <section className="card money">
+      <h2><span className="step">$</span> Customer payment (escrow on {network.name} via Circle)</h2>
       {!escrow ? (
         <>
           <p className="muted">
@@ -104,7 +105,12 @@ export default function EscrowPanel({ order, escrow, hasPlan, busy, act, onChang
                 <li key={t.idempotencyKey}>
                   {KIND_LABEL[t.kind]}: {microToUsdc(t.amountMicro)} USDC{" "}
                   <span className={`badge ${t.state === "COMPLETE" ? "ok" : FINAL.includes(t.state) ? "bad" : ""}`}>{t.state.toLowerCase()}</span>{" "}
-                  {t.txHash && <a href={`${EXPLORER}${t.txHash}`} target="_blank" rel="noreferrer">view proof</a>}
+                  {t.txHash && <a href={`${network.explorerTxBase}${t.txHash}`} target="_blank" rel="noreferrer">view proof</a>}
+                  {t.verified?.ok === true && (
+                    <> <span className="badge ok" title={t.verified.logId}>verified on Arc{t.verified.internal ? " · internal" : ""}</span></>
+                  )}
+                  {t.verified?.ok === false && <> <span className="badge bad">Arc mismatch</span><span className="muted"> {t.verified.reason}</span></>}
+                  {t.state === "COMPLETE" && t.txHash && !t.verified && <> <span className="muted" style={{ fontSize: 12 }}>Arc check pending</span></>}
                   {t.errorReason && <span className="muted"> {t.errorReason}</span>}
                 </li>
               ))}

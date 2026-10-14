@@ -11,9 +11,24 @@ describe("dashboard", () => {
       customerAddress: "0x", state: "RELEASED", txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: new Date().toISOString(),
     });
     const d = dashboard();
-    expect(d.releasedMicro).toEqual({ real: 0, simulated: 30_000_000 });
+    expect(d.releasedMicro).toEqual({ testnet: 0, mainnet: 0, simulated: 30_000_000 });
     expect(d.activeSimulated).toBe(1);
     expect(d.activeReal).toBe(0);
+  });
+
+  it("counts real money by each escrow's own network: a testnet escrow stays test USDC after a mainnet switch", () => {
+    process.env.CIRCLE_BLOCKCHAIN = "ARC";
+    const base = { ...store.getOrder("ORD-001")!, label: "real" as const, status: "IN_PRODUCTION" as const };
+    store.saveOrder({ ...base, id: "ORD-002", jobId: "JOB-002" });
+    store.saveOrder({ ...base, id: "ORD-003", jobId: "JOB-003" });
+    const escrow = (orderId: string, network: string, label: "testnet" | "mainnet", amountMicro: number) => store.saveEscrow({
+      orderId, amountMicro, escrowWalletId: "w", escrowAddress: "0x", customerWalletId: "c", customerAddress: "0x",
+      state: "FUNDED", txs: [], network, label, createdAt: new Date().toISOString(),
+    });
+    escrow("ORD-002", "ARC-TESTNET", "testnet", 72_730_000);
+    escrow("ORD-003", "ARC", "mainnet", 10_000_000);
+    expect(dashboard().escrowHeldMicro).toEqual({ testnet: 72_730_000, mainnet: 10_000_000, simulated: 0 });
+    delete process.env.CIRCLE_BLOCKCHAIN;
   });
 
   it("lists what needs a person, open tasks first", () => {

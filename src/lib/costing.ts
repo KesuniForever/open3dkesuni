@@ -1,5 +1,5 @@
 // Cost and price calculator for one order, in whole rupiah. Pure functions, no I/O.
-// Same model as the TIMBAL Fabric prototype: real costs (material, power, labour, machine wear,
+// Same model as our earlier pricing prototype: real costs (material, power, labour, machine wear,
 // finishing), a reprint reserve, per-order costs, then price, margin and break-even.
 // Estimates only: power comes from an average wattage, not a meter.
 

@@ -1,13 +1,14 @@
 // The agreement between Kesuni and the customer: what will be made (spec), how quality is checked,
 // and the price, fixed by a SHA-256 fingerprint. The customer approves it before paying; changing
 // the spec, product, quantity, deadline or price changes the fingerprint and needs a new approval.
-// Also: Kesuni's own quote from the cost calculator, and the operator's report of what production
-// actually used (plan vs actual).
+// Also: Kesuni's own quote, by weight (the official price) or from the cost calculator (a check), and
+// the operator's report of what production actually used (plan vs actual).
 import { createHash } from "node:crypto";
 import * as store from "./store";
 import { addQuote, type Fail } from "./actions";
 import { calculate, idrToMicro, parseCostInput, type CostResult } from "./costing";
-import type { ActualReport, Agreement, Order, Quote, Spec } from "./types";
+import { priceByWeight, type WeightPrice } from "./pricing";
+import type { ActualReport, Agreement, GramPricing, Order, Quote, Spec } from "./types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
 const PAYABLE = ["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"];
@@ -82,6 +83,84 @@ export function quoteFromCosting(
     output: { quoteId: q.quote.id, revenueIdr: result.revenueIdr, costIdr: result.businessCostIdr, marginPct: result.marginPct },
   });
   return { ok: true, quote: q.quote, result, overBudget: q.quote.priceMicro > order.mandateMicro };
+}
+
+// ---------- official price: by weight ----------
+
+/**
+ * Kesuni's own quote from grams per unit (Bambu Studio). Orders in CREATED only. Re-pricing replaces the
+ * previous by-weight quote when nobody chose or agreed to it, so quotes do not pile up.
+ */
+export function quoteByWeight(
+  orderId: string, input: { gramsPerUnit: number; source: string; etaHours?: unknown; by: "agent" | "human" },
+): { ok: true; quote: Quote; price: WeightPrice; gramPricing: GramPricing } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (order.status !== "CREATED") return fail(409, `Order is ${order.status}; quotes are closed`);
+  const source = String(input.source ?? "").trim().slice(0, 300);
+  if (!source) return fail(400, "Say where the grams come from (slicer, operator note)");
+  if (input.by !== "agent" && input.by !== "human") return fail(400, 'by must be "agent" or "human"');
+  const r = priceByWeight(Number(input.gramsPerUnit), order.quantity);
+  if (!r.ok) return fail(400, "Invalid weight", r.reasons);
+  const p = r.price;
+  const eta = Number(input.etaHours);
+  const given = input.etaHours !== undefined && input.etaHours !== "" && Number.isFinite(eta) && eta > 0 ? Math.ceil(eta) : null;
+  // The SLA rule checks this ETA, so the agent may only make it longer; only a person may shorten it.
+  const etaHours = given === null ? p.etaHours : input.by === "agent" ? Math.max(given, p.etaHours) : given;
+  const q = addQuote(orderId, { vendorId: "own", priceMicro: idrToMicro(p.totalIdr), etaHours });
+  if (!q.ok) return q;
+
+  const previous = order.gramPricing?.quoteId;
+  const touched = previous && (previous === order.chosenQuoteId || previous === order.agreement?.quoteId);
+  if (previous && !touched) store.deleteQuote(previous);
+  const gramPricing: GramPricing = {
+    gramsPerUnit: p.gramsPerUnit, quantity: p.quantity, pricePerGramIdr: p.pricePerGramIdr, costPerGramIdr: p.costPerGramIdr,
+    unitPriceIdr: p.unitPriceIdr, totalIdr: p.totalIdr, costIdr: p.costIdr, source, quoteId: q.quote.id, by: input.by,
+    at: new Date().toISOString(),
+  };
+  const current = store.getOrder(orderId)!;
+  // The owner approved the quote that was just replaced: that approval does not carry over to the new price.
+  const ownerApproval = previous && !touched && current.ownerApproval?.quoteId === previous ? undefined : current.ownerApproval;
+  // A person's grams are trusted grams for the agent too.
+  const slicerGrams = input.by === "human" ? { gramsPerUnit: p.gramsPerUnit, source, by: "operator", at: gramPricing.at } : current.slicerGrams;
+  store.saveOrder({ ...current, gramPricing, ownerApproval, slicerGrams });
+  // The agent's calls are logged by callTool; log people here.
+  if (input.by === "human") {
+    store.addLog({
+      orderId, actor: "human", tool: "price_by_weight", ok: true, at: gramPricing.at,
+      input: { gramsPerUnit: p.gramsPerUnit, source },
+      output: { quoteId: q.quote.id, unitPriceIdr: p.unitPriceIdr, totalIdr: p.totalIdr, marginPct: p.marginPct, replaced: previous && !touched ? previous : undefined },
+    });
+  }
+  return { ok: true, quote: q.quote, price: p, gramPricing };
+}
+
+/**
+ * A person at Kesuni enters grams per unit from the slicer (Bambu Studio). The agent prices only with these
+ * grams, never with numbers from the customer's note or product name. Orders in CREATED only.
+ */
+export function setSlicerGrams(
+  orderId: string, input: { gramsPerUnit: number; source: string; by: string },
+): { ok: true; order: Order } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (order.status !== "CREATED") return fail(409, `Order is ${order.status}; quotes are closed`);
+  const source = String(input.source ?? "").trim().slice(0, 300);
+  const by = String(input.by ?? "").trim().slice(0, 80);
+  const r = priceByWeight(Number(input.gramsPerUnit), order.quantity);
+  if (!r.ok) return fail(400, "Invalid weight", r.reasons);
+  if (!source) return fail(400, "Say where the grams come from (slicer, plate, settings)");
+  if (!by) return fail(400, "Who entered the grams is required");
+  const slicerGrams = { gramsPerUnit: r.price.gramsPerUnit, source, by, at: new Date().toISOString() };
+  const updated = { ...order, slicerGrams };
+  store.saveOrder(updated);
+  store.addLog({ orderId, actor: "human", tool: "slicer_grams", input: { gramsPerUnit: slicerGrams.gramsPerUnit, source }, ok: true, output: { by }, at: slicerGrams.at });
+  return { ok: true, order: updated };
+}
+
+/** The by-weight price behind the chosen quote, if Kesuni priced it that way. */
+export function gramPricingForChosen(order: Order): GramPricing | null {
+  return order.gramPricing && order.gramPricing.quoteId === order.chosenQuoteId ? order.gramPricing : null;
 }
 
 /** The calculation behind the chosen quote, if Kesuni priced it with the calculator. */

@@ -9,7 +9,10 @@ import { circle } from "./circle";
 import { microToUsdc } from "./policy";
 import { notReadyReason } from "./printer/actions";
 import { idrPerUsdc } from "./costing";
-import { agreementCurrent, costingForChosen } from "./agreement";
+import { agreementCurrent, costingForChosen, gramPricingForChosen } from "./agreement";
+import { isTestnetChain, publicNetwork, type PublicNetwork } from "./network";
+import { quoteIdr } from "./owner-rules";
+import { wakeChief } from "./agent/chief";
 import type { ActualReport, ChainTx, Escrow, Order, Review, Spec } from "./types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
@@ -26,12 +29,15 @@ export interface CustomerView {
   price: { usdc: string; idr: number; etaHours: number } | null;
   escrow: {
     state: Escrow["state"]; amountUsdc: string; network: string; label: string;
-    txs: { kind: ChainTx["kind"]; amountUsdc: string; state: ChainTx["state"]; txHash?: string; at: string }[];
+    /** verifiedOnArc: true = checked on Arc and it matches, false = Arc does not match (Kesuni checks), absent = not checked yet. */
+    txs: { kind: ChainTx["kind"]; amountUsdc: string; state: ChainTx["state"]; txHash?: string; at: string; verifiedOnArc?: boolean }[];
   } | null;
   paying: boolean;
   printing: { printer: string; state: string; percent: number; remainingMin: number | null; online: boolean } | null;
   printedOn: string | null;
   updates: { kind: string; note: string; label: string; at: string; photo?: string }[];
+  /** Short updates from the Chief (AI) or a person at Kesuni, oldest first. Text, author kind and time only. */
+  messages: { text: string; by: "agent" | "human"; at: string }[];
   acceptance: { accepted: boolean; by: string; note: string; at: string } | null;
   idrPerUsdc: number;
   spec: Spec | null;
@@ -39,7 +45,13 @@ export interface CustomerView {
   agreement: { hash: string; version: number; by: string; at: string; current: boolean } | null;
   /** Where the money goes, when Kesuni priced the order with the cost calculator. Rupiah. */
   costs: { lines: { label: string; idr: number }[]; kesuniIdr: number; totalIdr: number } | null;
+  /** How the price was made, when Kesuni priced by weight (the official price). No cost or margin here. */
+  weightPrice: { gramsPerUnit: number; pricePerGramIdr: number; exactUnitIdr: number; unitPriceIdr: number; quantity: number; totalIdr: number } | null;
+  /** The chain this order's money is on (the escrow's, else the configured one). */
+  network: PublicNetwork;
   actual: Pick<ActualReport, "filamentGrams" | "machineHours" | "maxDeviationMm" | "unitsPassed" | "note" | "at"> | null;
+  /** The measured size deviation is above the agreed tolerance: a warning before "Terima", never a block. */
+  overTolerance: boolean;
   review: Review | null;
 }
 
@@ -55,10 +67,13 @@ export function customerView(order: Order, token: string): CustomerView {
       id: order.id, product: order.product, quantity: order.quantity, deadline: order.deadline, status: order.status,
       label: order.label, customerName: order.customerName, customerNote: order.customerNote,
     },
-    price: quote ? { usdc: microToUsdc(quote.priceMicro), idr: Math.round((quote.priceMicro / 1e6) * rate), etaHours: quote.etaHours } : null,
+    // Rupiah as agreed (by weight or calculator), not converted back from whole USDC cents.
+    price: quote ? { usdc: microToUsdc(quote.priceMicro), idr: quoteIdr(order, quote), etaHours: quote.etaHours } : null,
     escrow: escrow ? {
       state: escrow.state, amountUsdc: microToUsdc(escrow.amountMicro), network: escrow.network, label: escrow.label,
-      txs: escrow.txs.map((t) => ({ kind: t.kind, amountUsdc: microToUsdc(t.amountMicro), state: t.state, txHash: t.txHash, at: t.at })),
+      txs: escrow.txs.map((t) => ({
+        kind: t.kind, amountUsdc: microToUsdc(t.amountMicro), state: t.state, txHash: t.txHash, at: t.at, verifiedOnArc: t.verified?.ok,
+      })),
     } : null,
     paying: Boolean(escrow && escrow.state === "AWAITING_DEPOSIT" && escrow.txs.some(live)),
     printing: p?.snapshot ? {
@@ -70,6 +85,7 @@ export function customerView(order: Order, token: string): CustomerView {
       kind: e.kind, note: e.note, label: e.label, at: e.at,
       photo: e.attachmentId ? `/api/c/${token}/files/${e.attachmentId}` : undefined,
     })),
+    messages: store.listMessages(order.id).map((m) => ({ text: m.text, by: m.by, at: m.at })),
     acceptance: acc ? { accepted: acc.accepted, by: acc.by, note: acc.note, at: acc.at } : null,
     idrPerUsdc: rate,
     spec: order.spec ?? null,
@@ -77,11 +93,23 @@ export function customerView(order: Order, token: string): CustomerView {
       ? { hash: order.agreement.hash, version: order.agreement.version, by: order.agreement.by, at: order.agreement.at, current: agreementCurrent(order) }
       : null,
     costs: costsFor(order),
+    weightPrice: weightPriceFor(order),
+    network: publicNetwork(escrow?.network),
     actual: order.actual ? {
       filamentGrams: order.actual.filamentGrams, machineHours: order.actual.machineHours, maxDeviationMm: order.actual.maxDeviationMm,
       unitsPassed: order.actual.unitsPassed, note: order.actual.note, at: order.actual.at,
     } : null,
+    overTolerance: overTolerance(order) !== null,
     review: order.review ?? null,
+  };
+}
+
+function weightPriceFor(order: Order): CustomerView["weightPrice"] {
+  const w = gramPricingForChosen(order);
+  if (!w) return null;
+  return {
+    gramsPerUnit: w.gramsPerUnit, pricePerGramIdr: w.pricePerGramIdr, exactUnitIdr: Math.round(w.gramsPerUnit * w.pricePerGramIdr),
+    unitPriceIdr: w.unitPriceIdr, quantity: w.quantity, totalIdr: w.totalIdr,
   };
 }
 
@@ -104,6 +132,9 @@ export async function refreshPayment(orderId: string): Promise<void> {
   if (!escrow) return;
   if (escrow.txs.some((t) => !["COMPLETE", "FAILED", "DENIED", "CANCELLED"].includes(t.state))) await syncEscrow(orderId);
   const now = store.getEscrow(orderId)!;
+  if (escrow.state === "AWAITING_DEPOSIT" && now.state === "FUNDED") {
+    wakeChief(orderId, "The customer's payment just arrived in escrow. Start production.");
+  }
   const toppedUp = now.txs.some((t) => t.kind === "customer_topup" && t.state === "COMPLETE");
   const depositing = now.txs.some((t) => t.kind === "deposit" && live(t));
   if (now.state === "AWAITING_DEPOSIT" && toppedUp && !depositing) await deposit(orderId);
@@ -130,20 +161,54 @@ export async function customerPay(orderId: string): Promise<{ ok: true } | Fail>
     return r.ok ? { ok: true } : r;
   }
   if (escrow.txs.some((t) => t.kind === "customer_topup" && live(t))) return { ok: true }; // deposit follows on refresh
+  // Mainnet: no test USDC. Funding a customer wallet with real USDC is not built yet (docs/PILOT.md).
+  if (!isTestnetChain(escrow.network)) {
+    return fail(409, "Dompet pembayaranmu belum berisi cukup USDC. Hubungi Kesuni untuk cara mengisinya.");
+  }
   const r = await topUpCustomer(orderId);
   return r.ok ? { ok: true } : r;
 }
 
-/** The customer accepts or rejects the goods. Then the agent releases or refunds the escrow. */
+const mm = (n: number) => String(n).replace(".", ",");
+
+/**
+ * Quality gate: the operator's measured max deviation is above the tolerance in the agreed spec. Returns the two
+ * numbers, or null when within tolerance or not measured yet. Only a warning for the customer; never blocks money.
+ */
+export function overTolerance(order: Order): { maxDeviationMm: number; toleranceMm: number } | null {
+  if (!order.actual || !order.spec) return null;
+  const { maxDeviationMm } = order.actual;
+  const { toleranceMm } = order.spec;
+  return Number.isFinite(maxDeviationMm) && Number.isFinite(toleranceMm) && maxDeviationMm > toleranceMm ? { maxDeviationMm, toleranceMm } : null;
+}
+
+/**
+ * The customer accepts or rejects the goods. Then the agent releases or refunds the escrow.
+ * Accepting needs `checked: true` (the customer ticked that they checked size, colour, finishing and function).
+ * Accepting above the agreed tolerance is allowed: it is written in the log and the acceptance note, and the
+ * release still goes through the policy as usual.
+ */
 export async function customerDecide(
-  orderId: string, input: { accepted: boolean; by: string; note: string },
+  orderId: string, input: { accepted: boolean; by: string; note: string; checked?: boolean },
 ): Promise<{ ok: true; settled: boolean; reasons?: string[] } | Fail> {
   const escrow = store.getEscrow(orderId);
   if (!escrow || escrow.state !== "FUNDED") return fail(409, "Pembayaran belum masuk escrow, jadi belum bisa diputuskan");
-  const r = recordAcceptance(orderId, input);
+  if (input.accepted && input.checked !== true) {
+    return fail(400, "Centang dulu bahwa kamu sudah memeriksa ukuran, warna, finishing, dan fungsi barang yang kamu terima");
+  }
+  const order = store.getOrder(orderId);
+  const over = input.accepted && order ? overTolerance(order) : null;
+  const note = over
+    ? `${input.note.trim() ? `${input.note.trim()} ` : ""}[Diterima walau selisih ukuran ${mm(over.maxDeviationMm)} mm melebihi batas ±${mm(over.toleranceMm)} mm]`
+    : input.note;
+  const r = recordAcceptance(orderId, { accepted: input.accepted, by: input.by, note });
   if (!r.ok) return r;
   const at = new Date().toISOString();
-  store.addLog({ orderId, actor: "human", tool: "customer_decision", input: { accepted: input.accepted }, ok: true, output: { by: input.by.trim() }, at });
+  store.addLog({
+    orderId, actor: "human", tool: "customer_decision",
+    input: { accepted: input.accepted, ...(input.accepted ? { checked: true } : {}), ...(over ? { acceptedOverTolerance: over } : {}) },
+    ok: true, output: { by: input.by.trim() }, at,
+  });
 
   // The agent settles on its own; the policy engine decides whether the money may move.
   const tool = input.accepted ? "release_escrow" : "refund_escrow";
@@ -165,6 +230,7 @@ export function customerCreateOrder(input: {
 }): { ok: true; order: Order } | Fail {
   const r: string[] = [];
   if (!input.name.trim()) r.push("Nama wajib diisi");
+  if (input.product.trim().length > 200) r.push("Nama produk terlalu panjang (paling banyak 200 huruf)");
   if (!Number.isFinite(input.budgetIdr) || input.budgetIdr < 1000) r.push("Budget minimal Rp1.000");
   if (r.length) return fail(400, "Pesanan belum lengkap", r);
   const mandateMicro = Math.round((input.budgetIdr / idrPerUsdc()) * 1e6);

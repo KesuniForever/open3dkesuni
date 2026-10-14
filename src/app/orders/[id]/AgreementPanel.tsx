@@ -43,7 +43,7 @@ export default function AgreementPanel({ order, quotes, agreementCurrent, idrPer
       <SpecForm key={JSON.stringify(order.spec ?? null)} spec={order.spec ?? EMPTY_SPEC} disabled={busy || specLocked}
         onSubmit={(s) => act(`${base}/spec`, s, "Spec saved. The customer sees it on their page.")} />
 
-      <h3 style={{ fontSize: 15, margin: "20px 0 6px" }}>Cost calculator</h3>
+      <h3 style={{ fontSize: 15, margin: "20px 0 6px" }}>Cost calculator (a check; the official price is by weight above)</h3>
       {result && priced && (
         <div className="alert ok">
           Kesuni quote <code>{priced.id}</code> comes from this calculation: cost {rp(result.businessCostIdr)}, price {rp(result.revenueIdr)},

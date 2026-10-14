@@ -71,18 +71,18 @@ describe("customer pays, accepts, and the agent settles", () => {
 
   it("cannot accept before paying", async () => {
     qc();
-    expect((await customerDecide(ORDER, { accepted: true, by: "Aini", note: "" })).ok).toBe(false);
+    expect((await customerDecide(ORDER, { accepted: true, by: "Aini", note: "", checked: true })).ok).toBe(false);
   });
 
   it("before QC there is nothing to accept", async () => {
     await pay();
-    expect((await customerDecide(ORDER, { accepted: true, by: "Aini", note: "" })).ok).toBe(false);
+    expect((await customerDecide(ORDER, { accepted: true, by: "Aini", note: "", checked: true })).ok).toBe(false);
   });
 
   it("Terima: the agent releases the escrow to Kesuni without asking anyone", async () => {
     await pay();
     qc();
-    const r = await customerDecide(ORDER, { accepted: true, by: "Aini", note: "rapi" });
+    const r = await customerDecide(ORDER, { accepted: true, by: "Aini", note: "rapi", checked: true });
     expect(r.ok && r.settled).toBe(true);
     await refreshPayment(ORDER);
     expect(store.getEscrow(ORDER)!.state).toBe("RELEASED");
@@ -91,6 +91,58 @@ describe("customer pays, accepts, and the agent settles", () => {
     const tools = store.listLog(ORDER).map((e) => `${e.actor}:${e.tool}`);
     expect(tools).toContain("human:customer_decision");
     expect(tools).toContain("agent:release_escrow");
+  });
+
+  it("Terima needs the 'I checked the goods' tick; Tolak does not", async () => {
+    await pay();
+    qc();
+    const r = await customerDecide(ORDER, { accepted: true, by: "Aini", note: "" });
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.status).toBe(400);
+    expect(!r.ok && r.error).toMatch(/Centang dulu/);
+    expect(store.getOrder(ORDER)!.status).toBe("EVIDENCE_SUBMITTED"); // nothing recorded, no money moved
+    expect(store.getEscrow(ORDER)!.state).toBe("FUNDED");
+    expect(store.getAcceptance(ORDER)).toBeUndefined();
+    // over the API: checked must be exactly true
+    const token = ensureCustomerToken(ORDER)!;
+    const ctx = { params: Promise.resolve({ token }) };
+    const post = (body: unknown) => new Request("http://x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await act(post({ action: "accept", by: "Aini", note: "", checked: "yes" }), ctx)).status).toBe(400);
+    const ok = await act(post({ action: "accept", by: "Aini", note: "", checked: true }), ctx);
+    expect(ok.status).toBe(200);
+    expect(store.getOrder(ORDER)!.status).toBe("ACCEPTED");
+    expect(store.listLog(ORDER).find((e) => e.tool === "customer_decision")!.input).toEqual({ accepted: true, checked: true });
+  });
+
+  it("above the agreed tolerance: the page warns, accepting is still allowed, recorded, and released by the policy", async () => {
+    await pay();
+    qc();
+    const o = store.getOrder(ORDER)!;
+    store.saveOrder({
+      ...o,
+      spec: { dimensions: "40 × 25 × 10 mm", toleranceMm: 0.3, material: "PLA", color: "hitam", layerMm: 0.2, infillPct: 15, finishing: "Standar", promise: "diukur jangka sorong" },
+      actual: { filamentGrams: 20, machineHours: 1, costIdr: 30000, maxDeviationMm: 0.6, unitsPassed: 1, note: "", by: "op", at: new Date().toISOString() },
+    });
+    const token = ensureCustomerToken(ORDER)!;
+    expect(customerView(store.getOrder(ORDER)!, token).overTolerance).toBe(true);
+    const r = await customerDecide(ORDER, { accepted: true, by: "Aini", note: "tidak apa-apa", checked: true });
+    expect(r.ok && r.settled).toBe(true);
+    expect(store.getAcceptance(ORDER)!.note).toBe("tidak apa-apa [Diterima walau selisih ukuran 0,6 mm melebihi batas ±0,3 mm]");
+    expect(store.listLog(ORDER).find((e) => e.tool === "customer_decision")!.input)
+      .toEqual({ accepted: true, checked: true, acceptedOverTolerance: { maxDeviationMm: 0.6, toleranceMm: 0.3 } });
+    await refreshPayment(ORDER);
+    expect(store.getEscrow(ORDER)!.state).toBe("RELEASED");
+  });
+
+  it("within tolerance (or not measured) there is no warning", async () => {
+    const o = store.getOrder(ORDER)!;
+    expect(customerView(o, ensureCustomerToken(ORDER)!).overTolerance).toBe(false);
+    store.saveOrder({
+      ...o,
+      spec: { dimensions: "x", toleranceMm: 0.3, material: "PLA", color: "", layerMm: 0.2, infillPct: 15, finishing: "", promise: "" },
+      actual: { filamentGrams: 20, machineHours: 1, costIdr: 1, maxDeviationMm: 0.3, unitsPassed: 1, note: "", by: "op", at: new Date().toISOString() },
+    });
+    expect(customerView(store.getOrder(ORDER)!, ensureCustomerToken(ORDER)!).overTolerance).toBe(false);
   });
 
   it("Tolak: the agent refunds the customer", async () => {
@@ -123,6 +175,20 @@ describe("ordering through the invite link", () => {
     const ok = await createViaInvite(req("kesuni-pilot-2026"));
     expect(ok.status).toBe(201);
     expect((await ok.json()).link).toMatch(/^\/c\/[\w-]{24}$/);
+  });
+
+  it("limits orders per network address per hour, and refuses a very long product name", async () => {
+    process.env.CUSTOMER_INVITE_CODE = "kesuni-pilot-2026";
+    const req = (ip: string, product = "Casing") => new Request("http://x/api/c", {
+      method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip },
+      body: JSON.stringify({ invite: "kesuni-pilot-2026", name: "A", product, quantity: 1, deadline: "2026-10-20", budgetIdr: 50000 }),
+    });
+    expect((await createViaInvite(req("203.0.113.9", "x".repeat(201)))).status).toBe(400);
+    for (let i = 0; i < 5; i++) expect((await createViaInvite(req("203.0.113.9"))).status).toBe(201);
+    const sixth = await createViaInvite(req("203.0.113.9"));
+    expect(sixth.status).toBe(429);
+    expect((await sixth.json()).error).toMatch(/Terlalu banyak pesanan/);
+    expect((await createViaInvite(req("198.51.100.7"))).status).toBe(201);
   });
 
   it("the customer API answers 404 for an unknown token and pays for a known one", async () => {

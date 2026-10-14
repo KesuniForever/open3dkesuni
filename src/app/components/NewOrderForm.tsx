@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import Icon from "./Icon";
 
 export default function NewOrderForm() {
   const router = useRouter();
@@ -14,7 +15,7 @@ export default function NewOrderForm() {
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF({ ...f, [k]: e.target.value });
 
-  if (!open) return <button className="primary" onClick={() => setOpen(true)}>+ New order</button>;
+  if (!open) return <button className="primary accent" onClick={() => setOpen(true)}><Icon name="plus" size={16} />New order</button>;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -37,7 +38,7 @@ export default function NewOrderForm() {
   }
 
   return (
-    <form className="card form" onSubmit={submit}>
+    <form className="card form new-order" onSubmit={submit}>
       <h2>New order</h2>
       <label>Customer name (no phone or address)
         <input value={f.customerName} onChange={set("customerName")} placeholder="e.g. Aini" maxLength={80} />

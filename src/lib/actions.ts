@@ -3,6 +3,7 @@
 import { randomBytes } from "node:crypto";
 import * as store from "./store";
 import { checkPaymentIntent, checkPlan } from "./policy";
+import { network } from "./network";
 import type { Acceptance, Evidence, Label, Order, PaymentIntent, Quote } from "./types";
 
 export type Fail = { ok: false; status: number; error: string; reasons?: string[] };
@@ -22,6 +23,7 @@ export function createOrder(input: {
   if (!input.designVersion.trim()) r.push("Design version is required");
   if (!Number.isInteger(input.mandateMicro) || input.mandateMicro <= 0) r.push("Budget must be a positive USDC amount");
   if (input.label !== "real" && input.label !== "simulated") r.push("Label must be real or simulated");
+  if (input.product.trim().length > 200) r.push("Product is too long (at most 200 characters)");
   if ((input.customerName ?? "").length > 80) r.push("Customer name is too long");
   if ((input.customerNote ?? "").length > 1000) r.push("Note is too long");
   if (r.length) return fail(400, "Invalid order", r);
@@ -30,7 +32,7 @@ export function createOrder(input: {
     ...ids, product: input.product.trim(), quantity: input.quantity, deadline: input.deadline,
     designVersion: input.designVersion.trim(), mandateMicro: input.mandateMicro, status: "CREATED", label: input.label,
     customerName: input.customerName?.trim() || undefined, customerNote: input.customerNote?.trim() || undefined,
-    customerToken: newCustomerToken(),
+    customerToken: newCustomerToken(), createdAt: new Date().toISOString(),
   };
   store.saveOrder(order);
   return { ok: true, order };
@@ -102,6 +104,29 @@ export function addEvidence(
   return { ok: true, evidence };
 }
 
+/**
+ * The owner lifts their own rule for one quote at its current price (e.g. a small pilot order). A re-priced or
+ * new quote needs a new approval. The Chief's open questions on the order are answered by this, so they are
+ * closed. People only: no agent tool calls this.
+ */
+export function approveByOwner(orderId: string, input: { quoteId: string; by: string; note: string }): { ok: true; order: Order } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (order.status !== "CREATED") return fail(409, `Order is ${order.status}; approval is for choosing a plan`);
+  if (!input.by.trim() || !input.note.trim()) return fail(400, "Who approves and why are required");
+  const quote = store.getQuote(input.quoteId);
+  if (!quote || quote.orderId !== orderId) return fail(400, "Say which quote of this order the owner approves");
+  const at = new Date().toISOString();
+  const by = input.by.trim().slice(0, 80);
+  const updated: Order = { ...order, ownerApproval: { quoteId: quote.id, priceMicro: quote.priceMicro, by, note: input.note.trim().slice(0, 300), at } };
+  store.saveOrder(updated);
+  for (const t of store.listTasks(orderId)) {
+    if (t.status === "open" && t.kind === "needs_info") store.saveTask({ ...t, status: "done", doneAt: at, doneBy: `${by} (disetujui pemilik)` });
+  }
+  store.addLog({ orderId, actor: "human", tool: "owner_approval", input: { quoteId: quote.id, note: updated.ownerApproval!.note }, ok: true, output: { by }, at });
+  return { ok: true, order: updated };
+}
+
 // Acceptance is a human decision. It is never derived from model output.
 export function recordAcceptance(
   orderId: string, input: { accepted: boolean; by: string; note: string },
@@ -136,7 +161,7 @@ export function createPaymentIntent(
 
   const intent: PaymentIntent = {
     id: store.nextIntentId(), orderId, recipient: proposed.recipient,
-    amountMicro: proposed.amountMicro, token: "USDC", network: "ARC-TESTNET",
+    amountMicro: proposed.amountMicro, token: "USDC", network: network().blockchain,
     idempotencyKey: proposed.idempotencyKey, state: "PAYMENT_INTENT_CREATED", label: "local",
     createdAt: new Date().toISOString(),
   };

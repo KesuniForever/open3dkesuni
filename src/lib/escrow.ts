@@ -10,6 +10,7 @@
 import { randomUUID } from "node:crypto";
 import * as store from "./store";
 import { circle, FINAL_STATES } from "./circle";
+import { isTestnetChain } from "./network";
 import { checkEscrowOpen, checkRefund, checkRelease, microToUsdc } from "./policy";
 import { assertTransition } from "./payment-state";
 import { createPaymentIntent, type Fail } from "./actions";
@@ -65,7 +66,7 @@ export async function openEscrow(orderId: string): Promise<Ok | Fail> {
     escrowWalletId: escrowWallet.walletId, escrowAddress: escrowWallet.address,
     customerWalletId: customer.walletId, customerAddress: customer.address,
     state: "AWAITING_DEPOSIT", txs: [], network,
-    label: network.endsWith("TESTNET") ? "testnet" : "mainnet", createdAt: new Date().toISOString(),
+    label: isTestnetChain(network) ? "testnet" : "mainnet", createdAt: new Date().toISOString(),
   };
   store.saveEscrow(escrow);
   return { ok: true, escrow };
@@ -78,7 +79,7 @@ export async function openEscrow(orderId: string): Promise<Ok | Fail> {
 export async function topUpCustomer(orderId: string): Promise<Ok | Fail> {
   const demoFunds = process.env.KESUNI_DEMO_FUNDS_ADDRESS;
   if (!demoFunds) return fail(501, "KESUNI_DEMO_FUNDS_ADDRESS is not set");
-  if (!circle().network.endsWith("TESTNET")) return fail(403, "Test top-ups are only allowed on testnet");
+  if (!isTestnetChain(circle().network)) return fail(403, "Test top-ups are only allowed on testnet");
   const before = store.getEscrow(orderId);
   if (!before) return fail(404, "Order has no escrow");
   const balance = await circle().usdcBalanceMicro(before.customerWalletId);

@@ -5,7 +5,8 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
-  Acceptance, AgentLogEntry, Attachment, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, Printer, Quote, Vendor,
+  Acceptance, AgentLogEntry, Attachment, CustomerMessage, DailyReview, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, Printer,
+  Quote, Vendor,
 } from "./types";
 import { usdcToMicro } from "./policy";
 
@@ -23,11 +24,14 @@ CREATE TABLE IF NOT EXISTS escrows     (order_id TEXT PRIMARY KEY, data TEXT NOT
 CREATE TABLE IF NOT EXISTS printers    (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tasks       (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS meta        (key TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS messages    (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS daily_reviews (day TEXT PRIMARY KEY, data TEXT NOT NULL);
 `;
-const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks", "attachments"] as const;
+const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks", "attachments", "messages"] as const;
 
 function open(): DatabaseSync {
-  const file = process.env.KESUNI_DB_PATH ?? path.join(process.cwd(), "data", "local", "kesuni.db");
+  const file = process.env.KESUNI_DB_PATH || path.join(process.cwd(), "data", "local", "kesuni.db");
   if (file !== ":memory:") mkdirSync(path.dirname(file), { recursive: true });
   const conn = new DatabaseSync(file);
   conn.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
@@ -103,6 +107,7 @@ export const nextQuoteId = (): string => `Q-${count("quotes") + 1}-${Date.now().
 // ---------- decisions ----------
 export const listDecisions = (orderId: string): Decision[] =>
   parse(conn().prepare("SELECT data FROM decisions WHERE order_id = ? ORDER BY seq").all(orderId));
+export const listAllDecisions = (): Decision[] => parse(conn().prepare("SELECT data FROM decisions ORDER BY seq").all());
 export const addDecision = (d: Decision): void =>
   void conn().prepare("INSERT INTO decisions (order_id, data) VALUES (?, ?)").run(d.orderId, JSON.stringify(d));
 
@@ -140,6 +145,7 @@ export function updateIntent(p: PaymentIntent): void {
 // ---------- escrow ----------
 export const getEscrow = (orderId: string): Escrow | undefined =>
   one(conn().prepare("SELECT data FROM escrows WHERE order_id = ?").get(orderId));
+export const listEscrows = (): Escrow[] => parse(conn().prepare("SELECT data FROM escrows ORDER BY rowid").all());
 export function saveEscrow(e: Escrow): void {
   conn().prepare("INSERT INTO escrows (order_id, data) VALUES (?, ?) ON CONFLICT(order_id) DO UPDATE SET data = excluded.data")
     .run(e.orderId, JSON.stringify(e));
@@ -156,6 +162,7 @@ export function savePrinter(p: Printer): void {
 // ---------- operator tasks ----------
 export const listTasks = (orderId: string): OperatorTask[] =>
   parse(conn().prepare("SELECT data FROM tasks WHERE order_id = ? ORDER BY rowid").all(orderId));
+export const listAllTasks = (): OperatorTask[] => parse(conn().prepare("SELECT data FROM tasks ORDER BY rowid").all());
 export const listOpenTasks = (): OperatorTask[] =>
   parse<OperatorTask>(conn().prepare("SELECT data FROM tasks ORDER BY rowid").all()).filter((t) => t.status === "open");
 export const getTask = (id: string): OperatorTask | undefined => one(conn().prepare("SELECT data FROM tasks WHERE id = ?").get(id));
@@ -174,9 +181,28 @@ export function saveAttachment(a: Attachment): void {
   conn().prepare("INSERT INTO attachments (id, order_id, data) VALUES (?, ?, ?)").run(a.id, a.orderId, JSON.stringify(a));
 }
 
+// ---------- customer messages (shown on the customer's page; write through src/lib/messages.ts) ----------
+export const listMessages = (orderId: string): CustomerMessage[] =>
+  parse(conn().prepare("SELECT data FROM messages WHERE order_id = ? ORDER BY rowid").all(orderId));
+export const listAllMessages = (): CustomerMessage[] => parse(conn().prepare("SELECT data FROM messages ORDER BY rowid").all());
+export const nextMessageId = (): string => `M-${count("messages") + 1}-${Date.now().toString(36)}`;
+export const addMessage = (m: CustomerMessage): void =>
+  void conn().prepare("INSERT INTO messages (id, order_id, data) VALUES (?, ?, ?)").run(m.id, m.orderId, JSON.stringify(m));
+
+// ---------- meta (settings saved by the operator; JSON values) ----------
+export const getMeta = <T>(key: string): T | undefined => one(conn().prepare("SELECT data FROM meta WHERE key = ?").get(key));
+export function setMeta(key: string, value: unknown): void {
+  conn().prepare("INSERT INTO meta (key, data) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET data = excluded.data")
+    .run(key, JSON.stringify(value));
+}
+
 // ---------- agent log ----------
 export const listLog = (orderId: string): AgentLogEntry[] =>
   parse(conn().prepare("SELECT data FROM agent_log WHERE order_id = ? ORDER BY id").all(orderId));
+/** Log entries of every order with fromIso <= at < toIso (ISO strings compare in time order). */
+export const listLogBetween = (fromIso: string, toIso: string): AgentLogEntry[] =>
+  parse(conn().prepare("SELECT data FROM agent_log WHERE json_extract(data, '$.at') >= ? AND json_extract(data, '$.at') < ? ORDER BY id")
+    .all(fromIso, toIso));
 export function addLog(entry: Omit<AgentLogEntry, "id">): AgentLogEntry {
   const c = conn();
   const { lastInsertRowid } = c.prepare("INSERT INTO agent_log (order_id, data) VALUES (?, '{}')").run(entry.orderId);
@@ -185,14 +211,24 @@ export function addLog(entry: Omit<AgentLogEntry, "id">): AgentLogEntry {
   return full;
 }
 
+// ---------- daily reviews (the Chief's daily report to the owner; one per Jakarta day) ----------
+export const getDailyReview = (day: string): DailyReview | undefined =>
+  one(conn().prepare("SELECT data FROM daily_reviews WHERE day = ?").get(day));
+export const listDailyReviews = (): DailyReview[] => parse(conn().prepare("SELECT data FROM daily_reviews ORDER BY day DESC").all());
+/** Regenerating a day replaces its review. */
+export function saveDailyReview(r: DailyReview): void {
+  conn().prepare("INSERT INTO daily_reviews (day, data) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET data = excluded.data")
+    .run(r.day, JSON.stringify(r));
+}
+
 // ---------- seed + reset ----------
 function seedSimulated(c: DatabaseSync): void {
   saveVendor(c, { id: "own", name: "Own studio", address: "0x0000000000000000000000000000000000000001", approved: true });
   saveVendor(c, { id: "partner-a", name: "Partner printer A (simulated)", address: "0x0000000000000000000000000000000000000002", approved: true });
   const order: Order = {
     id: "ORD-001", jobId: "JOB-001", product: "Custom lamp side table (3D-printed components)",
-    quantity: 1, deadline: "2026-10-08", designVersion: "v1",
-    mandateMicro: usdcToMicro("32"), status: "CREATED", label: "simulated",
+    quantity: 1, deadline: new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10), designVersion: "v1",
+    mandateMicro: usdcToMicro("32"), status: "CREATED", label: "simulated", createdAt: new Date().toISOString(),
   };
   c.prepare("INSERT INTO orders (id, data) VALUES (?, ?)").run(order.id, JSON.stringify(order));
   // Demo refusal: partner quote 35 exceeds mandate 32.
@@ -214,6 +250,10 @@ export function resetSimulated(): void {
       c.prepare("DELETE FROM orders WHERE id = ?").run(id);
     }
     if (!getOrder("ORD-001")) seedSimulated(c);
+    // The heartbeat's memory (src/lib/agent/heartbeat.ts) of problems it handled for these orders: the re-seeded
+    // demo order is a new order, so the Chief must be woken for it again. Keys look like "kind:<id>[:...]".
+    const seen = getMeta<Record<string, unknown>>("heartbeatSeen");
+    if (seen) setMeta("heartbeatSeen", Object.fromEntries(Object.entries(seen).filter(([k]) => !k.split(":").slice(1).some((p) => simIds.includes(p)))));
     c.exec("COMMIT");
   } catch (e) {
     c.exec("ROLLBACK");
@@ -224,7 +264,7 @@ export function resetSimulated(): void {
 /** Tests only: wipe everything, including real orders. */
 export function resetDb(): void {
   const c = conn();
-  for (const t of [...ORDER_TABLES, "orders", "vendors", "printers"]) c.exec(`DELETE FROM ${t}`);
+  for (const t of [...ORDER_TABLES, "orders", "vendors", "printers", "meta", "daily_reviews"]) c.exec(`DELETE FROM ${t}`);
   seedSimulated(c);
   syncOwnVendorAddress(c);
 }

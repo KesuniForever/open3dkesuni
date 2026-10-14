@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { KESUNI_DEFAULTS, calculate, parseCostInput, type CostInput } from "./costing";
 
-// The worked example from the TIMBAL Fabric prototype ("Organizer meja modular", 8 units).
+// The worked example from our earlier pricing prototype ("Organizer meja modular", 8 units).
 const ORGANIZER: CostInput = {
   quantity: 8, gramsPerUnit: 45, supportWastePct: 12, filamentIdrPerKg: 180_000,
   machineHours: 10, avgWatts: 120, idrPerKwh: 1_700,
@@ -11,7 +11,7 @@ const ORGANIZER: CostInput = {
 };
 
 describe("costing", () => {
-  it("matches the TIMBAL worked example to the rupiah", () => {
+  it("matches the prototype worked example to the rupiah", () => {
     const c = calculate(ORGANIZER);
     const line = (k: string) => c.lines.find((l) => l.key === k)!.idr;
     expect(c.filamentGrams).toBe(404);

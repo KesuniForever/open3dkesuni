@@ -1,8 +1,8 @@
-# Kesuni 3D
+# Open3DKesuni
 
 Hackathon project for the Tameion Agents Hackathon (Sep 27 to Oct 10, 2026).
 
-Kesuni 3D helps a small 3D-print business take an order, choose a production route
+Open3DKesuni helps a small 3D-print business take an order, choose a production route
 under a budget, record production and QC evidence, and pay the right party in USDC
 (Circle on Arc) only when acceptance rules are met.
 
@@ -25,8 +25,11 @@ Built, tested with simulated reports (not yet on the real printer): a read-only 
 (`node scripts/printer-bridge.mjs`, MQTT) that posts printer status to the app; the agent turns it into
 `device` evidence and operator tasks (change filament, collect + QC). Field names match `bambulabs_api`.
 
-Not built or proven: LLM tool-calling loop, bridge on the real A1, independent on-chain verification of releases,
-hosted database for the live link, real order. See `docs/PILOT.md` and `docs/EVIDENCE_LABELS.md`.
+Independent Arc receipt check (read-only, `src/lib/arc-verify.ts`): every COMPLETE deposit, release and refund is
+checked on Arc Testnet over RPC (receipt success, canonical block, exactly one matching USDC Transfer) by the heartbeat,
+and shown as "verified on Arc". Page `/arc` checks any transfer by hash. Unit-tested with a fake RPC.
+
+Not built or proven: LLM tool-calling loop, bridge on the real A1, hosted database for the live link, real order. See `docs/PILOT.md` and `docs/EVIDENCE_LABELS.md`.
 
 ## Design rules
 

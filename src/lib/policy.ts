@@ -1,5 +1,6 @@
 // Deterministic policy engine. Pure functions, no I/O, no LLM.
 // The model may propose; only these checks decide.
+import { ownerRuleReasons } from "./owner-rules";
 import type {
   Acceptance,
   Escrow,
@@ -43,6 +44,7 @@ export function checkPlan(order: Order, quote: Quote, vendor: Vendor | undefined
   }
   const deadlineMs = Date.parse(order.deadline);
   if (Number.isNaN(deadlineMs)) r.push("Order deadline is invalid");
+  else r.push(...ownerRuleReasons(order, quote).reasons);
   return result(r);
 }
 

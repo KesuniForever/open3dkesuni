@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { CustomerView as View } from "@/lib/customer";
+import { BrandMark } from "@/app/components/Icon";
 
-const EXPLORER = "https://explorer.testnet.arc.io/tx/";
 const STEPS = ["Pesanan diterima", "Harga dan pembayaran", "Dicetak", "Cek kualitas", "Selesai"];
 const TX_TEXT: Record<string, string> = {
   customer_topup: "USDC uji coba dikirim ke dompetmu",
@@ -87,8 +87,8 @@ export default function CustomerView({ token }: { token: string }) {
     }
   }
 
-  if (missing) return <main className="cust"><p>Link pesanan ini tidak ditemukan. Cek lagi link dari Kesuni.</p></main>;
-  if (!v) return <main className="cust"><p className="muted">Memuat pesanan…</p></main>;
+  if (missing) return <main className="cust" lang="id"><p>Link pesanan ini tidak ditemukan. Cek lagi link dari Kesuni.</p></main>;
+  if (!v) return <main className="cust" lang="id"><p className="muted">Memuat pesanan…</p></main>;
 
   const step = stepOf(v);
   const h = headline(v);
@@ -100,9 +100,9 @@ export default function CustomerView({ token }: { token: string }) {
   const txs = v.escrow?.txs ?? [];
 
   return (
-    <main className="cust">
+    <main className="cust" lang="id">
       <header className="cust-top">
-        <span className="brand">Kesuni 3D</span>
+        <span className="brand"><BrandMark size={30} />Open3DKesuni</span>
         <span className="muted">{v.order.customerName ? `Pesanan ${v.order.customerName}` : v.order.id}</span>
       </header>
 
@@ -137,13 +137,16 @@ export default function CustomerView({ token }: { token: string }) {
               <span className="big">{usdc(v.price.usdc)} USDC</span>
               <span className="muted">≈ {rupiah(v.price.idr)} · estimasi {v.price.etaHours} jam</span>
             </div>
+            {v.weightPrice && <WeightPrice w={v.weightPrice} />}
             <AgreeAndPay v={v} busy={busy} onPay={act} />
             <ul className="cust-promise">
               <li>Uangmu <b>tidak langsung</b> ke Kesuni. Disimpan dulu di <b>escrow</b> (dompet pengaman).</li>
               <li>Baru diteruskan ke Kesuni setelah kamu klik <b>Terima</b>.</li>
               <li>Kalau kamu klik <b>Tolak</b>, uangnya dikembalikan utuh.</li>
             </ul>
-            <p className="cust-note">Uji coba di jaringan <b>Arc Testnet</b>: USDC uji coba dikirim otomatis ke dompetmu. Tidak ada uang sungguhan yang dipakai.</p>
+            {v.network.isTestnet
+              ? <p className="cust-note">Uji coba di jaringan <b>{v.network.name}</b>: USDC uji coba dikirim otomatis ke dompetmu. Tidak ada uang sungguhan yang dipakai.</p>
+              : <p className="cust-note">Pembayaran memakai <b>USDC sungguhan</b> di jaringan <b>{v.network.name}</b>.</p>}
           </div>
         )}
 
@@ -152,7 +155,8 @@ export default function CustomerView({ token }: { token: string }) {
         )}
 
         {canDecide && (
-          <Decide defaultName={v.order.customerName ?? ""} busy={busy} photos={photos.map((p) => p.photo!)} onDecide={act} />
+          <Decide defaultName={v.order.customerName ?? ""} busy={busy} photos={photos.map((p) => p.photo!)} onDecide={act}
+            over={v.overTolerance && v.actual && v.spec ? { deviation: v.actual.maxDeviationMm, tolerance: v.spec.toleranceMm } : null} />
         )}
 
         {error && (
@@ -171,6 +175,23 @@ export default function CustomerView({ token }: { token: string }) {
         ))}
       </ol>
 
+      {v.messages.length > 0 && (
+        <section className="card">
+          <h2>Kabar dari Kesuni</h2>
+          <ul className="cust-list">
+            {[...v.messages].reverse().map((m) => (
+              <li key={m.at + m.text}>
+                <span className="tick">{m.by === "agent" ? "AI" : "K"}</span>
+                <div>
+                  <div style={{ whiteSpace: "pre-line" }}>{m.text}</div>
+                  <div className="muted" style={{ fontSize: 13 }}>{m.by === "agent" ? "ditulis oleh Chief (AI)" : "dari tim Kesuni"} · {when(m.at)}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {txs.length > 0 && (
         <section className="card">
           <h2>Bukti pembayaran di blockchain <span className="badge">{v.escrow!.label}</span></h2>
@@ -182,7 +203,9 @@ export default function CustomerView({ token }: { token: string }) {
                   <div>{TX_TEXT[t.kind]} · {usdc(t.amountUsdc)} USDC</div>
                   <div className="muted" style={{ fontSize: 13 }}>
                     {done(t.state) ? "berhasil" : broken(t.state) ? "gagal, Kesuni akan mengurus" : "sedang dikonfirmasi"} · {when(t.at)}
-                    {t.txHash && <> · <a href={`${EXPLORER}${t.txHash}`} target="_blank" rel="noreferrer">lihat bukti</a></>}
+                    {t.txHash && <> · <a href={`${v.network.explorerTxBase}${t.txHash}`} target="_blank" rel="noreferrer">lihat bukti</a></>}
+                    {t.verifiedOnArc === true && <> · <span className="badge ok" title="Dicek langsung di jaringan Arc: penerima dan jumlahnya cocok">Terverifikasi di Arc</span></>}
+                    {t.verifiedOnArc === false && <> · <span className="badge bad">belum cocok di Arc, Kesuni memeriksa</span></>}
                   </div>
                 </div>
               </li>
@@ -228,7 +251,7 @@ export default function CustomerView({ token }: { token: string }) {
           <dl className="calc-kv">
             <div><dt>Filament terpakai</dt><dd>{v.actual.filamentGrams} g</dd></div>
             <div><dt>Waktu mesin</dt><dd>{String(v.actual.machineHours).replace(".", ",")} jam</dd></div>
-            <div><dt>Selisih ukuran terbesar</dt><dd>{String(v.actual.maxDeviationMm).replace(".", ",")} mm{v.spec && ` (batas ±${String(v.spec.toleranceMm).replace(".", ",")} mm)`}</dd></div>
+            <div><dt>Selisih ukuran terbesar</dt><dd>{String(v.actual.maxDeviationMm).replace(".", ",")} mm{v.spec && ` (batas ±${String(v.spec.toleranceMm).replace(".", ",")} mm)`}{v.overTolerance && <> <span className="badge bad">di luar batas</span></>}</dd></div>
             <div><dt>Lolos cek tanpa perbaikan</dt><dd>{v.actual.unitsPassed} dari {v.order.quantity}</dd></div>
           </dl>
           <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Diukur operator Kesuni{v.actual.note && `: ${v.actual.note}`}. Kamu tetap memeriksa barangnya sendiri.</p>
@@ -261,13 +284,31 @@ export default function CustomerView({ token }: { token: string }) {
   );
 }
 
-function Decide({ defaultName, busy, photos, onDecide }: {
+/** Kesuni's official price by weight, as the customer reads it. No cost or margin. */
+function WeightPrice({ w }: { w: NonNullable<View["weightPrice"]> }) {
+  const g = String(w.gramsPerUnit).replace(".", ",");
+  return (
+    <p className="muted" style={{ fontSize: 14, margin: "4px 0 10px" }}>
+      Harga per berat: {g} g × {rupiah(w.pricePerGramIdr)} = {rupiah(w.exactUnitIdr)}
+      {w.exactUnitIdr !== w.unitPriceIdr && <>, dibulatkan ke {rupiah(w.unitPriceIdr)}</>} / buah
+      {w.quantity > 1 && <><br />{w.quantity} buah × {rupiah(w.unitPriceIdr)} = <b>{rupiah(w.totalIdr)}</b></>}
+    </p>
+  );
+}
+
+const CHECKED_TEXT = "Saya sudah memeriksa ukuran, warna, finishing, dan fungsi barang yang saya terima.";
+
+function Decide({ defaultName, busy, photos, onDecide, over }: {
   defaultName: string; busy: boolean; photos: string[];
   onDecide: (b: Record<string, unknown>) => void;
+  /** Measured size deviation above the agreed tolerance (mm): a warning, not a block. */
+  over: { deviation: number; tolerance: number } | null;
 }) {
   const [by, setBy] = useState(defaultName);
   const [note, setNote] = useState("");
+  const [checked, setChecked] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
+  const mm = (n: number) => String(n).replace(".", ",");
   return (
     <div className="cust-pay">
       {photos.length > 0 && (
@@ -284,9 +325,20 @@ function Decide({ defaultName, busy, photos, onDecide }: {
       <label>Catatan (boleh kosong)
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Misalnya: rapi, sesuai pesanan" />
       </label>
+      {over && (
+        <div className="alert bad" role="alert" style={{ marginTop: 0 }}>
+          <b>Perhatian: ukuran di luar batas yang disepakati.</b> Selisih ukuran terbesar yang diukur Kesuni {mm(over.deviation)} mm,
+          sedangkan batasnya ±{mm(over.tolerance)} mm. Periksa barangnya dengan teliti. Kamu tetap boleh menerima; kalau menerima,
+          hal ini dicatat. Kalau tidak sesuai, pilih Tolak dan uangmu dikembalikan.
+        </div>
+      )}
+      <label className="row" style={{ alignItems: "flex-start", gap: 8, fontWeight: 400 }}>
+        <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} style={{ width: "auto", marginTop: 3 }} />
+        <span>{CHECKED_TEXT}</span>
+      </label>
       <div className="row">
-        <button className="primary cust-cta" disabled={busy || !by.trim()} onClick={() => onDecide({ action: "accept", by, note })}>
-          Terima barang
+        <button className="primary cust-cta" disabled={busy || !by.trim() || !checked} onClick={() => onDecide({ action: "accept", by, note, checked: true })}>
+          {over ? "Tetap terima barang" : "Terima barang"}
         </button>
         {!confirmReject ? (
           <button disabled={busy || !by.trim()} onClick={() => setConfirmReject(true)}>Tolak</button>

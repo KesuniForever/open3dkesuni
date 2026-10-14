@@ -4,7 +4,7 @@ import { checkPaymentIntent, checkPlan, microToUsdc, usdcToMicro } from "./polic
 import type { Acceptance, Evidence, Order, Quote, Vendor } from "./types";
 
 const order: Order = {
-  id: "O", jobId: "J", product: "p", quantity: 1, deadline: "2026-10-08",
+  id: "O", jobId: "J", product: "p", quantity: 1, deadline: "2099-12-31",
   designVersion: "v1", mandateMicro: usdcToMicro("32"), status: "ACCEPTED", label: "simulated",
 };
 const vendor: Vendor = { id: "v", name: "v", address: "0xAbC", approved: true };

@@ -40,6 +40,8 @@ export interface Order {
   status: OrderStatus;
   chosenQuoteId?: string;
   label: Label;
+  /** When the order was taken (ISO). Missing on orders made before this field existed. */
+  createdAt?: string;
   /** Name the customer gave (no phone or address: those are never stored here or sent to the LLM). */
   customerName?: string;
   /** What the customer wrote about the order. */
@@ -50,12 +52,33 @@ export interface Order {
   spec?: Spec;
   /** The cost calculation behind Kesuni's own quote (rupiah). */
   costing?: { input: CostInput; quoteId: string; at: string };
+  /** Kesuni's official price by weight (grams per unit from the slicer) behind its own quote. Rupiah. */
+  gramPricing?: GramPricing;
   /** The customer approved this exact price and spec before paying. */
   agreement?: Agreement;
   /** What production actually used, reported by the operator after printing. */
   actual?: ActualReport;
   /** The customer's review, after the order is paid out. */
   review?: Review;
+  /** The owner allowed an exception to their rules for one quote at one price (e.g. an order under the minimum
+   *  value). A new or re-priced quote needs a new approval. Never set by the agent. */
+  ownerApproval?: { quoteId: string; priceMicro: number; by: string; note: string; at: string };
+  /** Grams per unit from the slicer, entered by a person at Kesuni. The only grams the agent may price with. */
+  slicerGrams?: { gramsPerUnit: number; source: string; by: string; at: string };
+}
+
+export interface GramPricing {
+  gramsPerUnit: number;
+  quantity: number;
+  pricePerGramIdr: number;
+  costPerGramIdr: number;
+  unitPriceIdr: number;
+  totalIdr: number;
+  costIdr: number;
+  source: string;          // where the grams come from (slicer, operator note)
+  quoteId: string;
+  by: "agent" | "human";
+  at: string;
 }
 
 export interface Spec {
@@ -180,6 +203,19 @@ export interface ChainTx {
   txHash?: string;
   errorReason?: string;
   at: string;
+  /** Independent check of the COMPLETE tx on Arc over RPC (src/lib/arc-verify.ts). Read-only: never changes escrow
+   *  state and never blocks a release or refund. ok=false means Arc does not show this transfer as recorded. */
+  verified?: TxVerification;
+}
+
+export interface TxVerification {
+  ok: boolean;
+  at: string;
+  /** chainId:txHash:logIndex of the one matching USDC Transfer log. */
+  logId?: string;
+  reason?: string;
+  /** customer_topup: an internal test-USDC move from Kesuni's demo-funds wallet, not a customer payment. */
+  internal?: boolean;
 }
 
 export type EscrowState =
@@ -219,7 +255,7 @@ export interface Printer {
 export interface OperatorTask {
   id: string;
   orderId: string;
-  kind: "change_filament" | "check_printer" | "collect_and_qc" | "reprint";
+  kind: "change_filament" | "check_printer" | "collect_and_qc" | "reprint" | "needs_info";
   printerId?: string;
   text: string;
   status: "open" | "done";
@@ -227,6 +263,28 @@ export interface OperatorTask {
   at: string;
   doneAt?: string;
   doneBy?: string;
+}
+
+/** A short update on the customer's order page (/c/<token>), by the Chief (AI) or a person at Kesuni. */
+export interface CustomerMessage {
+  id: string;
+  orderId: string;
+  text: string;
+  by: "agent" | "human";
+  at: string;
+}
+
+/** The Chief's daily report to the owner for one Jakarta day. `facts` is DailyFacts (src/lib/agent/daily-review.ts). */
+export interface DailyReview {
+  day: string;              // YYYY-MM-DD, Asia/Jakarta
+  facts: unknown;
+  text: string;             // simple Indonesian, sections as "## Heading" lines
+  mode: "claude" | "template";
+  model: string | null;     // null for the code template
+  at: string;
+  trigger: "schedule" | "button";
+  error?: string;           // why Claude was not used, when it was tried and failed
+  usage?: { input_tokens: number; output_tokens: number };
 }
 
 export interface PolicyResult {

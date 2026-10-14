@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { BrandMark } from "@/app/components/Icon";
 
 export default function OrderForm({ code }: { code: string }) {
   const router = useRouter();
@@ -31,8 +32,8 @@ export default function OrderForm({ code }: { code: string }) {
   }
 
   return (
-    <main className="cust">
-      <header className="cust-top"><span className="brand">Kesuni 3D</span><span className="muted">Pesan cetak 3D</span></header>
+    <main className="cust" lang="id">
+      <header className="cust-top"><span className="brand"><BrandMark size={30} />Open3DKesuni</span><span className="muted">Pesan cetak 3D</span></header>
       <section className="cust-hero">
         <h1>Mau cetak apa?</h1>
         <p className="muted">Isi pesananmu. Kesuni menyiapkan harga, lalu kamu bisa membayar dan memantau cetakannya dari halaman pesananmu.</p>

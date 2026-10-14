@@ -15,7 +15,8 @@ export async function GET(_req: Request, ctx: Ctx) {
   return NextResponse.json(customerView(orderForToken(token)!, token));
 }
 
-// POST { action: "agree", by } | { action: "pay", agree?: true, by? } | { action: "accept" | "reject", by, note }
+// POST { action: "agree", by } | { action: "pay", agree?: true, by? } | { action: "accept", by, note, checked: true }
+//    | { action: "reject", by, note }
 //    | { action: "review", quality, communication, value, text, by }
 export async function POST(req: Request, ctx: Ctx) {
   const { token } = await ctx.params;
@@ -37,7 +38,9 @@ export async function POST(req: Request, ctx: Ctx) {
     return r.ok ? NextResponse.json({ ok: true }) : failWith(r);
   }
   if (action === "accept" || action === "reject") {
-    const r = await customerDecide(order.id, { accepted: action === "accept", by: str(b?.by), note: str(b?.note).slice(0, 500) });
+    const r = await customerDecide(order.id, {
+      accepted: action === "accept", by: str(b?.by), note: str(b?.note).slice(0, 500), checked: b?.checked === true,
+    });
     return r.ok ? NextResponse.json(r) : failWith(r);
   }
   return fail(400, 'Expected { action: "agree" | "pay" | "accept" | "reject" | "review" }');

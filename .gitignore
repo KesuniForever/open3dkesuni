@@ -40,7 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# --- Kesuni 3D: never commit secrets or local state ---
+# --- Open3DKesuni: never commit secrets or local state ---
 !.env.example
 wallet.yaml
 .arc-canteen/

@@ -1,4 +1,4 @@
-// Bambu Lab A1 -> Kesuni 3D bridge. Runs on a computer on the SAME network as the printers.
+// Bambu Lab A1 -> Open3DKesuni bridge. Runs on a computer on the SAME network as the printers.
 //   node scripts/printer-bridge.mjs
 // Read-only: subscribes to each printer's status reports and asks once for a full status
 // ("pushall"). It never sends print, move, heat or stop commands.

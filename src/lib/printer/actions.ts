@@ -94,7 +94,16 @@ export function choosePrinter(orderId: string): { ok: true; printer: Printer; re
   return { ok: true, printer: r.printer, reasons };
 }
 
-function createTask(orderId: string, kind: OperatorTask["kind"], text: string, printerId?: string): OperatorTask {
+/**
+ * The order's print has finished and now waits for collection and QC: its last collect_and_qc task is newer
+ * than its last reprint task. A failed print (reprint task last) does need a new production run.
+ */
+export function printFinished(orderId: string): boolean {
+  const last = store.listTasks(orderId).filter((t) => t.kind === "collect_and_qc" || t.kind === "reprint").at(-1);
+  return last?.kind === "collect_and_qc";
+}
+
+export function createTask(orderId: string, kind: OperatorTask["kind"], text: string, printerId?: string): OperatorTask {
   const task: OperatorTask = { id: store.nextTaskId(), orderId, kind, printerId, text, status: "open", createdBy: "agent", at: new Date().toISOString() };
   store.saveTask(task);
   store.addLog({ orderId, actor: "agent", tool: "create_operator_task", input: { kind, printerId, text }, ok: true, output: { taskId: task.id }, at: task.at });

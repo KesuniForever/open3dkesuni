@@ -52,6 +52,18 @@ describe("resetSimulated", () => {
     expect(store.getOrder("ORD-001")?.status).toBe("CREATED");
     expect(store.listQuotes("ORD-001")).toHaveLength(2);
   });
+
+  it("forgets what the heartbeat handled for the demo order, so the re-seeded order wakes the Chief again", () => {
+    const r = realOrder();
+    const realId = r.ok ? r.order.id : "";
+    store.setMeta("heartbeatSeen", {
+      "needs_plan:ORD-001": { since: "x", handled: true },
+      "printer_offline:a1:ORD-001": { since: "x", handled: true },
+      [`needs_price:${realId}`]: { since: "x", handled: true },
+    });
+    store.resetSimulated();
+    expect(Object.keys(store.getMeta<Record<string, unknown>>("heartbeatSeen")!)).toEqual([`needs_price:${realId}`]);
+  });
 });
 
 describe("createOrder", () => {

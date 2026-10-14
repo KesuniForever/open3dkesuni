@@ -27,7 +27,7 @@ export interface FileStore {
 }
 
 function localStore(): FileStore {
-  const dir = process.env.KESUNI_FILES_DIR ?? path.join(process.cwd(), "data", "local", "files");
+  const dir = process.env.KESUNI_FILES_DIR || path.join(process.cwd(), "data", "local", "files");
   return {
     async put(key, bytes) {
       await mkdir(dir, { recursive: true });

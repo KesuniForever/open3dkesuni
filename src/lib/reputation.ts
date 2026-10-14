@@ -1,5 +1,5 @@
 // Customer reviews and Kesuni's reputation, built from finished work rather than order count.
-// Score (0–100), same weights as the TIMBAL prototype:
+// Score (0–100), same weights as our earlier prototype:
 //   40% passed QC without rework · 25% on time · 20% quality review · 10% communication · 5% worth the price.
 // Each part starts from a neutral 70/100 worth PRIOR_WEIGHT orders, so one order cannot swing the score.
 // Only real orders count: simulated orders are never reputation (or traction).

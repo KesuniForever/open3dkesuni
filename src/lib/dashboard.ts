@@ -1,16 +1,20 @@
-// Numbers for the operator's home page. Read-only. Real and simulated money are never added together.
+// Numbers for the operator's home page. Read-only. Real and simulated money are never added together, and real
+// money is counted per network from each escrow's own label: testnet escrows stay "test USDC" after a mainnet switch.
 import * as store from "./store";
 import { notReadyReason } from "./printer/actions";
 import { reputation, type Reputation } from "./reputation";
-import type { Order, OperatorTask } from "./types";
+import type { Escrow, Order, OperatorTask } from "./types";
 
 export interface Attention { orderId: string; product: string; text: string; kind: "task" | "price" | "pay" | "decide" | "report" }
+
+/** Real orders by the escrow's network; simulated (test) orders apart. */
+export interface Money { testnet: number; mainnet: number; simulated: number }
 
 export interface Dashboard {
   activeReal: number;
   activeSimulated: number;
-  escrowHeldMicro: { real: number; simulated: number };   // FUNDED, waiting for the customer's decision
-  releasedMicro: { real: number; simulated: number };     // paid out to Kesuni
+  escrowHeldMicro: Money;   // FUNDED, waiting for the customer's decision
+  releasedMicro: Money;     // paid out to Kesuni
   printersOnline: number;
   printersTotal: number;
   attention: Attention[];
@@ -22,17 +26,17 @@ const ACTIVE = ["CREATED", "PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED",
 export function dashboard(): Dashboard {
   const orders = store.listOrders();
   const byId = new Map(orders.map((o) => [o.id, o]));
-  const held = { real: 0, simulated: 0 };
-  const released = { real: 0, simulated: 0 };
+  const held: Money = { testnet: 0, mainnet: 0, simulated: 0 };
+  const released: Money = { testnet: 0, mainnet: 0, simulated: 0 };
   const attention: Attention[] = [];
-  const bucket = (o: Order) => (o.label === "real" ? "real" : "simulated");
+  const bucket = (o: Order, e: Escrow): keyof Money => (o.label !== "real" ? "simulated" : e.label === "mainnet" ? "mainnet" : "testnet");
 
   for (const o of orders) {
     const e = store.getEscrow(o.id);
-    if (e?.state === "FUNDED") held[bucket(o)] += e.amountMicro;
-    if (e?.state === "RELEASED") released[bucket(o)] += e.amountMicro;
+    if (e?.state === "FUNDED") held[bucket(o, e)] += e.amountMicro;
+    if (e?.state === "RELEASED") released[bucket(o, e)] += e.amountMicro;
     const add = (kind: Attention["kind"], text: string) => attention.push({ orderId: o.id, product: o.product, kind, text });
-    if (o.status === "CREATED") add("price", store.listQuotes(o.id).length ? "Run the agent to choose a plan" : "Needs a price: open the cost calculator");
+    if (o.status === "CREATED") add("price", store.listQuotes(o.id).length ? "Run the agent to choose a plan" : "Needs a price: grams per unit from the slicer (price by weight)");
     if (o.status === "PLAN_CHOSEN" && (!e || e.state === "AWAITING_DEPOSIT")) add("pay", "Waiting for the customer to approve and pay");
     if (o.status === "EVIDENCE_SUBMITTED") add("decide", "Waiting for the customer to accept or reject");
     if (["EVIDENCE_SUBMITTED", "ACCEPTED", "PAID"].includes(o.status) && !o.actual && o.label === "real") add("report", "Report what production used (plan vs actual)");
