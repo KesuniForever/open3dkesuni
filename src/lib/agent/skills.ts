@@ -24,8 +24,10 @@ const BY_TOOL: Record<string, Skill> = {
   agent_summary: "Operations", llm_unavailable: "Operations", agent_wake_skipped: "Operations",
   // Machines
   get_production_status: "Machines", choose_printer: "Machines", link_printer: "Machines", suggest_reroute: "Machines",
+  start_print: "Machines", printer_command: "Machines", print_job: "Machines",
   // Customer
   message_customer: "Customer", customer_agreement: "Customer", customer_review: "Customer", customer_decision: "Customer",
+  customer_colors: "Customer",
 };
 
 const TASK_SKILL: Record<string, Skill> = {

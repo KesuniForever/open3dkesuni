@@ -173,6 +173,8 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; overf
   background: var(--tint); color: var(--tint-text); font-size: 12px; font-weight: 700;
 }
 .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+/* A row of labelled fields: the inputs line up even when one label wraps to two lines. */
+.row.fields { align-items: flex-end; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .kv { margin: 0; }
 .kv dt { font-size: 12px; color: var(--muted); }
@@ -287,7 +289,7 @@ tbody tr:hover td { background: #fbfcfa; }
 .attention-item:hover, .order-row:hover { background: #fafbf8; }
 .attention-text { flex: 1; min-width: 0; font-size: 14px; color: var(--text-2); }
 .attention-text b { font-weight: 600; color: var(--text); }
-.attention-sub { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.attention-sub { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
 .attention-icon {
   display: inline-grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 9px;
   background: var(--surface-2); color: #8f9ba6;
@@ -295,6 +297,7 @@ tbody tr:hover td { background: #fbfcfa; }
 .attention-icon.amber { background: var(--warn-bg); color: #b98f52; }
 .attention-icon.blue { background: var(--blue-bg); color: #7f98b8; }
 .attention-icon.green { background: var(--ok-bg); color: #6f8c58; }
+.attention-icon.red { background: var(--bad-bg); color: var(--bad); }
 .attention-go { color: #b0b7bf; margin-top: 10px; }
 .orders { display: flex; flex-direction: column; }
 .orders a { display: flex; text-decoration: none; color: inherit; }
@@ -536,3 +539,17 @@ tbody tr:hover td { background: #fbfcfa; }
 .lang-switch button:hover:not(:disabled) { color: var(--text); background: transparent; }
 .lang-switch button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(32, 41, 54, 0.1); }
 .shell-top-right { display: flex; align-items: center; gap: 10px; flex: none; }
+
+/* ---------- segmented choice (single | multi colour) ---------- */
+.field-label { display: block; font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 5px; }
+.seg {
+  display: flex; padding: 3px; gap: 2px; min-height: 40px;
+  background: var(--surface-2); border: 1px solid var(--input); border-radius: var(--radius-sm);
+}
+.seg button {
+  flex: 1 1 0; min-height: 32px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent;
+  font-size: 13px; font-weight: 500; color: var(--muted); white-space: nowrap;
+}
+.seg button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.seg button[aria-checked="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(32, 41, 54, 0.1); }
+.calc-note { font-size: 12px; margin: 10px 0 0; line-height: 1.5; }

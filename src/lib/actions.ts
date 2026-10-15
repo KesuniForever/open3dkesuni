@@ -4,7 +4,11 @@ import { randomBytes } from "node:crypto";
 import * as store from "./store";
 import { checkPaymentIntent, checkPlan } from "./policy";
 import { network } from "./network";
-import type { Acceptance, Evidence, Label, Order, PaymentIntent, Quote } from "./types";
+import { parseColorChoices } from "./colors";
+import { MATERIALS } from "./pricing";
+import { idrPerUsdc } from "./costing";
+import { idrBudget, type Budget } from "./budget";
+import type { Acceptance, Evidence, Label, Material, Order, PaymentIntent, Quote } from "./types";
 
 export type Fail = { ok: false; status: number; error: string; reasons?: string[] };
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
@@ -12,9 +16,22 @@ const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok:
 const EVIDENCE_KINDS = ["log", "photo", "qc"] as const;
 const EVIDENCE_LABELS: Label[] = ["simulated", "manual", "device", "local", "testnet", "mainnet"];
 
+/**
+ * createOrder's budget fields from whole rupiah someone typed (the customer's invite form, the New order form):
+ * the rupiah as typed, today's app rate, and the USDC mandate rounded to the micro-USDC.
+ * Spread it into createOrder: `createOrder({ ...fields, ...budgetFromRupiah(budgetIdr) })`.
+ */
+export const budgetFromRupiah = (budgetIdr: number): Budget => idrBudget(budgetIdr, idrPerUsdc());
+
 export function createOrder(input: {
   product: string; quantity: number; deadline: string; designVersion: string;
   mandateMicro: number; label: "real" | "simulated"; customerName?: string; customerNote?: string;
+  /** The budget in rupiah as the person typed it (or worked out from the USDC typed) and the rate mandateMicro used. */
+  budgetIdr?: number; rateIdrPerUsdc?: number;
+  /** "PLA" or "PETG". */
+  material?: unknown;
+  /** [{ type, color, name? }]; check them against the loaded colours first (parseColorChoices with studioPalette). */
+  preferredColors?: unknown;
 }): { ok: true; order: Order } | Fail {
   const r: string[] = [];
   if (!input.product.trim()) r.push("Product is required");
@@ -26,6 +43,16 @@ export function createOrder(input: {
   if (input.product.trim().length > 200) r.push("Product is too long (at most 200 characters)");
   if ((input.customerName ?? "").length > 80) r.push("Customer name is too long");
   if ((input.customerNote ?? "").length > 1000) r.push("Note is too long");
+  const budget = input.budgetIdr !== undefined || input.rateIdrPerUsdc !== undefined;
+  if (budget && !(Number.isSafeInteger(input.budgetIdr) && input.budgetIdr! > 0 && input.budgetIdr! <= 1e12)) r.push("Budget in rupiah must be a positive amount");
+  if (budget && !(Number.isFinite(input.rateIdrPerUsdc) && input.rateIdrPerUsdc! > 0 && input.rateIdrPerUsdc! <= 1e6)) {
+    r.push("The rupiah per USDC rate must be a positive number");
+  }
+  const noMaterial = input.material === undefined || input.material === null || input.material === "";
+  const material = MATERIALS.find((m) => m === input.material) as Material | undefined;
+  if (!noMaterial && !material) r.push("Material must be PLA or PETG");
+  const colors = parseColorChoices(input.preferredColors);
+  if (!colors.ok) r.push(...colors.reasons);
   if (r.length) return fail(400, "Invalid order", r);
   const ids = store.nextOrderIds();
   const order: Order = {
@@ -33,6 +60,9 @@ export function createOrder(input: {
     designVersion: input.designVersion.trim(), mandateMicro: input.mandateMicro, status: "CREATED", label: input.label,
     customerName: input.customerName?.trim() || undefined, customerNote: input.customerNote?.trim() || undefined,
     customerToken: newCustomerToken(), createdAt: new Date().toISOString(),
+    ...(budget ? { budgetIdr: input.budgetIdr, rateIdrPerUsdc: input.rateIdrPerUsdc } : {}),
+    ...(material ? { material } : {}),
+    ...(colors.ok && colors.choices.length ? { preferredColors: colors.choices } : {}),
   };
   store.saveOrder(order);
   return { ok: true, order };

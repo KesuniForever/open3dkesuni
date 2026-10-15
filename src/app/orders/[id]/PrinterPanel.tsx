@@ -5,8 +5,10 @@ import type { OperatorTask, Order, Printer } from "@/lib/types";
 import Info from "@/app/components/Info";
 import MoreText from "@/app/components/MoreText";
 import { oneLine } from "@/lib/text";
+import { issueViews, stageText, taskText, type IssueTexts } from "@/app/machines/printer-details";
 import { useT } from "@/i18n/client";
 import type { T } from "@/i18n/core";
+import "./print.css";
 
 const STATE_TEXT: Record<string, string> = {
   IDLE: "Idle", PREPARE: "Preparing", SLICING: "Slicing", RUNNING: "Printing", PAUSE: "Paused",
@@ -22,13 +24,15 @@ function ago(t: T, iso?: string): string {
 }
 
 /** All printers (read from the Bambu A1s by the LAN bridge) and the operator tasks the agent created. */
-export default function PrinterPanel({ order, printers, tasks, busy, act, onChange }: {
+export default function PrinterPanel({ order, printers, tasks, busy, act, onChange, issueTexts = {} }: {
   order: Order;
   printers: Printer[];
   tasks: OperatorTask[];
   busy: boolean;
   act: (url: string, body: unknown, success: string) => Promise<void>;
   onChange: () => void;
+  /** Bambu's words for the faults reported now, in the page's language (fault tasks show them). */
+  issueTexts?: IssueTexts;
 }) {
   const t = useT();
   const [by, setBy] = useState("");
@@ -51,16 +55,28 @@ export default function PrinterPanel({ order, printers, tasks, busy, act, onChan
       <h2><span className="step">P</span> {t("Printers and operator tasks")}</h2>
       {printers.length === 0 && <p className="muted">{t("No printer has reported yet. Start the LAN bridge:")} <code>node scripts/printer-bridge.mjs</code></p>}
       <div className="table-wrap">
-        <table>
-          <thead><tr><th>{t("Printer")}</th><th>{t("Status")}</th><th>{t("Bed")}</th><th>{t("Job")}</th><th /></tr></thead>
+        <table className="pr-table">
+          <thead><tr><th>{t("Printer")}</th><th>{t("Status")}</th><th>{t("Bed")}</th><th>{t("Job")}</th><th className="pr-act-col" /></tr></thead>
           <tbody>
             {printers.map((p) => {
               const s = p.snapshot;
               const offline = !p.lastSeen || now - Date.parse(p.lastSeen) > STALE_MS;
               const here = p.currentOrderId === order.id;
+              const action = here ? (
+                <button disabled={busy} onClick={() => act(`/api/printers/${p.id}`, { action: "unlink" }, t("{name} unlinked.", { name: p.name }))}>{t("Unlink")}</button>
+              ) : (
+                <button disabled={busy || !printable || Boolean(p.currentOrderId) || Boolean(p.bedOccupiedBy)}
+                  title={t("Links the printer to this order. It does not start a print: that is in Colours & print.")}
+                  onClick={() => act(`/api/printers/${p.id}`, { action: "link", orderId: order.id }, t("{name} will print this order.", { name: p.name }))}>
+                  {t("Assign printer")}
+                </button>
+              );
               return (
                 <tr key={p.id}>
-                  <td><b>{p.name}</b> <span className="badge">{t("device")}</span><div className="muted" style={{ fontSize: 12 }}>{t("last report {ago}", { ago: ago(t, p.lastSeen) })}</div></td>
+                  <td><b>{p.name}</b> <span className="badge">{t("device")}</span><div className="muted" style={{ fontSize: 12 }}>{t("last report {ago}", { ago: ago(t, p.lastSeen) })}</div>
+                    {/* On a phone the action sits under the name, so it shows without scrolling the table sideways. */}
+                    <div className="pr-act-inline">{action}</div>
+                  </td>
                   <td>
                     {offline ? <span className="badge bad">{t("offline")}</span> : <>
                       {STATE_TEXT[s?.state ?? "UNKNOWN"] ? t(STATE_TEXT[s?.state ?? "UNKNOWN"]) : s?.state}
@@ -71,7 +87,11 @@ export default function PrinterPanel({ order, printers, tasks, busy, act, onChan
                           <div style={{ width: `${s.percent}%`, height: "100%", background: s.state === "PAUSE" ? "#c0392b" : "#2e7d32" }} />
                         </div>
                       )}
+                      {stageText(s, t) && <div className="muted" style={{ fontSize: 12 }}>{stageText(s, t)}</div>}
                     </>}
+                    {issueViews(s, {}).map((i) => (
+                      <div key={i.code}><a href={i.url} target="_blank" rel="noreferrer" className={`badge ${i.tone}`} title={t("Open guide")}>{i.code}</a></div>
+                    ))}
                   </td>
                   <td>
                     {p.bedOccupiedBy ? (
@@ -83,16 +103,7 @@ export default function PrinterPanel({ order, printers, tasks, busy, act, onChan
                     ) : <span className="badge ok">{t("empty")}</span>}
                   </td>
                   <td>{here ? <b>{t("this order")}</b> : p.currentOrderId ?? <span className="muted">{t("none")}</span>}</td>
-                  <td>
-                    {here ? (
-                      <button disabled={busy} onClick={() => act(`/api/printers/${p.id}`, { action: "unlink" }, t("{name} unlinked.", { name: p.name }))}>{t("Unlink")}</button>
-                    ) : (
-                      <button disabled={busy || !printable || Boolean(p.currentOrderId) || Boolean(p.bedOccupiedBy)}
-                        onClick={() => act(`/api/printers/${p.id}`, { action: "link", orderId: order.id }, t("{name} will print this order.", { name: p.name }))}>
-                        {t("Print here")}
-                      </button>
-                    )}
-                  </td>
+                  <td className="pr-act-col">{action}</td>
                 </tr>
               );
             })}
@@ -116,9 +127,9 @@ export default function PrinterPanel({ order, printers, tasks, busy, act, onChan
         <ul>
           {open.map((task) => (
             <li key={task.id} style={{ marginBottom: 6 }}>
-              <span className="badge bad">{t("open")}</span> {oneLine(task.text)}{" "}
+              <span className="badge bad">{t("open")}</span> {oneLine(taskText(task, t, issueTexts))}{" "}
               <button disabled={busy || !by.trim()} onClick={() => act(`/api/tasks/${task.id}`, { by }, t("Task marked done."))}>{t("Done")}</button>
-              <MoreText text={task.text} />
+              <MoreText text={taskText(task, t, issueTexts)} />
             </li>
           ))}
         </ul>
@@ -127,7 +138,7 @@ export default function PrinterPanel({ order, printers, tasks, busy, act, onChan
         <details className="fold">
           <summary>{t(done.length === 1 ? "{n} done task" : "{n} done tasks", { n: done.length })}</summary>
           <ul className="muted" style={{ margin: 0 }}>
-            {done.map((task) => <li key={task.id}>{oneLine(task.text)} ({task.doneBy})</li>)}
+            {done.map((task) => <li key={task.id}>{oneLine(taskText(task, t, issueTexts))} ({task.doneBy})</li>)}
           </ul>
         </details>
       )}

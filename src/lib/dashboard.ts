@@ -1,11 +1,19 @@
 // Numbers for the operator's home page. Read-only. Real and simulated money are never added together, and real
 // money is counted per network from each escrow's own label: testnet escrows stay "test USDC" after a mainnet switch.
 import * as store from "./store";
-import { notReadyReason } from "./printer/actions";
+import { isPrinterRef, notReadyReason } from "./printer/actions";
 import { reputation, type Reputation } from "./reputation";
 import type { Escrow, Order, OperatorTask } from "./types";
 
-export interface Attention { orderId: string; product: string; text: string; kind: "task" | "price" | "pay" | "decide" | "report" }
+export interface Attention {
+  orderId: string;
+  product: string;
+  text: string;
+  kind: "task" | "price" | "pay" | "decide" | "report" | "printer";
+  /** Where the item links to; the order page when missing. Printer faults without an order go to /machines. */
+  href?: string;
+  printerId?: string;
+}
 
 /** Real orders by the escrow's network; simulated (test) orders apart. */
 export interface Money { testnet: number; mainnet: number; simulated: number }
@@ -42,16 +50,24 @@ export function dashboard(): Dashboard {
     if (["EVIDENCE_SUBMITTED", "ACCEPTED", "PAID"].includes(o.status) && !o.actual && o.label === "real") add("report", "Report what production used (plan vs actual)");
   }
   // The same reminder can be raised many times (e.g. on every printer report): show it once, with a count.
+  // Printer faults (HMS, print errors) come first: they stop printing until a person looks.
+  const printers = store.listPrinters();
+  const printerName = (id?: string) => printers.find((p) => p.id === id)?.name ?? id ?? "";
   const tasks = new Map<string, Attention & { n: number }>();
   for (const t of store.listOpenTasks() as OperatorTask[]) {
     const key = `${t.orderId}
 ${t.text}`;
     const seen = tasks.get(key);
-    if (seen) seen.n++;
-    else tasks.set(key, { orderId: t.orderId, product: byId.get(t.orderId)?.product ?? t.orderId, kind: "task", text: t.text, n: 1 });
+    if (seen) { seen.n++; continue; }
+    const order = byId.get(t.orderId);
+    const href = order ? undefined : isPrinterRef(t.orderId) || t.printerId ? "/machines" : undefined;
+    tasks.set(key, {
+      orderId: t.orderId, product: order?.product ?? (t.printerId ? printerName(t.printerId) : t.orderId),
+      kind: t.errorCode ? "printer" : "task", text: t.text, n: 1, ...(href ? { href } : {}), ...(t.printerId ? { printerId: t.printerId } : {}),
+    });
   }
-  attention.unshift(...[...tasks.values()].map(({ n, ...a }) => ({ ...a, text: n > 1 ? `${a.text} (×${n})` : a.text })));
-  const printers = store.listPrinters();
+  const items = [...tasks.values()].map(({ n, ...a }) => ({ ...a, text: n > 1 ? `${a.text} (×${n})` : a.text }));
+  attention.unshift(...items.filter((a) => a.kind === "printer"), ...items.filter((a) => a.kind !== "printer"));
   return {
     activeReal: orders.filter((o) => o.label === "real" && ACTIVE.includes(o.status)).length,
     activeSimulated: orders.filter((o) => o.label !== "real" && ACTIVE.includes(o.status)).length,

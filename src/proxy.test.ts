@@ -91,3 +91,40 @@ describe("proxy: writes from other sites", () => {
     expect(proxy(post("/api/admin/import-db", tunnel)).status).toBe(403);
   });
 });
+
+describe("proxy: printing from the website", () => {
+  it("opens only the bridge's own routes (they check the bearer token) and the customers' colour list", () => {
+    expect(passes(proxy(req("/api/studio/colors", tunnel)))).toBe(true);
+    expect(passes(proxy(req("/api/printers/queue", tunnel)))).toBe(true);
+    expect(passes(proxy(post("/api/printers/queue/PC-1-abc", tunnel)))).toBe(true);
+    expect(passes(proxy(req("/api/print-jobs/PJ-1-abc/file", tunnel)))).toBe(true);
+    expect(passes(proxy(post("/api/printers/a1/camera", tunnel)))).toBe(true);
+  });
+
+  it("keeps controls, print jobs and the camera picture behind the operator password", () => {
+    expect(proxy(req("/api/printers/a1/camera", tunnel)).status).toBe(403);
+    expect(proxy(post("/api/printers/a1/command", tunnel)).status).toBe(403);
+    expect(proxy(post("/api/print-jobs", tunnel)).status).toBe(403);
+    expect(proxy(req("/api/print-jobs", tunnel)).status).toBe(403);
+    expect(proxy(post("/api/print-jobs/PJ-1-abc", tunnel)).status).toBe(403);
+    expect(proxy(req("/api/printers/queue/extra/path", tunnel)).status).toBe(403);
+  });
+
+  it("printer controls, print starts and the camera: only this computer skips the password, not the studio Wi-Fi", () => {
+    const lan = { host: "192.168.100.99:3000" };
+    for (const r of [post("/api/printers/a1/command"), post("/api/print-jobs"), post("/api/print-jobs/PJ-1-abc"), req("/api/printers/a1/camera")]) {
+      expect(passes(proxy(r)), r.url).toBe(true);
+    }
+    // Reading pages and lists from the studio Wi-Fi stays open; controlling the printers does not.
+    expect(passes(proxy(req("/machines", lan)))).toBe(true);
+    expect(passes(proxy(req("/api/print-jobs", lan)))).toBe(true);
+    expect(proxy(post("/api/printers/a1/command", lan)).status).toBe(403);
+    process.env.OPERATOR_PASSWORD = "correct horse";
+    expect(proxy(post("/api/printers/a1/command", lan)).status).toBe(401);
+    expect(proxy(post("/api/print-jobs", lan)).status).toBe(401);
+    expect(proxy(req("/api/printers/a1/camera", lan)).status).toBe(401);
+    expect(passes(proxy(post("/api/printers/a1/command", { ...lan, authorization: basic("correct horse") })))).toBe(true);
+    // The bridge still posts camera frames with its own token.
+    expect(passes(proxy(post("/api/printers/a1/camera", lan)))).toBe(true);
+  });
+});

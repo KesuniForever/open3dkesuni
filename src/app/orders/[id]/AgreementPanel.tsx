@@ -3,6 +3,8 @@
 import { useState } from "react";
 import CostCalculator from "@/app/components/CostCalculator";
 import { calculate } from "@/lib/costing";
+import { MATERIALS } from "@/lib/pricing";
+import { choicesWith, FINISHES } from "@/lib/spec-choices";
 import type { Order, Quote, Spec } from "@/lib/types";
 import { useLocale, useT } from "@/i18n/client";
 import { dateLocale } from "@/i18n/core";
@@ -11,10 +13,11 @@ import { rich } from "./rich";
 type Act = (url: string, body: unknown, success: string) => Promise<void>;
 const rp = (n: number) => `Rp${Math.round(n).toLocaleString("id-ID")}`;
 
-const EMPTY_SPEC: Spec = {
-  dimensions: "", toleranceMm: 0.3, material: "PLA", color: "", layerMm: 0.2, infillPct: 20, finishing: "Standard",
+/** A new spec starts at the material chosen on the order. */
+const emptySpec = (order: Order): Spec => ({
+  dimensions: "", toleranceMm: 0.3, material: order.material ?? "PLA", color: "", layerMm: 0.2, infillPct: 20, finishing: "Standard",
   promise: "Every unit is checked for size, colour, finish and function before hand-over.",
-};
+});
 
 /** Price (cost calculator → Kesuni quote), spec and quality promise, and whether the customer approved them. */
 export default function AgreementPanel({ order, quotes, agreementCurrent, idrPerUsdc, busy, act }: {
@@ -48,7 +51,7 @@ export default function AgreementPanel({ order, quotes, agreementCurrent, idrPer
       )}
 
       <h3 style={{ fontSize: 15, margin: "16px 0 6px" }}>{t("Spec and quality promise")}</h3>
-      <SpecForm key={JSON.stringify(order.spec ?? null)} spec={order.spec ?? EMPTY_SPEC} disabled={busy || specLocked}
+      <SpecForm key={JSON.stringify(order.spec ?? null)} spec={order.spec ?? emptySpec(order)} disabled={busy || specLocked}
         onSubmit={(s) => act(`${base}/spec`, s, t("Spec saved. The customer sees it on their page."))} />
 
       <h3 style={{ fontSize: 15, margin: "20px 0 6px" }}>{t("Cost calculator (a check; the official price is by weight above)")}</h3>
@@ -63,7 +66,7 @@ export default function AgreementPanel({ order, quotes, agreementCurrent, idrPer
         <CostCalculator
           initial={{ ...(order.costing?.input ?? {}), quantity: order.quantity }}
           lockQuantity
-          budgetIdr={Math.round((order.mandateMicro / 1e6) * idrPerUsdc)}
+          budgetIdr={order.budgetIdr ?? Math.round((order.mandateMicro / 1e6) * idrPerUsdc)}
           idrPerUsdc={idrPerUsdc}
           busy={busy}
           onUse={(input) => act(`${base}/costing`, input, t("Kesuni quote added from the calculator. Run the agent to choose a plan."))}
@@ -78,18 +81,27 @@ export default function AgreementPanel({ order, quotes, agreementCurrent, idrPer
 function SpecForm({ spec, disabled, onSubmit }: { spec: Spec; disabled: boolean; onSubmit: (s: Spec) => void }) {
   const t = useT();
   const [s, setS] = useState<Spec>(spec);
-  const text = (k: keyof Spec) => (e: React.ChangeEvent<HTMLInputElement>) => setS({ ...s, [k]: e.target.value });
+  const text = (k: keyof Spec) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setS({ ...s, [k]: e.target.value });
   const num = (k: keyof Spec) => (e: React.ChangeEvent<HTMLInputElement>) => setS({ ...s, [k]: Number(e.target.value) });
   return (
     <form className="form" onSubmit={(e) => { e.preventDefault(); onSubmit(s); }}>
       <div className="spec-grid">
         <label>{t("Dimensions")}<input value={s.dimensions} onChange={text("dimensions")} placeholder="60 × 30 × 15 mm" disabled={disabled} /></label>
         <label>{t("Tolerance (± mm)")}<input type="number" step="0.05" min={0} value={s.toleranceMm} onChange={num("toleranceMm")} disabled={disabled} /></label>
-        <label>{t("Material")}<input value={s.material} onChange={text("material")} disabled={disabled} /></label>
+        <label>{t("Material")}
+          <select value={s.material} onChange={text("material")} disabled={disabled}>
+            {choicesWith(MATERIALS, spec.material).map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
         <label>{t("Color")}<input value={s.color} onChange={text("color")} placeholder={t("Black")} disabled={disabled} /></label>
         <label>{t("Layer (mm)")}<input type="number" step="0.04" min={0.04} value={s.layerMm} onChange={num("layerMm")} disabled={disabled} /></label>
         <label>{t("Infill (%)")}<input type="number" min={0} max={100} value={s.infillPct} onChange={num("infillPct")} disabled={disabled} /></label>
-        <label>{t("Finishing")}<input value={s.finishing} onChange={text("finishing")} disabled={disabled} /></label>
+        <label>{t("Finishing")}
+          <select value={s.finishing} onChange={text("finishing")} disabled={disabled}>
+            {/* Stored in English, shown translated; an older free-text value shows as written. */}
+            {choicesWith(FINISHES, spec.finishing).map((f) => <option key={f} value={f}>{(FINISHES as readonly string[]).includes(f) ? t(f) : f}</option>)}
+          </select>
+        </label>
       </div>
       <label>{t("Quality promise (how the result is checked; the customer reads this)")}
         <input value={s.promise} onChange={text("promise")} disabled={disabled} />

@@ -17,7 +17,8 @@ const byIp = (g.__kesuniOrderIps ??= new Map<string, number[]>());
 const all = (g.__kesuniOrderTimes ??= []);
 
 // A customer places an order. Only people with the invite link (CUSTOMER_INVITE_CODE) can.
-// Body: { invite, name, product, quantity, deadline: "YYYY-MM-DD", budgetIdr, note }
+// Body: { invite, name, product, quantity, deadline: "YYYY-MM-DD", budgetIdr, note, material?: "PLA" | "PETG",
+//        colors?: [{ type, color: "#RRGGBB" }] (loaded in the studio right now: GET /api/studio/colors) }
 export async function POST(req: Request) {
   const code = process.env.CUSTOMER_INVITE_CODE;
   const b = await readJson(req);
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
   }
   const r = customerCreateOrder({
     name: str(b.name), product: str(b.product), quantity: Number(b.quantity), deadline: str(b.deadline),
-    budgetIdr: Number(b.budgetIdr), note: str(b.note),
+    budgetIdr: Number(b.budgetIdr), note: str(b.note), material: b.material, colors: b.colors,
   });
   if (!r.ok) return failWith(r);
   byIp.set(ip, [...recent, now]);

@@ -52,7 +52,7 @@ export default function FilesPanel({ order, attachments, onChange }: {
   }
 
   return (
-    <section className="card">
+    <section className="card" id="files" style={{ scrollMarginTop: 80 }}>
       <h2><span className="step">F</span> {t("Files")} <Info>{t("Files stay with Kesuni and are never sent to the AI agent. A QC photo is also recorded as photo evidence; it does not replace the QC result.")}</Info></h2>
       {attachments.length === 0 ? (
         <p className="muted">{t("No files yet. Upload the design for the operator's slicer, reference images, or QC photos.")}</p>

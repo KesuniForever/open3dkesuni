@@ -48,6 +48,7 @@ const id: Record<string, string> = {
     "Koneksi printer sempat terputus. Angkanya akan diperbarui lagi.",
 
   // price and paying
+  "about {n} hour": "sekitar {n} jam",
   "about {n} hours": "sekitar {n} jam",
   "Price by weight: {grams} g × {perGram} = {exact}": "Harga menurut berat: {grams} g × {perGram} = {exact}",
   "rounded up to {price}": "dibulatkan ke {price}",
@@ -81,7 +82,7 @@ const id: Record<string, string> = {
   "Order steps": "Langkah pesanan",
   "Order received": "Pesanan diterima",
   "Price and payment": "Harga & pembayaran",
-  "Printing": "Pencetakan",
+  "Printing": "Mencetak",
   "Quality check": "Cek kualitas",
   "Done": "Selesai",
 

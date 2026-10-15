@@ -16,6 +16,8 @@ import Icon, { type IconName } from "./components/Icon";
 import Info from "./components/Info";
 import { network } from "@/lib/network";
 import { getT } from "@/i18n/server";
+import { budgetText } from "@/lib/budget";
+import { idrPerUsdc } from "@/lib/costing";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,7 @@ const ATTENTION_ICON: Record<Attention["kind"], { icon: IconName; tone: string }
   pay: { icon: "wallet", tone: "green" },
   decide: { icon: "check", tone: "amber" },
   report: { icon: "review", tone: "blue" },
+  printer: { icon: "printer", tone: "red" },
 };
 
 const EVIDENCE = { none: "no finished real orders yet", limited: "limited evidence (under 5 orders)", solid: "5+ finished orders" };
@@ -41,7 +44,7 @@ export default async function Home() {
       {m.mainnet > 0 && <span className="muted"><b>{microToUsdc(m.mainnet)} USDC</b> {t("real money on Arc")}</span>}
     </>
   );
-  const budgetUnit = network().isTestnet ? t("test USDC") : "USDC";
+  const testnet = network().isTestnet;
   return (
     <main className="wrap">
       <header className="page-head">
@@ -49,7 +52,7 @@ export default async function Home() {
           <p className="eyebrow">{t("Studio overview")}</p>
           <h1>{t("Every order, from quote to payout.")}</h1>
         </div>
-        <div className="page-actions"><NewOrderForm /></div>
+        <div className="page-actions"><NewOrderForm rate={idrPerUsdc()} /></div>
       </header>
 
       <div className="stat-grid">
@@ -110,10 +113,10 @@ export default async function Home() {
               <ul className="attention">
                 {d.attention.slice(0, 12).map((a, i) => (
                   <li key={`${a.orderId}-${a.kind}-${i}`}>
-                    <Link href={`/orders/${a.orderId}`} className="attention-item">
+                    <Link href={a.href ?? `/orders/${a.orderId}`} className="attention-item">
                       <span className={`attention-icon ${ATTENTION_ICON[a.kind].tone}`}><Icon name={ATTENTION_ICON[a.kind].icon} /></span>
                       <span className="attention-text">
-                        <b>{a.product}</b> <span className="muted">({a.orderId})</span>
+                        <b>{a.product}</b> {!a.href && <span className="muted">({a.orderId})</span>}
                         <span className="attention-sub one-line">{t(a.text)}</span>
                       </span>
                       <Icon name="chevron" size={16} className="attention-go" />
@@ -161,9 +164,9 @@ export default async function Home() {
               <span className="order-info">
                 <strong>{o.customerName ? `${o.customerName}: ` : ""}{o.product}</strong>
                 <span className="muted">
-                  {t("{id} · {units} · budget {budget} {unit} · due {due} ·", {
+                  {t("{id} · {units} · budget {budget} · due {due} ·", {
                     id: o.id, units: t(o.quantity === 1 ? "{n} unit" : "{n} units", { n: o.quantity }),
-                    budget: microToUsdc(o.mandateMicro), unit: budgetUnit, due: o.deadline,
+                    budget: budgetText(o, t, testnet), due: o.deadline,
                   })}{" "}
                   <b>{o.status}</b>
                   {o.agreement && ` · ${t("agreed")}`}{o.review && ` · ${o.review.quality}★`}

@@ -151,6 +151,15 @@ export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
     case "customer_agreement":
       return { title: t("Customer approved price and spec"), line: i.version !== undefined ? t("Version {v}", { v: str(i.version) }) : undefined };
     case "customer_review": return { title: t("Customer left a review"), line: i.quality !== undefined ? t("Quality {q}/5", { q: str(i.quality) }) : undefined };
+    case "customer_colors": {
+      const colors = Array.isArray(i.colors) ? (i.colors as { name?: unknown }[]).map((c) => t(str(c?.name))).filter(Boolean) : [];
+      return { title: t("Customer chose material and colours"), line: [str(i.material), ...colors].filter(Boolean).join(" · ") || undefined };
+    }
+    // Printing from the website: always a person (the Chief has no control tool).
+    case "start_print": return { title: t("Print started by {name}", { name: str(i.by) }), line: [str(o.printer), str(o.jobId)].filter(Boolean).join(" · ") || undefined };
+    case "printer_command": return { title: t("Printer control by {name}", { name: str(i.by) }), line: str(i.kind) || undefined };
+    case "print_job":
+      return e.ok ? { title: t("Print sent to the printer"), line: str(o.printer) || undefined } : { title: t("Print did not start"), line: oneLine(str(o.error)) || undefined };
     case "agent_start": return { title: triggerTitle(str(i.trigger), t), ...detail(str(i.trigger)) };
     case "agent_thought": case "agent_summary": return { title: t("Chief summary"), ...detail(str(o.text)) };
     case "llm_unavailable": return { title: t("Claude unavailable"), line: oneLine(str(o.error), 140) };

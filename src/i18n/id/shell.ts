@@ -226,7 +226,7 @@ const id: Record<string, string> = {
   "Transparent breakdown": "Rincian transparan",
   "{grams} g filament · {kwh} kWh (Bambu Lab A1 estimate, not a meter).": "{grams} g filamen · {kwh} kWh (perkiraan Bambu Lab A1, bukan meteran).",
   "Reserve = production cost × risk ÷ (1 − risk). Tax not included.": "Cadangan = biaya produksi × risiko ÷ (1 − risiko). Belum termasuk pajak.",
-  "Estimated time (hours)": "Perkiraan waktu (jam)",
+  "Ready in (hours)": "Siap dalam (jam)",
   "Make this Kesuni's quote": "Jadikan penawaran Kesuni",
   // breakdown lines from src/lib/costing.ts, rendered by the calculator
   "Material + support/waste": "Bahan + support/sisa",
@@ -245,8 +245,22 @@ const id: Record<string, string> = {
   "Price per piece": "Harga per buah",
   "Total ({n} piece)": "Total ({n} buah)",
   "Total ({n} pieces)": "Total ({n} buah)",
-  "Estimated time": "Perkiraan waktu",
+  "Colour": "Warna",
+  "Single colour": "Satu warna",
+  "Multi colour": "Multi warna",
+  "Print time": "Waktu cetak",
+  "Ready in": "Siap dalam",
+  "{a}–{b} min": "{a}–{b} mnt",
+  "{a}–{b} h": "{a}–{b} jam",
+  "{a}–{b} days": "{a}–{b} hari",
+  "{n} days": "{n} hari",
+  "± {n} hour": "± {n} jam",
   "± {n} hours": "± {n} jam",
+  "± {n} hours · about {d} days": "± {n} jam · sekitar {d} hari",
+  "{mode}: {range} min of printing per gram. Up to {printers} pieces print at the same time, one per printer. Ready in adds {hours} h to collect, check and pack.":
+    "{mode}: {range} mnt cetak per gram. Maksimal {printers} buah dicetak bersamaan, satu per printer. Siap dalam sudah termasuk {hours} jam untuk ambil, cek, dan kemas.",
+  "{mode}: {range} min of printing per gram. One piece prints at a time. Ready in adds {hours} h to collect, check and pack.":
+    "{mode}: {range} mnt cetak per gram. Buah dicetak satu per satu. Siap dalam sudah termasuk {hours} jam untuk ambil, cek, dan kemas.",
 
   // Overview
   "Studio overview": "Ringkasan studio",
@@ -283,7 +297,6 @@ const id: Record<string, string> = {
   "Reviews": "Ulasan",
   "{n} · quality {quality} · communication {communication} · value {value}": "{n} · kualitas {quality} · komunikasi {communication} · nilai {value}",
   "No orders yet.": "Belum ada pesanan.",
-  "{id} · {units} · budget {budget} {unit} · due {due} ·": "{id} · {units} · anggaran {budget} {unit} · tenggat {due} ·",
   "{n} units": "{n} unit",
   "agreed": "disepakati",
 

@@ -8,6 +8,7 @@ import type {
 } from "@/lib/types";
 import EscrowPanel from "./EscrowPanel";
 import PrinterPanel from "./PrinterPanel";
+import PrintPanel from "./PrintPanel";
 import FilesPanel from "./FilesPanel";
 import AgreementPanel from "./AgreementPanel";
 import ActualPanel from "./ActualPanel";
@@ -24,6 +25,11 @@ import { useT } from "@/i18n/client";
 import type { T } from "@/i18n/core";
 import { rich, units } from "./rich";
 import { tLib } from "@/lib/lib-text";
+import type { IssueTexts } from "@/app/machines/printer-details";
+import { useIssueTexts } from "@/app/machines/use-issue-texts";
+import { budgetText } from "@/lib/budget";
+import { nameOf } from "@/lib/colors";
+import ColorSwatch from "@/app/components/ColorSwatch";
 
 interface OrderData {
   order: Order;
@@ -62,9 +68,11 @@ async function post(url: string, body?: unknown) {
   return { ok: res.ok, data: await res.json() };
 }
 
-export default function OrderView({ id }: { id: string }) {
+/** issueTexts: Bambu's words for the printer faults reported when the page was made (the table is server-only). */
+export default function OrderView({ id, issueTexts = {} }: { id: string; issueTexts?: IssueTexts }) {
   const t = useT();
   const [data, setData] = useState<OrderData | null>(null);
+  useIssueTexts(data?.printers ?? [], issueTexts);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
@@ -154,7 +162,15 @@ export default function OrderView({ id }: { id: string }) {
               <div><dt>{t("Quantity")}</dt><dd>{order.quantity}</dd></div>
               <div><dt>{t("Deadline")}</dt><dd>{order.deadline}</dd></div>
               <div><dt>{t("Design version")}</dt><dd>{order.designVersion}</dd></div>
-              <div><dt>{t("Budget mandate")}</dt><dd>{microToUsdc(order.mandateMicro)} {usdc}</dd></div>
+              <div><dt>{t("Budget mandate")}</dt><dd>{budgetText(order, t, data.network.isTestnet)}</dd></div>
+              {(order.material || order.preferredColors?.length) && (
+                <div><dt>{t("Material")}</dt><dd>
+                  {order.material ?? ""}
+                  {order.preferredColors?.map((c) => (
+                    <span key={c.type + c.color} style={{ whiteSpace: "nowrap" }}> <ColorSwatch color={c.color} size={14} /> {t(c.name ?? nameOf(c.color))}</span>
+                  ))}
+                </dd></div>
+              )}
               <div><dt>{t("Status")}</dt><dd><b>{t(order.status)}</b></dd></div>
             </dl>
           </section>
@@ -165,7 +181,7 @@ export default function OrderView({ id }: { id: string }) {
         </div>
 
         <div className="order-main">
-          <WeightPricePanel order={order} quotes={quotes} pricing={data.pricing} budgetIdr={Math.round((order.mandateMicro / 1e6) * data.idrPerUsdc)}
+          <WeightPricePanel order={order} quotes={quotes} pricing={data.pricing} budgetIdr={order.budgetIdr ?? Math.round((order.mandateMicro / 1e6) * data.idrPerUsdc)}
             minMarginPct={data.ownerRules.minMarginPct} busy={busy} act={act} />
 
           <AgreementPanel order={order} quotes={quotes} agreementCurrent={data.agreementCurrent} idrPerUsdc={data.idrPerUsdc} busy={busy} act={act} />
@@ -217,7 +233,9 @@ export default function OrderView({ id }: { id: string }) {
           </section>
 
           <FilesPanel order={order} attachments={data.attachments} onChange={load} />
-          <PrinterPanel order={order} printers={data.printers} tasks={data.tasks} busy={busy} act={act} onChange={load} />
+          <PrintPanel order={order} attachments={data.attachments} printers={data.printers} paid={escrow?.state === "FUNDED"} issueTexts={issueTexts}
+            busy={busy} act={act} onChange={load} />
+          <PrinterPanel order={order} printers={data.printers} tasks={data.tasks} busy={busy} act={act} onChange={load} issueTexts={issueTexts} />
 
           {/* 3. Evidence */}
           <section className="card">
@@ -416,6 +434,13 @@ function summarize(e: AgentLogEntry, t: T): string {
     });
   }
   if (e.tool === "customer_review") return t("customer left a review");
+  if (e.tool === "customer_colors") {
+    const names = Array.isArray(input.colors) ? (input.colors as { name?: string; color?: string }[]).map((c) => t(c.name ?? nameOf(String(c.color)))) : [];
+    return t("customer chose {choice}", { choice: [input.material ? String(input.material) : "", ...names].filter(Boolean).join(" · ") || t("none") });
+  }
+  if (e.tool === "start_print") return t("{name} started plate {plate} on {printer}", { name: String(input.by ?? ""), plate: String(input.plate ?? ""), printer: String(out?.printer ?? input.printerId ?? "") });
+  if (e.tool === "printer_command") return `${String(input.kind ?? "")} · ${t("by {name}", { name: String(input.by ?? "") })}`;
+  if (e.tool === "print_job") return t("sent to {printer}", { printer: String(out?.printer ?? "") });
   if (e.tool === "message_customer") return t("wrote to the customer: “{text}”", { text: String(input.text ?? "") });
   if (e.tool === "customer_decision") return (input.accepted ? t("customer accepted") : t("customer rejected"));
   if (e.tool === "release_escrow" || e.tool === "refund_escrow") return t("sent on the agent's own, after the policy check");

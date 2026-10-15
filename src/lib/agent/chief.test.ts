@@ -124,7 +124,7 @@ describe("Chief Kesuni Officer (Claude, faked)", () => {
     await runChief(ORDER);
     const quotes = store.listQuotes(ORDER);
     expect(quotes).toHaveLength(1);
-    expect(quotes[0].priceMicro).toBe(28_130_000); // Rp450.000 at Rp16.000 per USDC, whole cents
+    expect(quotes[0].priceMicro).toBe(28_125_000); // Rp450.000 at Rp16.000 per USDC, to the micro-USDC
     expect(store.getOrder(ORDER)!.gramPricing).toMatchObject({ gramsPerUnit: 300, unitPriceIdr: 450_000, by: "agent" });
   });
 

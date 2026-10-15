@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { customerDecide, customerPay, customerView, orderForToken, refreshPayment } from "@/lib/customer";
+import { customerDecide, customerPay, customerSetColors, customerView, orderForToken, refreshPayment } from "@/lib/customer";
 import { fail, failWith, readJson, str } from "@/lib/http";
 import { customerAgree } from "@/lib/agreement";
 import { customerReview } from "@/lib/reputation";
@@ -18,6 +18,7 @@ export async function GET(_req: Request, ctx: Ctx) {
 // POST { action: "agree", by } | { action: "pay", agree?: true, by? } | { action: "accept", by, note, checked: true }
 //    | { action: "reject", by, note }
 //    | { action: "review", quality, communication, value, text, by }
+//    | { action: "colors", material: "PLA" | "PETG" | null, colors: [{ type, color }] } (while Kesuni prepares the price)
 export async function POST(req: Request, ctx: Ctx) {
   const { token } = await ctx.params;
   const order = orderForToken(token);
@@ -28,6 +29,10 @@ export async function POST(req: Request, ctx: Ctx) {
     const a = customerAgree(order.id, str(b?.by));
     if (!a.ok) return failWith(a);
     if (action === "agree") return NextResponse.json({ ok: true, agreement: a.agreement });
+  }
+  if (action === "colors") {
+    const r = customerSetColors(order.id, { material: b?.material, colors: b?.colors });
+    return r.ok ? NextResponse.json({ ok: true, choice: r.choice }) : failWith(r);
   }
   if (action === "review") {
     const r = customerReview(order.id, b ?? {});
@@ -43,5 +48,5 @@ export async function POST(req: Request, ctx: Ctx) {
     });
     return r.ok ? NextResponse.json(r) : failWith(r);
   }
-  return fail(400, 'Expected { action: "agree" | "pay" | "accept" | "reject" | "review" }');
+  return fail(400, 'Expected { action: "agree" | "pay" | "accept" | "reject" | "review" | "colors" }');
 }

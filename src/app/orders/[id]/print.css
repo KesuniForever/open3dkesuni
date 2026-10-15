@@ -1,0 +1,95 @@
+/* Order page, "Colours & print" (PrintPanel.tsx): the sliced file, the printer and AMS slots, the start, the jobs. */
+.pp { scroll-margin-top: 80px; }
+.pp-h { font-size: 13px; font-weight: 600; color: var(--muted); margin: 18px 0 8px; }
+.pp-hint { font-size: 12.5px; }
+.pp-empty { font-size: 14px; line-height: 1.55; }
+.pp-pick { margin-bottom: 8px; }
+.pp-file { margin: 0 0 10px; font-size: 13.5px; overflow-wrap: anywhere; }
+
+/* customer's colours */
+.pp-wish { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.pp-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.pp-wish ul, .pp-filaments { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.pp-wish li, .pp-filaments li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.pp-wish li > span, .pp-filaments li > span { display: flex; flex-direction: column; min-width: 0; }
+.pp-wish small, .pp-filaments small { font-size: 11.5px; color: var(--muted); }
+.pp-wish small.pp-missing { color: var(--warn); }
+
+/* the plate */
+.pp-plate { display: grid; gap: 10px; padding: 12px 0; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+.pp-facts { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0; }
+.pp-facts > div { display: flex; flex-direction: column; min-width: 0; }
+.pp-facts dt { font-size: 11.5px; color: var(--muted); }
+.pp-facts dd { margin: 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* price from the slicer's grams */
+.pp-price { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; margin-top: 12px; }
+.pp-units { flex: 0 0 130px; }
+.pp-price-text { flex: 1 1 160px; font-size: 13.5px; padding-bottom: 10px; }
+.pp-price-buttons { flex: 1 1 100%; gap: 8px; }
+
+/* printers */
+.pp-printers { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.pp-printers label { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; color: var(--text); font-size: 14px; }
+.pp-printers li.on label { border-color: var(--ring); background: var(--tint); }
+.pp-printers input { width: auto; min-height: 0; margin: 3px 0 0; accent-color: var(--primary); }
+.pp-printer-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pp-printer-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 8px; }
+.pp-printer-top b { white-space: nowrap; }
+.pp-printer-name small { font-size: 12px; color: var(--muted); font-weight: 400; overflow-wrap: anywhere; }
+.pp-printers .badge { flex: none; }
+.pp-detail { display: grid; gap: 12px; margin-top: 12px; }
+.pp-detail > .alert { margin: 0; }
+.pp-fault { padding: 10px 12px; border-radius: 10px; background: var(--bad-bg); color: var(--bad); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.pp-fault.warn { background: var(--warn-bg); color: var(--warn); }
+.pp-fault code { background: rgba(255, 255, 255, 0.7); }
+.pp-fault a { color: inherit; font-weight: 600; }
+.pp-ext { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+
+/* AMS mapping: one row per filament */
+.pp-map { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.pp-map li { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.2fr); align-items: center; gap: 10px; }
+.pp-map-file, .pp-map-slot { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; }
+.pp-map-file > span { display: flex; flex-direction: column; min-width: 0; }
+.pp-map-file small { font-size: 11.5px; color: var(--muted); }
+.pp-map-arrow { color: var(--faint); }
+.pp-map-slot select { min-width: 0; }
+@media (max-width: 560px) {
+  .pp-map li { grid-template-columns: minmax(0, 1fr); gap: 6px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
+  .pp-map-arrow { display: none; }
+}
+
+/* options, warnings and the person's checks */
+.pp-options > summary { overflow-wrap: anywhere; }
+.pp-checks { display: grid; gap: 8px; }
+.pp-check { display: flex; align-items: flex-start; gap: 8px; color: var(--text); font-size: 14px; font-weight: 400; cursor: pointer; }
+.pp-check input { margin-top: 3px; flex: none; }
+.pp-warn { padding: 10px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); font-size: 13.5px; }
+.pp-warn ul { margin: 0 0 8px; padding-left: 18px; }
+.pp-must { padding: 12px; border: 1px dashed var(--input); border-radius: 10px; }
+.pp-confirm-map { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.pp-confirm-map li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* print jobs */
+.pp-jobs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.pp-jobs > li { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 6px; }
+.pp-job-head { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13px; overflow-wrap: anywhere; }
+.pp-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.pp-steps li { font-size: 11.5px; padding: 2px 8px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.pp-steps li.done { background: var(--ok-bg); color: var(--ok); }
+.pp-steps li.now { background: var(--primary); color: var(--lime); font-weight: 600; }
+.pp-steps li.bad { background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+.pp-job-live { margin: 0; font-size: 13px; font-weight: 600; }
+.pp-job-error { margin: 0; font-size: 13px; color: var(--bad); overflow-wrap: anywhere; }
+.pp-job-actions { gap: 8px; font-size: 13px; }
+.pp-job-actions:empty { display: none; }
+.pp-job-actions button { min-height: 30px; padding: 4px 12px; font-size: 13px; }
+.pc-dialog::backdrop { background: rgba(32, 41, 54, 0.35); }
+
+/* "Printers and operator tasks" (PrinterPanel.tsx): on a phone the Assign / Unlink button moves under the printer's
+   name, so it is visible without scrolling the table sideways. */
+.pr-act-inline { display: none; margin-top: 6px; }
+@media (max-width: 480px) {
+  .pr-table .pr-act-col { display: none; }
+  .pr-act-inline { display: block; }
+}

@@ -6,7 +6,10 @@ import type { Order } from "./types";
 import { makeT } from "../i18n/core";
 import { ID } from "../i18n/id";
 
-const ENV = ["KESUNI_MIN_ORDER_IDR", "KESUNI_OWNER_APPROVAL_ABOVE_IDR", "KESUNI_PRICE_PER_GRAM_IDR", "KESUNI_GRAMS_PER_HOUR", "KESUNI_PRINTER_COUNT"];
+const ENV = [
+  "KESUNI_MIN_ORDER_IDR", "KESUNI_OWNER_APPROVAL_ABOVE_IDR", "KESUNI_PRICE_PER_GRAM_IDR", "KESUNI_PRINTER_COUNT",
+  "KESUNI_PRINT_MIN_PER_GRAM_MULTI", "KESUNI_HANDLING_HOURS",
+];
 
 beforeEach(() => {
   for (const k of ENV) delete process.env[k];
@@ -91,8 +94,15 @@ describe("demo scenarios: one simulated order each, through the real engine", ()
     const o = run("late-deadline");
     expect(o.status).toBe("CREATED");
     expect(o.deadline).toBe(jakartaToday());
+    // Multi colour: 4 × 60 g on 3 printers = 2 rounds × 60 g × 15 min = 1800 min → 30 h + 1 h. Over a day, so it is
+    // refused whatever the time of day the scenario runs, though handling is only 1 h now.
+    expect(o.gramPricing).toMatchObject({ colorMode: "multi", gramsPerUnit: 60, quantity: 4 });
+    expect(quotes(o)[0].etaHours).toBe(31);
     const check = ownerRuleReasons(o, quotes(o)[0]);
-    expect(check.reasons.join()).toMatch(/finishes after the deadline .* \(SLA\)/);
+    expect(check.reasons.join()).toMatch(/ETA 31h finishes after the deadline .* \(SLA\)/);
+    // Even at one second past midnight in Jakarta.
+    const midnight = Date.parse(`${o.deadline}T00:00:01+07:00`);
+    expect(ownerRuleReasons(o, quotes(o)[0], midnight).reasons.join()).toMatch(/SLA/);
     expect(check.reasons.join()).not.toMatch(/owner approval needed/);
     expect(check.ownerCanApprove).toBe(false);
     expect(openTasks(o)).toHaveLength(1);
@@ -137,6 +147,16 @@ describe("owner's rules from .env.local", () => {
     expect(ownerRuleReasons(o, quotes(o)[0]).reasons.join()).toMatch(/above Rp3\.000\.000/);
   });
 
+  it("late deadline: a setup fast enough to finish today says which settings to check, and makes no plan", () => {
+    process.env.KESUNI_PRINT_MIN_PER_GRAM_MULTI = "1-1"; // 2 rounds × 60 g × 1 min = 2 h + 1 h
+    process.env.KESUNI_HANDLING_HOURS = "0";
+    const r = runScenario("late-deadline", new Date(Date.parse("2099-01-01T08:00:00+07:00")));
+    // A deadline far in the future here, so the plan is not refused: the scenario explains instead of pretending.
+    if (r.ok) throw new Error("expected a refusal");
+    expect(r.error).toMatch(/KESUNI_PRINTER_COUNT and KESUNI_PRINT_MIN_PER_GRAM_MULTI/);
+    expect(store.getOrder(r.orderId!)!.status).toBe("CREATED");
+  });
+
   it("no minimum set: the below-minimum scenario says so and makes nothing", () => {
     process.env.KESUNI_MIN_ORDER_IDR = "0";
     const n = store.listOrders().length;
@@ -175,6 +195,8 @@ describe("demo center lists", () => {
     expect(f["above-limit"]).toBe("Owner approval above Rp1.000.000");
     expect(f["below-minimum"]).toBe("Owner minimum Rp100.000");
     expect(f.smooth).toBe("Rp1.500 per gram, own studio");
+    expect(f["late-deadline"]).toBe("4 × 60 g multi colour: ready in ± 31 h, due today");
+    expect(demoFacts(makeT("id", ID))["late-deadline"]).toBe("4 × 60 g multi warna: siap dalam ± 31 jam, tenggat hari ini");
     expect(f["printer-offline"]).toBe("Live: 1 of 2 printers online");
   });
 

@@ -6,11 +6,13 @@ import { callTool, LLM_TOOLS, redactNote, TOOLS } from "./tools";
 import { chooseQuote, createOrder } from "../actions";
 import { setSlicerGrams } from "../agreement";
 import { completeTask, ingestReport, linkPrinter } from "../printer/actions";
-import type { PrinterSnapshot } from "../printer/bambu";
+import { detectEvents, mergeReport, type PrinterSnapshot } from "../printer/bambu";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 /** A person at Kesuni enters grams per unit from the slicer: the only grams the agent may price with. */
-const slicer = (gramsPerUnit: number, orderId = "ORD-001") => {
-  const r = setSlicerGrams(orderId, { gramsPerUnit, source: "Bambu Studio, plate 1", by: "operator" });
+const slicer = (gramsPerUnit: number, orderId = "ORD-001", colorMode?: "single" | "multi") => {
+  const r = setSlicerGrams(orderId, { gramsPerUnit, source: "Bambu Studio, plate 1", by: "operator", colorMode });
   if (!r.ok) throw new Error(r.error);
 };
 
@@ -142,11 +144,31 @@ describe("price_by_weight (agent tool)", () => {
     const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
     const made = createOrder({ product: "Casing", quantity: 40, deadline: tomorrow, designVersion: "v1", mandateMicro: 125_000_000, label: "real" });
     if (!made.ok) throw new Error(made.error);
-    slicer(15, made.order.id);
+    slicer(15, made.order.id, "multi");
     const r = callTool("price_by_weight", { orderId: made.order.id, gramsPerUnit: 15, source: "Bambu Studio", etaHours: 2 });
     const quote = (r.data as { quote: { id: string; etaHours: number } }).quote;
-    expect(quote.etaHours).toBe(44); // 24 h + 600 g on 2 printers at ~15 g/h
+    // Multi colour, as the operator entered: 40 units on 3 printers = 14 rounds × 15 g × 15 min = 3150 min → 53 h + 1 h
+    expect(quote.etaHours).toBe(54);
     expect(JSON.stringify(callTool("choose_plan", { orderId: made.order.id, quoteId: quote.id, reason: "x" }).data)).toMatch(/SLA/);
+  });
+
+  it("uses the colour mode a person entered with the slicer grams; older grams without one are single colour", () => {
+    slicer(30, "ORD-001", "multi");
+    const multi = callTool("price_by_weight", { orderId: "ORD-001", gramsPerUnit: 30, source: "Bambu Studio" });
+    // 1 unit: 30 g × 5–15 min = 150–450 min → 8 h + 1 h. Same price as single colour.
+    expect(multi.data).toMatchObject({ colorMode: "multi", totalIdr: 45_000, printMinutes: { min: 150, max: 450 }, etaHours: 9 });
+    expect(store.getOrder("ORD-001")!.gramPricing).toMatchObject({ colorMode: "multi", by: "agent" });
+    expect(JSON.stringify(callTool("get_order", { orderId: "ORD-001" }).data)).toMatch(/"slicerGrams":\{"gramsPerUnit":30,"source":"Bambu Studio, plate 1","colorMode":"multi"\}/);
+    // A row saved before the colour mode existed.
+    const { colorMode: _old, ...older } = store.getOrder("ORD-001")!.slicerGrams!;
+    void _old;
+    store.saveOrder({ ...store.getOrder("ORD-001")!, slicerGrams: older });
+    const single = callTool("price_by_weight", { orderId: "ORD-001", gramsPerUnit: 30, source: "Bambu Studio" });
+    expect(single.data).toMatchObject({ colorMode: "single", totalIdr: 45_000, printMinutes: { min: 90, max: 150 }, etaHours: 4 });
+    // The Chief cannot pick a faster colour mode itself: an input it sends is ignored.
+    slicer(30, "ORD-001", "multi");
+    const forced = callTool("price_by_weight", { orderId: "ORD-001", gramsPerUnit: 30, source: "Bambu Studio", colorMode: "single" });
+    expect(forced.data).toMatchObject({ colorMode: "multi", etaHours: 9 });
   });
 });
 
@@ -200,5 +222,76 @@ describe("what the agent may see", () => {
     store.saveOrder({ ...store.getOrder("ORD-001")!, customerName: "Aini", customerNote: "hp 081234567890" });
     const r = callTool("get_order", { orderId: "ORD-001" });
     expect(JSON.stringify(r.data)).not.toMatch(/Aini|081234567890/);
+  });
+});
+
+describe("printers: the Chief reads their status, only people control them", () => {
+  const CONTROL_WORD = /\b(start|pause|resum|stop|speed|light|print_now|gcode|g-code)/i;
+
+  it("no tool can start, pause, resume or stop a print, or change a printer's speed or light", () => {
+    for (const t of TOOLS) {
+      expect(t.name, t.name).not.toMatch(CONTROL_WORD);
+      expect(t.description, t.name).not.toMatch(CONTROL_WORD);
+      expect(JSON.stringify(t.inputSchema), t.name).not.toMatch(CONTROL_WORD);
+    }
+    for (const name of ["pause_print", "stop_print", "start_print", "set_speed", "light_on", "printer_command"]) {
+      expect(callTool(name, { orderId: "ORD-001" }).ok, name).toBe(false);
+    }
+  });
+
+  it("the agent's code never imports the printer controls or the print-job code", () => {
+    const dir = path.join(process.cwd(), "src", "lib", "agent");
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))) {
+      const src = readFileSync(path.join(dir, file), "utf8");
+      expect(src, file).not.toMatch(/printer\/(jobs|control)["']/);
+      expect(src, file).not.toMatch(/createPrinterCommand|createPrintJob|buildMqttPayload|updateQueueItem/);
+    }
+  });
+
+  it("get_production_status shows what each printer is doing, its faults and its spools (read-only)", () => {
+    const report = (print: Record<string, unknown>, prev?: PrinterSnapshot) => {
+      const next = mergeReport(prev, { print }, new Date().toISOString())!;
+      ingestReport("a1-3", next, detectEvents(prev, next));
+      return next;
+    };
+    report({
+      gcode_state: "PREPARE", stg: [2, 13, 1], stg_cur: 2, spd_lvl: 2, sdcard: true, nozzle_diameter: "0.4",
+      hms: [{ attr: 84935680, code: 65604 }],
+      ams: { ams: [{ id: "0", info: "1002", tray: [{ id: "0", tray_type: "PLA", tray_color: "FF6910FF" }, { id: "1" }] }] },
+    });
+    const data = callTool("get_production_status", { orderId: "ORD-001" }).data as { printers: Record<string, unknown>[]; printJobs: unknown[] };
+    expect(data.printers[0]).toMatchObject({
+      id: "a1-3", state: "PREPARE", stage: "Heatbed preheating", needsPerson: false, speed: "Standard", nozzleMm: "0.4", sdCard: true,
+      faults: [{ code: "HMS_0510_0400_0001_0044", level: "fatal", text: "The firmware of AMS lite does not match the printer. Please upgrade it on the \"Firmware\" page." }],
+      spools: [{ slot: 1, material: "PLA", color: "#FF6910", colorName: "Orange" }], spoolColoursChecked: false,
+    });
+    expect(data.printJobs).toEqual([]);
+  });
+});
+
+describe("materials: the Chief prices PLA and PETG", () => {
+  beforeEach(() => { process.env.IDR_PER_USDC = "16000"; });
+  afterEach(() => { delete process.env.IDR_PER_USDC; delete process.env.KESUNI_PRICE_PER_GRAM_IDR_PETG; });
+
+  it("prices an order whose material is PETG, at the PETG price per gram", () => {
+    process.env.KESUNI_PRICE_PER_GRAM_IDR_PETG = "1800";
+    store.saveOrder({ ...store.getOrder("ORD-001")!, material: "PETG", customerNote: "Pakai PETG ya, warna hitam" });
+    slicer(100);
+    const get = callTool("get_order", { orderId: "ORD-001" }).data as { material: string; pricingBlockedBy: string | null };
+    expect(get).toMatchObject({ material: "PETG", pricingBlockedBy: null });
+    const r = callTool("price_by_weight", { orderId: "ORD-001", gramsPerUnit: 100, source: "Bambu Studio" });
+    expect(r.data).toMatchObject({ unitPriceIdr: 180_000, totalIdr: 180_000 });
+    expect(store.getOrder("ORD-001")!.gramPricing).toMatchObject({ pricePerGramIdr: 1800, costPerGramIdr: 750 });
+  });
+
+  it("PETG in the note of an order that is not PETG still goes to a person; so do other materials", () => {
+    store.saveOrder({ ...store.getOrder("ORD-001")!, material: "PLA", customerNote: "PETG kalau bisa" });
+    expect((callTool("get_order", { orderId: "ORD-001" }).data as { pricingBlockedBy: string }).pricingBlockedBy)
+      .toBe('The order mentions "PETG" but its material is PLA: a person checks which material it is');
+    store.saveOrder({ ...store.getOrder("ORD-001")!, material: "PETG", customerNote: "PETG atau ABS" });
+    expect((callTool("get_order", { orderId: "ORD-001" }).data as { pricingBlockedBy: string }).pricingBlockedBy).toMatch(/mentions "ABS"/);
+    store.saveOrder({ ...store.getOrder("ORD-001")!, material: "PETG", customerNote: "", spec: { dimensions: "", toleranceMm: 0.2, material: "PLA", color: "", layerMm: 0.2, infillPct: 15, finishing: "Standard", promise: "" } });
+    expect((callTool("get_order", { orderId: "ORD-001" }).data as { pricingBlockedBy: string }).pricingBlockedBy)
+      .toBe('The order\'s material is PETG but the spec says "PLA": a person checks which one it is');
   });
 });

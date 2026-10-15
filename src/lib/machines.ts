@@ -2,7 +2,7 @@
 // into what one machine card shows. Pure functions with no store access, so the page's client component
 // can re-shape every poll in the browser. Readings are only what the Bambu A1 reports over LAN MQTT.
 import type { OperatorTask, Printer } from "./types";
-import { errorCodeText, type PrinterState } from "./printer/bambu";
+import { activeIssues, BENIGN_PRINT_ERRORS, errorCodeText, type PrinterSnapshot, type PrinterState } from "./printer/bambu";
 import { makeT, type T, type Vars } from "../i18n/core";
 
 /** English, for callers that pass no translator (tests, the agent). The page passes its own t for Indonesian. */
@@ -50,9 +50,16 @@ export function isOnline(p: Printer, now: number): boolean {
   return Boolean(p.lastSeen) && now - Date.parse(p.lastSeen!) <= ONLINE_MS;
 }
 
+/** A fault that blocks printing: a fatal or serious HMS message, or a device error (same rule as printer/actions.ts). */
+export function blockingFaultCode(s: Pick<PrinterSnapshot, "hms" | "errorCode"> | undefined): string | null {
+  return (s ? activeIssues(s) : []).find((i) => i.kind === "print_error" || i.severity === 1 || i.severity === 2)?.code ?? null;
+}
+
 /** Same rules and words as notReadyReason in printer/actions.ts (that module needs the store, so it cannot run in the browser). */
 export function notReadyMsg(p: Printer, now: number): Msg | null {
   if (!isOnline(p, now)) return { key: "offline (no report in the last 2 min)" };
+  const fault = blockingFaultCode(p.snapshot);
+  if (fault) return { key: "printer error {code}", vars: { code: fault } };
   if (p.currentOrderId) return { key: "busy with {id}", vars: { id: p.currentOrderId } };
   if (p.bedOccupiedBy) {
     return p.bedOccupiedBy === NO_ORDER_PRINT
@@ -95,14 +102,18 @@ function pill(p: Printer, online: boolean, now: number, t: T): MachineView["pill
   if (!online) return { tone: "bad", text: t("Offline · {ago}", { ago: ago(p.lastSeen, now, t) }) };
   if (!s || s.state === "UNKNOWN") return { tone: "idle", text: t("Online · No status yet") };
   const pct = `${Math.floor(s.percent)}%`;
-  if ((s.state === "PAUSE" || s.state === "FAILED") && s.errorCode) return { tone: "bad", text: t("Error {code}", { code: errorCodeText(s.errorCode) }) };
+  // A fault that blocks printing is red whatever the state (printer #3's AMS firmware HMS while idle, a clog while paused).
+  const fault = blockingFaultCode(s);
+  if (fault) return { tone: "bad", text: fault.startsWith("HMS_") ? t("Printer error") : t("Error {code}", { code: fault }) };
   switch (s.state) {
-    case "FAILED": return { tone: "bad", text: t("Print failed") };
+    // A person's Stop ends as FAILED with "task cancelled": not a failure.
+    case "FAILED": return BENIGN_PRINT_ERRORS.includes(s.errorCode >>> 0) ? { tone: "warn", text: t("Print stopped") } : { tone: "bad", text: t("Print failed") };
     case "PAUSE": return { tone: "warn", text: t("Paused {pct}", { pct }) };
     case "RUNNING": return { tone: "busy", text: t("Printing {pct}", { pct }) };
     case "PREPARE": return { tone: "busy", text: t("Preparing") };
     case "SLICING": return { tone: "busy", text: t("Slicing") };
     case "FINISH": return { tone: "ok", text: t("Online · Finished") };
+    case "INIT": return { tone: "idle", text: t("Starting up") };
     default: return { tone: "ok", text: t("Online · Idle") };
   }
 }

@@ -27,9 +27,9 @@ const ALONE: Record<string, string> = {
   arc_verify: "Check transfers on Arc", release: "Release escrow after acceptance", refund: "Refund after rejection",
 };
 const PERSON: Record<string, string> = {
-  qc: "Does not approve QC or reprints", printability: "Does not judge printability", material: "No materials beyond plain PLA",
+  qc: "Does not approve QC or reprints", printability: "Does not judge printability", material: "No materials beyond PLA and PETG",
   machines: "No machines Kesuni does not run", price_change: "Does not change prices or rules", money: "Does not send funds",
-  unknown: "Does not act on missing data", disputes: "Does not settle disputes",
+  unknown: "Does not act on missing data", disputes: "Does not settle disputes", printers: "Does not run the printers",
 };
 
 const FEED_ICON: Record<string, { icon: IconName; tone: string }> = {

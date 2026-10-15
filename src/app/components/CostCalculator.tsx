@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { KESUNI_DEFAULTS, calculate, type CostInput } from "@/lib/costing";
+import { KESUNI_DEFAULTS, calculate, costingEtaHours, type CostInput } from "@/lib/costing";
 import { useT } from "@/i18n/client";
 
 const rp = (n: number) => `Rp${Math.round(n).toLocaleString("id-ID")}`;
@@ -70,7 +70,7 @@ export default function CostCalculator({ initial, lockQuantity, budgetIdr, idrPe
   );
   const loss = c.profitIdr < 0;
   const overBudget = budgetIdr !== undefined && c.revenueIdr > budgetIdr;
-  const etaDefault = Math.ceil(input.machineHours + input.laborHours + 24);
+  const etaDefault = costingEtaHours(input);
 
   return (
     <div className="calc">
@@ -124,7 +124,7 @@ export default function CostCalculator({ initial, lockQuantity, budgetIdr, idrPe
 
         {onUse && (
           <div className="calc-use">
-            <label>{t("Estimated time (hours)")}
+            <label>{t("Ready in (hours)")}
               <input type="number" min={1} value={eta} placeholder={String(etaDefault)} onChange={(e) => setEta(e.target.value)} />
             </label>
             <button className="primary" type="button" disabled={busy || loss || c.revenueIdr <= 0}

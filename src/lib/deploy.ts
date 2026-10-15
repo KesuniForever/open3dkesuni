@@ -87,9 +87,13 @@ export const ENV_VARS: EnvVar[] = [
   { name: "IDR_PER_USDC", need: "optional", what: "Rupiah per USDC; default 16500" },
   { name: "KESUNI_PRICE_PER_GRAM_IDR", need: "optional", what: "Price per gram" },
   { name: "KESUNI_COST_PER_GRAM_IDR", need: "optional", what: "Cost per gram" },
+  { name: "KESUNI_PRICE_PER_GRAM_IDR_PETG", need: "optional", what: "PETG price per gram; default the PLA price" },
+  { name: "KESUNI_COST_PER_GRAM_IDR_PETG", need: "optional", what: "PETG cost per gram; default the PLA cost" },
   { name: "KESUNI_PRICE_ROUND_IDR", need: "optional", what: "Price rounding step" },
-  { name: "KESUNI_GRAMS_PER_HOUR", need: "optional", what: "Print speed for lead times" },
-  { name: "KESUNI_PRINTER_COUNT", need: "optional", what: "Printers for lead times" },
+  { name: "KESUNI_PRINT_MIN_PER_GRAM_SINGLE", need: "optional", what: "Print minutes per gram, single colour; default 3-5" },
+  { name: "KESUNI_PRINT_MIN_PER_GRAM_MULTI", need: "optional", what: "Print minutes per gram, multi colour; default 5-15" },
+  { name: "KESUNI_HANDLING_HOURS", need: "optional", what: "Hours to collect, check and pack after printing; default 1" },
+  { name: "KESUNI_PRINTER_COUNT", need: "optional", what: "Printers that print units side by side; default 3" },
   { name: "KESUNI_MIN_ORDER_IDR", need: "optional", what: "Owner rule: minimum order" },
   { name: "KESUNI_PARTNER_MIN_IDR", need: "optional", what: "Owner rule: minimum for a partner job" },
   { name: "KESUNI_OWNER_APPROVAL_ABOVE_IDR", need: "optional", what: "Owner rule: approval above this amount" },
@@ -110,6 +114,11 @@ export const ENV_VARS: EnvVar[] = [
   { name: "PRINTER_ACCESS_CODE", need: "bridge-only", what: "Printer access code (studio PC)" },
 ];
 
+/** Variables the app used to read and no longer does: a leftover value is silently ignored, so the check says so. */
+export const RETIRED_ENV_VARS: { name: string; why: string }[] = [
+  { name: "KESUNI_GRAMS_PER_HOUR", why: "print time now comes from KESUNI_PRINT_MIN_PER_GRAM_SINGLE and _MULTI" },
+];
+
 export interface EnvLine extends EnvVar { set: boolean }
 export interface EnvReport { lines: EnvLine[]; problems: string[]; warnings: string[] }
 
@@ -120,6 +129,9 @@ export function envReport(env: Env): EnvReport {
   for (const l of lines) {
     if (l.need === "keep-unset" && l.set) warnings.push(`${l.name} is set: ${l.what}`);
     if (l.need === "recommended" && !l.set) warnings.push(`${l.name} is not set: ${l.what}`);
+  }
+  for (const r of RETIRED_ENV_VARS) {
+    if (filled(env[r.name]) !== "") warnings.push(`${r.name} is retired and no longer read (${r.why}): delete it`);
   }
   const bridgeOnly = Object.keys(env).filter((k) => /^PRINTER(_\d+)?_(IP|SERIAL|ACCESS_CODE)$/.test(k) || k === "APP_URL");
   if (bridgeOnly.length) warnings.push(`Not needed on the server (printer bridge only), better removed: ${bridgeOnly.sort().join(", ")}`);

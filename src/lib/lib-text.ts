@@ -12,8 +12,8 @@ const SHAPE: Record<string, string> = {
   status: "[A-Z_]+", state: "[A-Z_]+", from: "[A-Z_]+", to: "[A-Z_]+",
   order: "[A-Z]+-[\\w-]+|a print without an order",
 };
-/** Values that are words themselves (a status, a printer state, "2 min"): translated too. */
-const WORD_VARS = new Set(["status", "state", "order", "kind", "ext", "rating", "every"]);
+/** Values that are words themselves (a status, a printer state, "2 min", a colour name): translated too. */
+const WORD_VARS = new Set(["status", "state", "order", "kind", "ext", "rating", "every", "name", "level"]);
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -37,7 +37,10 @@ let templates: Template[] | null = null;
 const all = (): Template[] =>
   (templates ??= Object.keys(lib).filter((k) => /\{\w+\}/.test(k)).map(compile).sort((a, b) => b.literal - a.literal));
 
-/** A library text in the page's language. English stays byte-identical. */
+/**
+ * A library text in the page's language. English stays byte-identical. Several reasons joined with "; " (the printer
+ * bridge sends them so) are translated one by one when the whole text has no entry.
+ */
 export function tLib(t: T, text: string, depth = 0): string {
   const direct = t(text);
   if (direct !== text || depth > 2) return direct;
@@ -51,5 +54,6 @@ export function tLib(t: T, text: string, depth = 0): string {
     });
     return t(tpl.text, vars);
   }
+  if (depth === 0 && text.includes("; ")) return text.split("; ").map((part) => tLib(t, part, 1)).join("; ");
   return text;
 }

@@ -7,7 +7,11 @@ import financeQuality from "./finance-quality";
 import chiefOps from "./chief-ops";
 import demoTokenArc from "./demo-token-arc";
 import lib from "./lib";
+import printing from "./printing";
+import customerColors from "./customer-colors";
+import budgetMaterial from "./budget-material";
 
 export const ID: Readonly<Record<string, string>> = {
   ...lib, ...shell, ...order, ...customer, ...machinesCapacity, ...financeQuality, ...chiefOps, ...demoTokenArc,
+  ...printing, ...customerColors, ...budgetMaterial,
 };

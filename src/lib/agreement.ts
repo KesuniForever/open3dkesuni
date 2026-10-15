@@ -6,8 +6,9 @@
 import { createHash } from "node:crypto";
 import * as store from "./store";
 import { addQuote, type Fail } from "./actions";
-import { calculate, idrToMicro, parseCostInput, type CostResult } from "./costing";
-import { priceByWeight, type WeightPrice } from "./pricing";
+import { calculate, costingEtaHours, idrToMicro, parseCostInput, type CostResult } from "./costing";
+import { orderMaterial, parseColorMode, priceByWeight, pricingConfig, pricingFor, toMaterial, type WeightPrice } from "./pricing";
+import { BAD_FINISHING, specFinishing, specMaterial } from "./spec-choices";
 import type { ActualReport, Agreement, GramPricing, Order, Quote, Spec } from "./types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
@@ -20,6 +21,9 @@ function locked(orderId: string): boolean {
   return e.state !== "AWAITING_DEPOSIT" || e.txs.some((t) => t.kind === "deposit" && !["FAILED", "DENIED", "CANCELLED"].includes(t.state));
 }
 
+// The material is in the fingerprint through spec.material (setSpec keeps order.material in line with it). The
+// colours the customer picked (preferredColors) are a wish, not the promise: spec.color is what Kesuni promises. So the
+// document is unchanged and agreements made before these fields existed stay valid.
 export function agreementHash(order: Order, quote: Quote): string {
   const doc = {
     orderId: order.id, product: order.product, quantity: order.quantity, deadline: order.deadline,
@@ -43,19 +47,27 @@ export function setSpec(orderId: string, raw: Record<string, unknown>): { ok: tr
   if (!["CREATED", ...PAYABLE].includes(order.status)) return fail(409, `Order is ${order.status}; the spec is closed`);
   const text = (k: string, max = 200) => String(raw[k] ?? "").trim().slice(0, max);
   const num = (k: string) => Number(raw[k]);
+  // Material and finishing are choices, stored in English; an older free-text value is kept while it is unchanged.
+  const material = specMaterial(text("material"), order.spec?.material, order.material ?? "PLA");
+  const finishing = specFinishing(text("finishing"), order.spec?.finishing);
   const spec: Spec = {
-    dimensions: text("dimensions"), toleranceMm: num("toleranceMm"), material: text("material") || "PLA",
+    dimensions: text("dimensions"), toleranceMm: num("toleranceMm"), material: material ?? "",
     color: text("color"), layerMm: num("layerMm"), infillPct: num("infillPct"),
-    finishing: text("finishing") || "Standard", promise: text("promise", 500),
+    finishing: finishing ?? "", promise: text("promise", 500),
   };
   const r: string[] = [];
+  if (material === null) r.push("Material must be PLA or PETG");
+  if (finishing === null) r.push(BAD_FINISHING);
   if (!spec.dimensions) r.push("Dimensions are required");
   if (!(spec.toleranceMm >= 0 && spec.toleranceMm <= 10)) r.push("Tolerance must be 0–10 mm");
   if (!(spec.layerMm > 0 && spec.layerMm <= 1)) r.push("Layer height must be above 0 and at most 1 mm");
   if (!(spec.infillPct >= 0 && spec.infillPct <= 100)) r.push("Infill must be 0–100%");
   if (!spec.promise) r.push("Say how the result will be checked (the quality promise)");
   if (r.length) return fail(400, "Invalid spec", r);
-  const updated = { ...order, spec };
+  // The spec is the person's latest word on the material: the order's material follows it, so the price per gram and
+  // the Chief's material check (it hands a spec that disagrees with the order to a person) read the same material.
+  const m = toMaterial(spec.material);
+  const updated: Order = { ...order, spec, ...(m ? { material: m } : {}) };
   store.saveOrder(updated);
   return { ok: true, order: updated };
 }
@@ -73,7 +85,7 @@ export function quoteFromCosting(
   if (input.quantity !== order.quantity) return fail(400, `Quantity must match the order (${order.quantity})`);
   const result = calculate(input);
   if (result.revenueIdr <= 0) return fail(400, "Price must be above zero");
-  const etaHours = Math.max(1, Math.ceil(Number(raw.etaHours) || input.machineHours + input.laborHours + 24));
+  const etaHours = Math.max(1, Math.ceil(Number(raw.etaHours) || costingEtaHours(input)));
   const q = addQuote(orderId, { vendorId: "own", priceMicro: idrToMicro(result.revenueIdr), etaHours });
   if (!q.ok) return q;
   store.saveOrder({ ...store.getOrder(orderId)!, costing: { input, quoteId: q.quote.id, at: new Date().toISOString() } });
@@ -87,12 +99,16 @@ export function quoteFromCosting(
 
 // ---------- official price: by weight ----------
 
+const BAD_COLOR = 'Colour mode must be "single" or "multi"';
+
 /**
  * Kesuni's own quote from grams per unit (Bambu Studio). Orders in CREATED only. Re-pricing replaces the
- * previous by-weight quote when nobody chose or agreed to it, so quotes do not pile up.
+ * previous by-weight quote when nobody chose or agreed to it, so quotes do not pile up. colorMode (single colour
+ * when missing) sets the print time and so the ETA; the price per gram stays the same.
  */
 export function quoteByWeight(
-  orderId: string, input: { gramsPerUnit: number; source: string; etaHours?: unknown; by: "agent" | "human" },
+  orderId: string,
+  input: { gramsPerUnit: number; source: string; etaHours?: unknown; by: "agent" | "human"; colorMode?: unknown },
 ): { ok: true; quote: Quote; price: WeightPrice; gramPricing: GramPricing } | Fail {
   const order = store.getOrder(orderId);
   if (!order) return fail(404, "Order not found");
@@ -100,7 +116,10 @@ export function quoteByWeight(
   const source = String(input.source ?? "").trim().slice(0, 300);
   if (!source) return fail(400, "Say where the grams come from (slicer, operator note)");
   if (input.by !== "agent" && input.by !== "human") return fail(400, 'by must be "agent" or "human"');
-  const r = priceByWeight(Number(input.gramsPerUnit), order.quantity);
+  const colorMode = parseColorMode(input.colorMode);
+  if (!colorMode) return fail(400, BAD_COLOR);
+  // The order's material sets the price per gram (PETG may differ from PLA in the config).
+  const r = priceByWeight(Number(input.gramsPerUnit), order.quantity, colorMode, pricingFor(pricingConfig(), orderMaterial(order)));
   if (!r.ok) return fail(400, "Invalid weight", r.reasons);
   const p = r.price;
   const eta = Number(input.etaHours);
@@ -115,32 +134,36 @@ export function quoteByWeight(
   if (previous && !touched) store.deleteQuote(previous);
   const gramPricing: GramPricing = {
     gramsPerUnit: p.gramsPerUnit, quantity: p.quantity, pricePerGramIdr: p.pricePerGramIdr, costPerGramIdr: p.costPerGramIdr,
-    unitPriceIdr: p.unitPriceIdr, totalIdr: p.totalIdr, costIdr: p.costIdr, source, quoteId: q.quote.id, by: input.by,
+    unitPriceIdr: p.unitPriceIdr, totalIdr: p.totalIdr, costIdr: p.costIdr, source, colorMode, quoteId: q.quote.id, by: input.by,
     at: new Date().toISOString(),
   };
   const current = store.getOrder(orderId)!;
   // The owner approved the quote that was just replaced: that approval does not carry over to the new price.
   const ownerApproval = previous && !touched && current.ownerApproval?.quoteId === previous ? undefined : current.ownerApproval;
   // A person's grams are trusted grams for the agent too.
-  const slicerGrams = input.by === "human" ? { gramsPerUnit: p.gramsPerUnit, source, by: "operator", at: gramPricing.at } : current.slicerGrams;
+  const slicerGrams = input.by === "human" ? { gramsPerUnit: p.gramsPerUnit, source, by: "operator", at: gramPricing.at, colorMode } : current.slicerGrams;
   store.saveOrder({ ...current, gramPricing, ownerApproval, slicerGrams });
   // The agent's calls are logged by callTool; log people here.
   if (input.by === "human") {
     store.addLog({
       orderId, actor: "human", tool: "price_by_weight", ok: true, at: gramPricing.at,
-      input: { gramsPerUnit: p.gramsPerUnit, source },
-      output: { quoteId: q.quote.id, unitPriceIdr: p.unitPriceIdr, totalIdr: p.totalIdr, marginPct: p.marginPct, replaced: previous && !touched ? previous : undefined },
+      input: { gramsPerUnit: p.gramsPerUnit, source, colorMode },
+      output: {
+        quoteId: q.quote.id, unitPriceIdr: p.unitPriceIdr, totalIdr: p.totalIdr, marginPct: p.marginPct, etaHours,
+        replaced: previous && !touched ? previous : undefined,
+      },
     });
   }
   return { ok: true, quote: q.quote, price: p, gramPricing };
 }
 
 /**
- * A person at Kesuni enters grams per unit from the slicer (Bambu Studio). The agent prices only with these
- * grams, never with numbers from the customer's note or product name. Orders in CREATED only.
+ * A person at Kesuni enters grams per unit from the slicer (Bambu Studio), and whether it prints in one colour or
+ * several (single colour when missing). The agent prices only with these grams, never with numbers from the
+ * customer's note or product name, and its ETA uses this colour mode. Orders in CREATED only.
  */
 export function setSlicerGrams(
-  orderId: string, input: { gramsPerUnit: number; source: string; by: string },
+  orderId: string, input: { gramsPerUnit: number; source: string; by: string; colorMode?: unknown },
 ): { ok: true; order: Order } | Fail {
   const order = store.getOrder(orderId);
   if (!order) return fail(404, "Order not found");
@@ -151,10 +174,15 @@ export function setSlicerGrams(
   if (!r.ok) return fail(400, "Invalid weight", r.reasons);
   if (!source) return fail(400, "Say where the grams come from (slicer, plate, settings)");
   if (!by) return fail(400, "Who entered the grams is required");
-  const slicerGrams = { gramsPerUnit: r.price.gramsPerUnit, source, by, at: new Date().toISOString() };
+  const colorMode = parseColorMode(input.colorMode);
+  if (!colorMode) return fail(400, BAD_COLOR);
+  const slicerGrams = { gramsPerUnit: r.price.gramsPerUnit, source, by, at: new Date().toISOString(), colorMode };
   const updated = { ...order, slicerGrams };
   store.saveOrder(updated);
-  store.addLog({ orderId, actor: "human", tool: "slicer_grams", input: { gramsPerUnit: slicerGrams.gramsPerUnit, source }, ok: true, output: { by }, at: slicerGrams.at });
+  store.addLog({
+    orderId, actor: "human", tool: "slicer_grams", input: { gramsPerUnit: slicerGrams.gramsPerUnit, source, colorMode }, ok: true,
+    output: { by }, at: slicerGrams.at,
+  });
   return { ok: true, order: updated };
 }
 

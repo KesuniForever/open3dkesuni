@@ -115,4 +115,31 @@ describe("library texts in Indonesian", () => {
     const why = printers.map((p) => notReadyReason(p, NOW.getTime())!);
     covered([...why, ...printers.map((p, i) => `${p.name}: ${why[i]}`), "A1 Combo #1: ready"]);
   });
+
+  it("covers what the printer bridge reports back, also several reasons joined with \"; \"", () => {
+    covered([
+      "The printer paused", "The printer is printing again", "The printer stopped the print", "The print speed changed", "The light is on",
+      "The light is off", "The printer sent its firmware versions", "The printer accepted it", "Camera frame sent",
+      "The printer refused: busy", "The printer refused with error 0500-4004", "The printer refused the print: file not found",
+      "The printer refused the print with error 0500-4037", "Printer error 0500-4038: the print did not start",
+      "Printer error HMS_0510_0400_0001_0044: the print did not start", "The printer did not start the print",
+      "The printer did not start within 45 s: check the printer screen, then start again", "The printer has not paused yet: check the printer",
+      "The printer did not resume: check the printer screen", "The printer has not stopped yet: check the printer",
+      "No answer from the printer within 15 s: check the printer", "Could not send it to the printer: client disconnecting",
+      "Not sent: bad AMS mapping", "The bridge is not connected to the printer", "The bridge hit an error: boom",
+      "New printer warning HMS_0300_0100_0003_0001 since the print was queued: check it and start again",
+      "Another print (PJ-3-x) is starting on this printer", "The job has no download link from this app",
+      "Could not download the file (the app answered 404)", "Could not download the file: fetch failed", "The file is larger than 200 MB",
+      "The file is empty", "The app did not send the file's checksum", "The file changed on the way (checksum mismatch)",
+      "The file is not the one the job was made with (checksum mismatch)", "The file has 10 bytes; the job says 12",
+      "Upload to the printer failed: connect ECONNREFUSED printer #1 (port 990)", "The app could not record the start; nothing was sent to the printer",
+      "This printer reports no camera", "No camera frame: camera timeout", "Dry run: nothing was sent to the printer", "Unknown printer command",
+      "The bed was confirmed more than 10 min ago: nothing was sent. Check the bed again and start again.",
+      "The printer is paused: it must be idle or finished", "printer error HMS_0510_0400_0001_0044",
+      "The printer paused because of a fault: fix it, then tick \"I fixed the cause\"",
+      "The bridge is not connected to the printer; The printer is printing: it must be idle or finished",
+    ]);
+    expect(tLib(id, "PLA Yellow (#FEC600) is not loaded in the studio right now")).toBe(
+      "PLA Kuning (#FEC600) sedang tidak terpasang di studio");
+  });
 });

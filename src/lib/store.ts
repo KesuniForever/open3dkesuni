@@ -6,7 +6,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   Acceptance, AgentLogEntry, Attachment, CustomerMessage, DailyReview, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, Printer,
-  Quote, Vendor,
+  PrinterCommand, PrintJob, Quote, Vendor,
 } from "./types";
 import { usdcToMicro } from "./policy";
 
@@ -27,8 +27,10 @@ CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, order_id TEXT NOT N
 CREATE TABLE IF NOT EXISTS meta        (key TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS messages    (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS daily_reviews (day TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS print_jobs  (id TEXT PRIMARY KEY, order_id TEXT, printer_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS printer_commands (id TEXT PRIMARY KEY, printer_id TEXT NOT NULL, data TEXT NOT NULL);
 `;
-const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks", "attachments", "messages"] as const;
+const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks", "attachments", "messages", "print_jobs"] as const;
 
 function open(): DatabaseSync {
   const file = process.env.KESUNI_DB_PATH || path.join(process.cwd(), "data", "local", "kesuni.db");
@@ -191,6 +193,37 @@ export const getAttachment = (id: string): Attachment | undefined =>
 export function saveAttachment(a: Attachment): void {
   conn().prepare("INSERT INTO attachments (id, order_id, data) VALUES (?, ?, ?)").run(a.id, a.orderId, JSON.stringify(a));
 }
+/** Replace an attachment's metadata (e.g. parsed3mf read again). The bytes in the file store are not touched. */
+export function updateAttachment(a: Attachment): void {
+  conn().prepare("UPDATE attachments SET data = ? WHERE id = ?").run(JSON.stringify(a), a.id);
+}
+
+// ---------- print jobs and printer commands (a person asks on the website; the LAN bridge carries them out) ----------
+// Write through src/lib/printer/jobs.ts: it checks who asks, the printer's state and the expiry of stale commands.
+export const listPrintJobs = (filter: { orderId?: string; printerId?: string } = {}): PrintJob[] =>
+  filter.orderId !== undefined
+    ? parse(conn().prepare("SELECT data FROM print_jobs WHERE order_id = ? ORDER BY rowid").all(filter.orderId))
+    : filter.printerId !== undefined
+      ? parse(conn().prepare("SELECT data FROM print_jobs WHERE printer_id = ? ORDER BY rowid").all(filter.printerId))
+      : parse(conn().prepare("SELECT data FROM print_jobs ORDER BY rowid").all());
+export const getPrintJob = (id: string): PrintJob | undefined => one(conn().prepare("SELECT data FROM print_jobs WHERE id = ?").get(id));
+export const nextPrintJobId = (): string => `PJ-${count("print_jobs") + 1}-${Date.now().toString(36)}`;
+export function savePrintJob(j: PrintJob): void {
+  conn().prepare(`INSERT INTO print_jobs (id, order_id, printer_id, data) VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET data = excluded.data`).run(j.id, j.orderId ?? null, j.printerId, JSON.stringify(j));
+}
+
+export const listPrinterCommands = (printerId?: string): PrinterCommand[] =>
+  printerId === undefined
+    ? parse(conn().prepare("SELECT data FROM printer_commands ORDER BY rowid").all())
+    : parse(conn().prepare("SELECT data FROM printer_commands WHERE printer_id = ? ORDER BY rowid").all(printerId));
+export const getPrinterCommand = (id: string): PrinterCommand | undefined =>
+  one(conn().prepare("SELECT data FROM printer_commands WHERE id = ?").get(id));
+export const nextPrinterCommandId = (): string => `PC-${count("printer_commands") + 1}-${Date.now().toString(36)}`;
+export function savePrinterCommand(c: PrinterCommand): void {
+  conn().prepare("INSERT INTO printer_commands (id, printer_id, data) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
+    .run(c.id, c.printerId, JSON.stringify(c));
+}
 
 // ---------- customer messages (shown on the customer's page; write through src/lib/messages.ts) ----------
 export const listMessages = (orderId: string): CustomerMessage[] =>
@@ -275,7 +308,7 @@ export function resetSimulated(): void {
 /** Tests only: wipe everything, including real orders. */
 export function resetDb(): void {
   const c = conn();
-  for (const t of [...ORDER_TABLES, "orders", "vendors", "printers", "meta", "daily_reviews"]) c.exec(`DELETE FROM ${t}`);
+  for (const t of [...ORDER_TABLES, "orders", "vendors", "printers", "meta", "daily_reviews", "printer_commands"]) c.exec(`DELETE FROM ${t}`);
   seedSimulated(c);
   syncOwnVendorAddress(c);
 }

@@ -3,6 +3,7 @@ import * as store from "./store";
 import { setCircleGateway } from "./circle";
 import { addEvidence, chooseQuote, recordAcceptance } from "./actions";
 import { agreementCurrent, customerAgree, quoteFromCosting, recordActual, setSpec } from "./agreement";
+import { costingEtaHours } from "./costing";
 import { customerPay, customerView, refreshPayment } from "./customer";
 import { customerReview, reputation } from "./reputation";
 import { DEMO, fakeCircle } from "./fake-circle.test-helper";
@@ -33,6 +34,20 @@ describe("price from the cost calculator", () => {
     expect(r.quote).toMatchObject({ vendorId: "own", priceMicro: 10_000_000 }); // Rp160.000 / 16.000
     expect(store.getOrder(ORDER)!.costing?.quoteId).toBe(r.quote.id);
     expect(r.overBudget).toBe(false);
+  });
+
+  it("the quote is ready in machine time + labour hours, with no fixed 24 h on top", () => {
+    const small = quoteFromCosting(ORDER, { unitPriceIdr: 160_000 }); // defaults: 1 h machine + 0.5 h labour
+    if (!small.ok) throw new Error(small.error);
+    expect(small.quote.etaHours).toBe(2);
+    const big = quoteFromCosting(ORDER, { gramsPerUnit: 300, machineHours: 6, unitPriceIdr: 160_000 });
+    if (!big.ok) throw new Error(big.error);
+    expect(big.quote.etaHours).toBe(7);
+    const given = quoteFromCosting(ORDER, { unitPriceIdr: 160_000, etaHours: 30 });
+    if (!given.ok) throw new Error(given.error);
+    expect(given.quote.etaHours).toBe(30);
+    expect(costingEtaHours({ machineHours: 2.2, laborHours: 0.8 })).toBe(3); // not 4 from 3.0000000000000004
+    expect(costingEtaHours({ machineHours: 0, laborHours: 0 })).toBe(1);
   });
 
   it("refuses a quantity that differs from the order", () => {

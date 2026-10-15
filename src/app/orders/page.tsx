@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listOrders } from "@/lib/store";
-import { microToUsdc } from "@/lib/policy";
+import { budgetText } from "@/lib/budget";
+import { idrPerUsdc } from "@/lib/costing";
 import { network } from "@/lib/network";
 import { getT } from "@/i18n/server";
 import NewOrderForm from "../components/NewOrderForm";
@@ -32,12 +33,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   ];
   const tab = pickTab(tabs, (await searchParams).tab);
   const shown = groups[tab];
-  const budgetUnit = network().isTestnet ? t("test USDC") : "USDC";
+  const testnet = network().isTestnet;
 
   return (
     <main className="wrap">
       <PageHead eyebrow={t("Orders")} title={t("From quote to payout.")} sub={t("Every order, its status and its money in one list.")}
-        actions={<NewOrderForm />} />
+        actions={<NewOrderForm rate={idrPerUsdc()} />} />
       <Tabs tabs={tabs} active={tab} basePath="/orders" />
       <section className="card orders-panel">
         {shown.length === 0 && <p className="muted" style={{ margin: 0 }}>{t("No orders here yet.")}</p>}
@@ -48,9 +49,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               <span className="order-info">
                 <strong>{o.customerName ? `${o.customerName}: ` : ""}{o.product}</strong>
                 <span className="muted">
-                  {t("{id} · {units} · budget {budget} {unit} · due {due} ·", {
+                  {t("{id} · {units} · budget {budget} · due {due} ·", {
                     id: o.id, units: t(o.quantity === 1 ? "{n} unit" : "{n} units", { n: o.quantity }),
-                    budget: microToUsdc(o.mandateMicro), unit: budgetUnit, due: o.deadline,
+                    budget: budgetText(o, t, testnet), due: o.deadline,
                   })}{" "}
                   <b>{o.status}</b>
                   {o.agreement && ` · ${t("agreed")}`}{o.review && ` · ${o.review.quality}★`}

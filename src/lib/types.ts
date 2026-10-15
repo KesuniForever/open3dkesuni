@@ -2,6 +2,7 @@
 // Money is always integer micro-USDC (6 decimals). Never floats.
 import type { PrinterSnapshot } from "./printer/bambu";
 import type { CostInput } from "./costing";
+import type { ColorMode } from "./pricing";
 
 export type Label = "simulated" | "real" | "manual" | "device" | "local" | "testnet" | "mainnet";
 
@@ -63,8 +64,17 @@ export interface Order {
   /** The owner allowed an exception to their rules for one quote at one price (e.g. an order under the minimum
    *  value). A new or re-priced quote needs a new approval. Never set by the agent. */
   ownerApproval?: { quoteId: string; priceMicro: number; by: string; note: string; at: string };
-  /** Grams per unit from the slicer, entered by a person at Kesuni. The only grams the agent may price with. */
-  slicerGrams?: { gramsPerUnit: number; source: string; by: string; at: string };
+  /** Grams per unit from the slicer, entered by a person at Kesuni. The only grams the agent may price with.
+   *  colorMode sets the print time; missing on rows saved before it existed, which means single colour. */
+  slicerGrams?: { gramsPerUnit: number; source: string; by: string; at: string; colorMode?: ColorMode };
+  /** The customer's budget in rupiah exactly as typed (or worked out from the USDC typed), with the rate used for
+   *  mandateMicro (src/lib/costing.ts idrPerUsdc()). Missing on orders made before 15 Oct 2026: their budget is USDC only. */
+  budgetIdr?: number;
+  rateIdrPerUsdc?: number;
+  /** Material chosen on the order. Older orders only have spec.material (free text). */
+  material?: Material;
+  /** Colours the customer picked from the spools loaded in the studio (GET /api/studio/colors). */
+  preferredColors?: ColorChoice[];
 }
 
 export interface GramPricing {
@@ -76,6 +86,8 @@ export interface GramPricing {
   totalIdr: number;
   costIdr: number;
   source: string;          // where the grams come from (slicer, operator note)
+  /** Single or multi colour: sets the print time, never the price. Missing on rows saved before it existed (single). */
+  colorMode?: ColorMode;
   quoteId: string;
   by: "agent" | "human";
   at: string;
@@ -160,6 +172,8 @@ export interface Attachment {
   uploadedBy: string;
   at: string;
   storageKey: string;
+  /** What a Bambu Studio .3mf holds, read right after upload (src/lib/threemf.ts). Missing for other files. */
+  parsed3mf?: ThreeMfInfo;
 }
 
 export interface Acceptance {
@@ -249,6 +263,11 @@ export interface Printer {
   /** The printer cannot see its bed. After a print ends we treat the bed as holding that order's part
    *  until a person marks it collected. */
   bedOccupiedBy?: string;
+  /** A person checked that the material and colour the printer shows for each AMS slot are the real spools (generic
+   *  spools default to black). `key` is amsKey() of the trays then: a spool change makes the check stale. */
+  colorsChecked?: { by: string; at: string; key: string };
+  /** Faults the printer reports now (code -> first seen, ISO). A task is raised once per appearance. */
+  faultsSeen?: Record<string, string>;
 }
 
 /** Work only a person can do (change filament, collect the print, QC). Created by the agent or a person. */
@@ -263,6 +282,101 @@ export interface OperatorTask {
   at: string;
   doneAt?: string;
   doneBy?: string;
+  /** The printer fault this task is about ("HMS_0510_0400_0001_0044" or "0700-8011"): one open task per printer and
+   *  code, closed by itself when the printer stops reporting it. */
+  errorCode?: string;
+}
+
+// ---------- materials, colours, sliced files, printing from the website (Bambu LAN, through the bridge) ----------
+
+/** Materials Kesuni prints and prices by weight. */
+export type Material = "PLA" | "PETG";
+
+/** A colour the customer picked. Stored as material + colour, never as a tray (spools move between slots). */
+export interface ColorChoice {
+  type: Material;
+  color: string;   // "#RRGGBB"
+  name?: string;   // English colour name (src/lib/colors.ts nameOf), or the spool's name
+}
+
+/** One filament of a sliced plate. */
+export interface ThreeMfFilament {
+  id: number;            // 1-based index into the project's filament list (ams_mapping index = id - 1)
+  type: string;          // "PLA", "PETG"
+  color: string;         // "#RRGGBB"
+  usedG: number | null;
+  usedM?: number | null;
+  infoIdx?: string | null; // filament preset, "GFA00"
+}
+
+export interface ThreeMfPlate {
+  index: number;               // 1-based plate number; prints Metadata/plate_<index>.gcode
+  predictionSec: number | null; // the slicer's total time estimate, including preparation
+  weightG: number | null;      // all filaments of the plate
+  filaments: ThreeMfFilament[]; // only the filaments this plate uses
+  bedType?: string | null;     // "textured_plate": the person checks the plate on the printer
+  nozzle?: string | null;      // "0.4"
+  objects?: number;            // number of objects on the plate
+}
+
+/** What a Bambu Studio .3mf holds. Only a sliced file ("Export plate sliced file" -> *.gcode.3mf) can be printed. */
+export interface ThreeMfInfo {
+  sliced: boolean;             // at least one plate has G-code
+  plates: ThreeMfPlate[];      // sliced plates only
+  printerModel?: string;       // "Bambu Lab A1"
+  printerModelId?: string;     // "N2S" = A1
+  nozzle?: string;             // "0.4"
+  /** Every filament in the project, in order: ams_mapping has one entry per filament here. */
+  projectFilaments?: { type: string; color: string }[];
+  slicerVersion?: string;
+  /** Why the file could not be read (then sliced is false). */
+  error?: string;
+}
+
+export interface PrintOptions {
+  bedLevelling: boolean;   // auto bed levelling before the print (default on)
+  flowCali: boolean;       // flow-dynamics calibration (about 1–2 min)
+  timelapse: boolean;      // off by default: slows A1 prints
+  useAms: boolean;         // false = external spool only
+}
+
+export type PrintJobState = "queued" | "uploading" | "sent" | "printing" | "done" | "failed" | "cancelled";
+
+/** A real print started from the website by a person. The bridge uploads the file and starts it (never the Chief). */
+export interface PrintJob {
+  id: string;                // "PJ-<n>-<time>"
+  orderId?: string;
+  printerId: string;
+  attachmentId: string;      // the sliced .gcode.3mf on the order
+  plate: number;             // 1-based
+  fileName: string;          // name on the SD card root, e.g. "ORD-012_p1_1792072000.gcode.3mf"
+  amsMapping: number[];      // one entry per project filament: global AMS tray (ams*4 + slot) or -1 (not used)
+  options: PrintOptions;
+  state: PrintJobState;
+  by: string;                // the person who started it (and confirmed the bed is empty)
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
+  md5?: string;              // of the 3MF file, for the bridge to check its download
+  subtaskName?: string;      // name shown on the printer screen
+  /** "ftp": start with url ftp:///<name>, a person's retry when an A1 did not start with file:///sdcard/<name>. */
+  urlForm?: "sdcard" | "ftp";
+}
+
+export type PrinterCommandKind = "pause" | "resume" | "stop" | "speed" | "light" | "get_version" | "camera_snapshot";
+export type PrinterCommandState = "queued" | "sent" | "done" | "failed" | "expired";
+
+/** A control for one printer, asked for by a person on the website and carried out by the bridge. */
+export interface PrinterCommand {
+  id: string;                // "PC-<n>-<time>"
+  printerId: string;
+  kind: PrinterCommandKind;
+  params: Record<string, string | number | boolean>;  // speed: { level: 1..4 }; light: { on: boolean }; resume: { fixed?: true }
+  state: PrinterCommandState;
+  by: string;                // the person (read-only kinds: who opened the page)
+  createdAt: string;
+  doneAt?: string;
+  result?: string;           // the printer's answer, or why it failed or expired
 }
 
 /** A short update on the customer's order page (/c/<token>), by the Chief (AI) or a person at Kesuni. */

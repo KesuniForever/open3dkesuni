@@ -1,32 +1,31 @@
-import Link from "next/link";
 import { listOpenTasks, listOrders, listPrinters } from "@/lib/store";
 import { ago, isOnline, isPrinterTask, lastBridgeReport, ONLINE_MS } from "@/lib/machines";
-import type { OperatorTask, Printer } from "@/lib/types";
+import { cameraFrame } from "@/lib/printer/jobs";
+import type { Printer } from "@/lib/types";
 import type { T } from "@/i18n/core";
-import { getT } from "@/i18n/server";
+import { getLocale, getT } from "@/i18n/server";
 import PageHead from "../components/PageHead";
 import Tabs, { pickTab, type Tab } from "../components/Tabs";
 import Callout from "../components/Callout";
 import Icon, { type IconName } from "../components/Icon";
-import MachinesBoard, { type OrderInfo } from "./MachinesBoard";
+import MachinesBoard, { PrinterTasks, type OrderInfo } from "./MachinesBoard";
+import { issueTexts } from "./issue-texts";
 import "./machines.css";
 
 export const dynamic = "force-dynamic";
 
 const clock = () => Date.now();
+/** The camera counts as working when the bridge sent a frame this recently (a frame held from long ago proves nothing). */
+const FRAME_FRESH_MS = 5 * 60_000;
 
-const TASK_TITLE: Partial<Record<OperatorTask["kind"], string>> = {
-  check_printer: "Check printer",
-  change_filament: "Change filament",
-};
-
-/** My machines: the studio's Bambu Lab printers, read live over the LAN by the printer bridge. */
+/** My machines: the studio's Bambu Lab printers, read live over the LAN by the printer bridge, controlled by people. */
 export default async function MachinesPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const t = await getT();
   const printers = listPrinters();
   const tasks = listOpenTasks().filter(isPrinterTask);
   const orders: Record<string, OrderInfo> = Object.fromEntries(listOrders().map((o) => [o.id, { label: o.label, status: o.status }]));
   const now = clock();
+  const texts = issueTexts(printers, await getLocale());
   const tabs: Tab[] = [
     { id: "printers", label: t("Printers"), count: printers.length },
     { id: "connection", label: t("Connection") },
@@ -36,13 +35,13 @@ export default async function MachinesPage({ searchParams }: { searchParams: Pro
   return (
     <main className="wrap">
       <PageHead eyebrow={t("Machine registry")} title={t("Know your machines.")} sub={t("Live status from the studio's printers.")}
-        actions={<span className="mach-tag"><Icon name="shield" size={15} />{t("Read-only, no remote control")}</span>} />
+        actions={<span className="mach-tag"><Icon name="shield" size={15} />{t("Controls for people only")}</span>} />
       <Tabs tabs={tabs} active={tab} basePath="/machines" />
 
       {tab === "printers" ? (
         <>
-          <MachinesBoard initial={printers} serverNow={now} orders={orders} printerTasks={tasks.length} />
-          {tasks.length > 0 && <PrinterTasks tasks={tasks} printers={printers} orders={orders} t={t} />}
+          <MachinesBoard initial={printers} serverNow={now} orders={orders} tasks={tasks} issueTexts={texts} />
+          {tasks.length > 0 && <PrinterTasks tasks={tasks} printers={printers} orders={orders} texts={texts} />}
         </>
       ) : (
         <Connection printers={printers} now={now} t={t} />
@@ -51,55 +50,31 @@ export default async function MachinesPage({ searchParams }: { searchParams: Pro
   );
 }
 
-function PrinterTasks({ tasks, printers, orders, t }: { tasks: OperatorTask[]; printers: Printer[]; orders: Record<string, OrderInfo>; t: T }) {
-  const name = (id?: string) => printers.find((p) => p.id === id)?.name;
-  return (
-    <section className="card attention-panel mach-tasks">
-      <h2>{t("Open printer tasks")}</h2>
-      <ul className="attention">
-        {tasks.map((task) => {
-          const title = TASK_TITLE[task.kind];
-          return (
-            <li key={task.id}>
-              <Link href={`/orders/${task.orderId}`} className="attention-item">
-                <span className="attention-icon amber"><Icon name="wrench" /></span>
-                <span className="attention-text">
-                  <b>{title && t(title)}</b>{name(task.printerId) && ` · ${name(task.printerId)}`}
-                  <span className="attention-sub">
-                    {task.text}
-                    {orders[task.orderId]?.label === "simulated" && <span className="badge simulated">{t("simulated")}</span>}
-                  </span>
-                </span>
-                <Icon name="chevron" size={16} className="attention-go" />
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
 type Cap = { icon: IconName; title: string; on: boolean; yes?: string; no?: string; note: string };
 
 function Connection({ printers, now, t }: { printers: Printer[]; now: number; t: T }) {
   const last = lastBridgeReport(printers);
   const bridgeUp = last !== null && now - Date.parse(last) <= ONLINE_MS;
+  const frames = printers.some((p) => {
+    const f = cameraFrame(p.id);
+    return Boolean(f && now - Date.parse(f.at) <= FRAME_FRESH_MS);
+  });
   // The LAN bridge is the one capability that is expected to be on, so "off" is a red "Down", not a plain "No".
   const caps: Cap[] = [
     { icon: "network", title: "LAN bridge", on: bridgeUp, yes: "Running", no: "Down",
       note: last ? t("Last report {ago}.", { ago: ago(last, now, t) }) : t("No report yet.") },
-    { icon: "pulse", title: "Live telemetry", on: true, yes: "Yes", note: t("State, progress, layer, temperatures, error codes.") },
+    { icon: "pulse", title: "Live telemetry", on: true, yes: "Yes", note: t("Stage, progress, temperatures, fans, AMS spools, errors.") },
     { icon: "box", title: "Bed check", on: false, note: t("Printers cannot see the bed. A person confirms it is empty.") },
-    { icon: "play", title: "Camera", on: false, note: t("Not connected.") },
-    { icon: "shield", title: "Remote control", on: false, note: t("By design. The app never starts, stops or heats a printer.") },
+    { icon: "play", title: "Camera", on: frames, note: frames ? t("One frame at a time, through the LAN bridge.") : t("No frame in the last 5 min.") },
+    { icon: "shield", title: "Remote control", on: true, yes: "People only",
+      note: t("Start, pause, resume, stop, speed and light, each with a person's name. Never the Chief; never heat, move or G-code.") },
     { icon: "chain", title: "Cloud", on: false, note: t("No Bambu cloud. The bridge reads the printers on the studio network.") },
   ];
 
   return (
     <>
-      <Callout icon="shield" title={t("Read-only by design")}>
-        {t("The app reads printer status. It never sends print, move, heat or stop commands.")}
+      <Callout icon="shield" title={t("People control, the Chief only reads")}>
+        {t("A person starts, pauses or stops a print with their name. The app never moves an axis, heats or sends G-code.")}
       </Callout>
 
       <section className="card mach-card-flush">
@@ -145,6 +120,8 @@ function Connection({ printers, now, t }: { printers: Printer[]; now: number; t:
             <li><code>node scripts/printer-bridge.mjs</code> {t("runs on a computer on the studio network.")}</li>
             <li>{t("It reads each printer's status over MQTT (TLS, port 8883) and sends it here when the state or progress changes, and every 30 s.")}</li>
             <li>{t("Printer events become tasks for a person: change filament, collect the part, check a failed print.")}</li>
+            <li>{t("It takes a person's controls and print jobs from this app and checks them again before it sends them. A control not picked up in 60 s expires; a print in 5 min.")}</li>
+            <li>{t("Controls from another device need the operator password; only this computer is trusted without one.")}</li>
           </ul>
         </details>
       </section>

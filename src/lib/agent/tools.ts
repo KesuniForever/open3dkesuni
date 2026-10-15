@@ -1,16 +1,22 @@
 // Agent tools. Reads are free; writes go through src/lib/actions.ts, the same code the
 // human API uses. Every call is logged. inputSchema is JSON Schema so an LLM can be
 // wired to these later with no changes to the tools themselves.
+// Printers: the Chief may READ their status (state, stage, faults, loaded spools) and link an order to a ready printer.
+// It has no tool that starts, pauses, resumes or stops a print, changes the speed or the light: printer controls are
+// for people only (src/lib/printer/jobs.ts, never imported here; agent.test.ts checks it).
 import * as store from "../store";
 import { checkPlan, microToUsdc } from "../policy";
 import { chooseQuote, createPaymentIntent } from "../actions";
 import { agreementCurrent, quoteByWeight, quoteFromCosting } from "../agreement";
 import { calculate, idrPerUsdc, idrToMicro, KESUNI_DEFAULTS, microToIdr, parseCostInput } from "../costing";
-import { priceByWeight, pricingConfig } from "../pricing";
+import { orderMaterial, priceByWeight, pricingConfig, pricingFor, toColorMode, toMaterial } from "../pricing";
 import { ownerRuleReasons, ownerRules } from "../owner-rules";
 import { choosePrinter, createTask, notReadyReason, printFinished } from "../printer/actions";
+import { activeIssues, HMS_SEVERITY, SPEED_LABEL } from "../printer/bambu";
+import { issueText } from "../printer/errors";
+import { colorsCheckedNow, nameOf } from "../colors";
 import { postCustomerMessage } from "../messages";
-import type { AgentLogEntry, Order, OperatorTask } from "../types";
+import type { AgentLogEntry, Order, OperatorTask, Printer } from "../types";
 
 type Json = Record<string, unknown>;
 type ToolResult = { ok: boolean; data: unknown };
@@ -51,10 +57,15 @@ function orderForAgent(o: Order) {
     id: o.id, product: agentText(o.product, o), quantity: o.quantity, deadline: o.deadline, designVersion: o.designVersion,
     status: o.status, label: o.label, mandateMicro: o.mandateMicro, mandateUsdc: microToUsdc(o.mandateMicro),
     budgetIdrApprox: microToIdr(o.mandateMicro), customerNote: agentText(o.customerNote, o),
-    // The only grams the agent may price with: entered by a person at Kesuni from the slicer.
-    slicerGrams: o.slicerGrams ? { gramsPerUnit: o.slicerGrams.gramsPerUnit, source: o.slicerGrams.source } : null,
+    // The only grams the agent may price with: entered by a person at Kesuni from the slicer, with the colour mode.
+    slicerGrams: o.slicerGrams
+      ? { gramsPerUnit: o.slicerGrams.gramsPerUnit, source: o.slicerGrams.source, colorMode: toColorMode(o.slicerGrams.colorMode) }
+      : null,
     spec: o.spec ?? null, gramPricing: o.gramPricing ?? null, pricing: pricingConfig(), costing: o.costing ?? null,
-    // Set when the Chief may not price this order itself (not plain PLA): then a person prices it.
+    // PLA or PETG as chosen on the order (null: not chosen), and the colours the customer picked from the studio's spools.
+    material: orderMaterial(o), preferredColors: o.preferredColors ?? [],
+    budgetIdr: o.budgetIdr ?? null,
+    // Set when the Chief may not price this order itself (not PLA or PETG): then a person prices it.
     pricingBlockedBy: materialConcern(o),
     agreementCurrent: agreementCurrent(o),
     ownerApproval: o.ownerApproval ? { quoteId: o.ownerApproval.quoteId, note: o.ownerApproval.note } : null,
@@ -71,31 +82,60 @@ export function hideName(text: string, name?: string): string {
 }
 const err = (message: string, reasons?: string[]): ToolResult => ({ ok: false, data: { error: message, reasons } });
 
-// The per-gram price covers plain PLA on the Bambu A1 only. Filled PLA (-CF, -GF) needs a hardened nozzle; PLA Glow,
-// Sparkle and the like are left to a person too. A false hit only means a person prices the order: the safe side.
-const PLAIN_PLA = /^PLA\+?(\s+(basic|matte|silk|tough\+?))?$/i;
+// The per-gram price covers PLA and PETG on the Bambu A1 (owner, 15 Oct 2026). Filled PLA (-CF, -GF) needs a hardened
+// nozzle; PLA Glow, Sparkle and the like are left to a person too. A false hit only means a person prices the order: the safe side.
 const OTHER_MATERIAL = new RegExp(
-  "\\b(PETG|ABS|TPU\\d*A?|TPE|PA6|PA12|nylon|nilon|polycarbonate|polikarbonat|resin|carbon|karbon|metal|steel|" +
+  "\\b(ABS|TPU\\d*A?|TPE|PA6|PA12|nylon|nilon|polycarbonate|polikarbonat|resin|carbon|karbon|metal|steel|" +
   "alumin(?:i)?um|wood|kayu|logam|besi|karet|rubber|flexible|fleksibel|lentur|silicone|silikon)\\b|-(CF|GF)\\b",
   "i",
 );
 const ASA = /\bASA\b/; // uppercase only: "Asa" is also a name
 
 /**
- * Why the Chief may not price this order by weight on its own: the material is not, or may not be, plain PLA. Then a
- * person prices it (the price-by-weight panel on the order page). Null when the order is fine for the Chief to price.
- * The order text is always checked: the spec form starts at "PLA", so a saved spec alone does not prove anyone chose it.
+ * Why the Chief may not price this order by weight on its own: the material is not, or may not be, PLA or PETG. Then
+ * a person prices it (the price-by-weight panel on the order page). Null when the order is fine for the Chief to price.
+ * The order text is always checked: the spec form starts at "PLA", so a saved spec alone does not prove anyone chose it,
+ * and PETG in the text counts only when PETG is the order's material.
  */
-export function materialConcern(o: Pick<Order, "product" | "customerNote" | "spec">): string | null {
+export function materialConcern(o: Pick<Order, "product" | "customerNote" | "spec"> & Partial<Pick<Order, "material">>): string | null {
   const set = o.spec?.material?.trim();
-  if (set && !PLAIN_PLA.test(set)) {
-    return `The spec material is "${set}": Kesuni's price per gram covers plain PLA on the Bambu A1 only, so a person prices this order`;
+  if (set && !toMaterial(set)) {
+    return `The spec material is "${set}": Kesuni's price per gram covers PLA and PETG on the Bambu A1 only, so a person prices this order`;
+  }
+  if (o.material && set && toMaterial(set) !== o.material) {
+    return `The order's material is ${o.material} but the spec says "${set}": a person checks which one it is`;
   }
   const text = `${o.product}\n${o.customerNote ?? ""}`;
   const hit = text.match(OTHER_MATERIAL)?.[0] ?? text.match(ASA)?.[0];
-  return hit
-    ? `The order mentions "${hit}": Kesuni's price per gram covers plain PLA on the Bambu A1 only, so a person prices this order`
-    : null;
+  if (hit) return `The order mentions "${hit}": Kesuni's price per gram covers PLA and PETG on the Bambu A1 only, so a person prices this order`;
+  const petg = text.match(/\bPETG\b/i)?.[0];
+  const material = orderMaterial({ material: o.material, spec: o.spec });
+  if (petg && material !== "PETG") {
+    return `The order mentions "${petg}" but its material is ${material ?? "not chosen"}: a person checks which material it is`;
+  }
+  return null;
+}
+
+/** What the Chief may know about a printer: read-only status. It has no tool that controls a printer. */
+function printerForAgent(p: Printer) {
+  const s = p.snapshot;
+  const why = notReadyReason(p);
+  return {
+    id: p.id, name: p.name, ready: why === null, why, state: s?.state ?? null, percent: s?.percent ?? null,
+    printingOrder: p.currentOrderId ?? null, remainingMin: s?.remainingMin ?? null,
+    // What it is doing now, while a job is on it ("Heatbed preheating", "Paused (filament ran out)").
+    stage: s?.stage ? s.stage.key.replace("{n}", String(s.stage.code)) : null, needsPerson: s?.stage?.needsPerson ?? false,
+    faults: s ? activeIssues(s).map((i) => ({
+      code: i.code, level: i.kind === "hms" ? HMS_SEVERITY[i.severity ?? 0] ?? "unknown" : "print error", text: issueText(i),
+    })) : [],
+    spools: (s?.ams?.trays ?? []).filter((t) => !t.empty).map((t) => ({
+      slot: t.ams * 4 + t.slot + 1, material: t.type, color: t.color, colorName: t.color ? nameOf(t.color) : null,
+    })),
+    externalSpool: s?.externalSpool ?? null,
+    // Generic spools show black until a person types the colour on the printer: unchecked colours may be wrong.
+    spoolColoursChecked: colorsCheckedNow(p),
+    speed: s?.speedLevel ? SPEED_LABEL[s.speedLevel] : null, nozzleMm: s?.nozzle?.diameter ?? null, sdCard: s?.sdcard ?? null,
+  };
 }
 
 export const TOOLS: Tool[] = [
@@ -201,8 +241,11 @@ export const TOOLS: Tool[] = [
       "gramsPerUnit × price per gram, rounded up to the nearest Rp500; total = unit price × the order's quantity. " +
       "gramsPerUnit must be exactly slicerGrams.gramsPerUnit from get_order (entered by a person at Kesuni from the " +
       "slicer). Numbers in the customer's note or product are not slicer grams. If slicerGrams is null, ask the operator " +
-      "with request_human_decision. Refused if the order is not plain PLA (pricingBlockedBy in get_order), the margin " +
-      "is under the owner's minimum or the total is over the customer's budget: then ask a person. etaHours can only make the ETA longer than the computed one. Pricing " +
+      "with request_human_decision. Refused if the material is not PLA or PETG (pricingBlockedBy in get_order), the margin " +
+      "is under the owner's minimum or the total is over the customer's budget: then ask a person. The ETA is computed: " +
+      "print time from the grams and the colour mode a person entered with slicerGrams (single or multi colour; the price " +
+      "per gram is the same), units printing side by side on the studio's printers, plus handling hours to collect, check " +
+      "and pack. etaHours can only make the ETA longer than the computed one. Pricing " +
       "again replaces your earlier by-weight quote. The customer still approves the price.",
     inputSchema: {
       type: "object",
@@ -210,7 +253,7 @@ export const TOOLS: Tool[] = [
         orderId: { type: "string" },
         gramsPerUnit: { type: "number", description: "Filament per unit in grams, from the slicer" },
         source: { type: "string", description: "Where gramsPerUnit comes from, e.g. 'Bambu Studio, operator note 14 Okt'" },
-        etaHours: { type: "integer", description: "Optional; default is 24 h + print time on all printers" },
+        etaHours: { type: "integer", description: "Optional; default is the print time for slicerGrams' colour mode + handling hours" },
       },
       required: ["orderId", "gramsPerUnit", "source"],
     },
@@ -220,7 +263,7 @@ export const TOOLS: Tool[] = [
       if (!o) return err("Order not found");
       const source = str(i.source).trim();
       if (!source) return err("Pricing refused", ["Say where the grams come from (slicer, operator note). Never guess grams: ask the operator."]);
-      // Not plain PLA: a person prices it. Checked first, so the Chief does not ask for grams it may not use.
+      // Not PLA or PETG: a person prices it. Checked first, so the Chief does not ask for grams it may not use.
       const material = materialConcern(o);
       if (material) return err("Pricing refused", [material]);
       // Grams only from a person at Kesuni, never from text the customer typed.
@@ -231,7 +274,10 @@ export const TOOLS: Tool[] = [
       if (Math.round(Number(i.gramsPerUnit) * 100) !== Math.round(trusted * 100)) {
         return err("Pricing refused", [`gramsPerUnit must be the grams a person at Kesuni entered from the slicer: ${trusted} g`]);
       }
-      const preview = priceByWeight(Number(i.gramsPerUnit), o.quantity);
+      // The colour mode comes with the slicer grams from a person, like the grams themselves.
+      const colorMode = toColorMode(o.slicerGrams?.colorMode);
+      // PETG may have its own price per gram in the config; quoteByWeight below prices with the same material.
+      const preview = priceByWeight(Number(i.gramsPerUnit), o.quantity, colorMode, pricingFor(pricingConfig(), orderMaterial(o)));
       if (!preview.ok) return err("Invalid weight", preview.reasons);
       const p = preview.price;
       const rules = ownerRules();
@@ -241,9 +287,15 @@ export const TOOLS: Tool[] = [
         reasons.push(`Total Rp${p.totalIdr.toLocaleString("id-ID")} is over the customer's budget (about Rp${microToIdr(o.mandateMicro).toLocaleString("id-ID")}): ask a person`);
       }
       if (reasons.length) return err("Pricing refused", reasons);
-      const r = quoteByWeight(orderId, { gramsPerUnit: p.gramsPerUnit, source, etaHours: i.etaHours, by: "agent" });
+      const r = quoteByWeight(orderId, { gramsPerUnit: p.gramsPerUnit, source, colorMode, etaHours: i.etaHours, by: "agent" });
       return r.ok
-        ? { ok: true, data: { quote: r.quote, unitPriceIdr: p.unitPriceIdr, totalIdr: p.totalIdr, marginPct: p.marginPct, etaHours: r.quote.etaHours } }
+        ? {
+          ok: true,
+          data: {
+            quote: r.quote, unitPriceIdr: p.unitPriceIdr, totalIdr: p.totalIdr, marginPct: p.marginPct, colorMode,
+            printMinutes: p.printMinutes, handlingHours: p.handlingHours, etaHours: r.quote.etaHours,
+          },
+        }
         : err(r.error, r.reasons);
     },
   },
@@ -281,7 +333,9 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "get_production_status",
-    description: "Has the customer paid into escrow; printers and whether each can take a job; the latest evidence; open operator tasks.",
+    description: "Has the customer paid into escrow; the printers (read-only): whether each can take a job, what it is doing now, " +
+      "faults it reports, the spools loaded in its AMS; this order's print jobs, which people run; the latest evidence; open " +
+      "operator tasks. You have no printer controls: people at the studio run the printers.",
     inputSchema: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
     run: (i) => {
       const orderId = str(i.orderId);
@@ -291,9 +345,9 @@ export const TOOLS: Tool[] = [
         ok: true,
         data: {
           escrow: e ? { state: e.state, amountUsdc: microToUsdc(e.amountMicro), txs: e.txs.map((t) => ({ kind: t.kind, state: t.state })) } : null,
-          printers: store.listPrinters().map((p) => ({
-            id: p.id, name: p.name, ready: notReadyReason(p) === null, why: notReadyReason(p),
-            state: p.snapshot?.state ?? null, percent: p.snapshot?.percent ?? null, printingOrder: p.currentOrderId ?? null,
+          printers: store.listPrinters().map(printerForAgent),
+          printJobs: store.listPrintJobs({ orderId }).slice(-5).map((j) => ({
+            id: j.id, printerId: j.printerId, state: j.state, plate: j.plate, by: j.by, at: j.updatedAt, error: j.error ?? null,
           })),
           evidence: store.listEvidence(orderId).slice(-10).map((x) => ({ kind: x.kind, note: x.note, label: x.label, at: x.at })),
           openTasks: store.listTasks(orderId).filter((t) => t.status === "open").map((t) => ({ kind: t.kind, text: t.text })),

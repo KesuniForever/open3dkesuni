@@ -44,6 +44,19 @@ describe("machineView", () => {
 
   it("a pause without an error is a warning, not an error", () => {
     expect(machineView(printer({ snapshot: snap({ state: "PAUSE", percent: 30 }) }), NOW).pill).toEqual({ tone: "warn", text: "Paused 30%" });
+    // A person's pause (0300-8001) and a person's stop (0300-400C) are not errors either.
+    expect(machineView(printer({ snapshot: snap({ state: "PAUSE", percent: 30, errorCode: 0x03008001 }) }), NOW).pill).toEqual({ tone: "warn", text: "Paused 30%" });
+    expect(machineView(printer({ snapshot: snap({ state: "FAILED", percent: 30, errorCode: 0x0300400c }) }), NOW).pill).toEqual({ tone: "warn", text: "Print stopped" });
+  });
+
+  it("a fatal HMS is red and keeps the printer out of the ready count, even while idle", () => {
+    const fatal = printer({ snapshot: snap({ state: "IDLE", hms: [{ code: "HMS_0510_0400_0001_0044", severity: 1, url: "", since: null }] }) });
+    const v = machineView(fatal, NOW);
+    expect(v.pill).toEqual({ tone: "bad", text: "Printer error" });
+    expect(v.notReady).toBe("printer error HMS_0510_0400_0001_0044");
+    expect(machineStats([fatal], NOW).ready).toBe(0);
+    // A common (severity 3) one does not block.
+    expect(machineView(printer({ snapshot: snap({ state: "IDLE", hms: [{ code: "HMS_0300_0100_0003_0001", severity: 3, url: "", since: null }] }) }), NOW).notReady).toBeNull();
   });
 
   it("no report for more than 2 minutes is offline, with when it was last seen", () => {

@@ -6,3 +6,39 @@
   .cust-top-right { gap: 8px; }
   .cust-top-right > .muted { font-size: 12px; line-height: 1.35; }
 }
+
+/* Material and colour picker (ColorPicker.tsx): the spools loaded in the studio right now. */
+.cc { display: grid; gap: 14px; min-width: 0; }
+.cc-segs { gap: 12px; }
+.cc-seg { flex: 1 1 200px; min-width: 0; }
+.cc-count { font-weight: 400; }
+.cc-locked { margin-top: 6px; }
+.cc-palette { display: grid; gap: 10px; min-width: 0; }
+.cc-palette > .field-label { margin-bottom: 0; }
+.cc-group { display: grid; gap: 6px; min-width: 0; }
+.cc-type { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-2); }
+.cc-swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.cc-swatch {
+  min-height: 40px; padding: 5px 13px 5px 6px; gap: 8px; border-radius: 999px; font-size: 14px; color: var(--text);
+  background: var(--surface); border: 1px solid var(--input);
+}
+.cc-swatch[aria-pressed="true"] { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); background: var(--tint); font-weight: 600; }
+.cc-swatch[aria-pressed="true"]:hover:not(:disabled) { background: var(--tint); }
+.cc-group.other .cc-swatch:not(:disabled) { opacity: 0.6; }
+.cc-dot {
+  flex: none; width: 26px; height: 26px; border-radius: 50%; display: inline-block; vertical-align: middle;
+  box-shadow: inset 0 0 0 1px rgba(32, 41, 54, 0.22);
+}
+/* White and ivory spools: a darker rim, so the dot still shows on a white card (same rule as ColorSwatch). */
+.cc-dot.light { box-shadow: inset 0 0 0 1px rgba(32, 41, 54, 0.45); }
+/* Generic spools carry the colour a person typed on the printer: not confirmed until Kesuni checks it. */
+.cc-dot.unsure { outline: 1.5px dashed var(--faint); outline-offset: 2px; }
+.cc-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 14px; }
+.cc-chip { display: inline-flex; align-items: center; gap: 7px; }
+.cc-chip .cc-dot { width: 20px; height: 20px; }
+.cc-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.cc-card-head h2 { margin: 0; }
+.cc-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.cc-actions > button { flex: 1 1 140px; min-height: 44px; }
+.cust-fieldset { border: 1px solid var(--border); border-radius: 12px; padding: 12px 13px 14px; margin: 0; min-width: 0; }
+.cust-fieldset > legend { font-size: 13px; font-weight: 600; color: var(--text-2); padding: 0 6px; margin-left: -6px; }

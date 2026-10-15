@@ -69,6 +69,14 @@ describe("envReport", () => {
     expect(JSON.stringify(r)).not.toContain("0xdead");
   });
 
+  it("says to delete a retired variable that is still set (the app ignores it)", () => {
+    const r = envReport({ KESUNI_GRAMS_PER_HOUR: "15" });
+    expect(r.warnings.some((w) => w.startsWith("KESUNI_GRAMS_PER_HOUR is retired and no longer read"))).toBe(true);
+    expect(JSON.stringify(r)).not.toContain('"15"');
+    expect(envReport({}).warnings.some((w) => w.includes("KESUNI_GRAMS_PER_HOUR"))).toBe(false);
+    expect(ENV_VARS.map((v) => v.name)).not.toContain("KESUNI_GRAMS_PER_HOUR");
+  });
+
   it("does not flag the variables `next start` sets for itself", () => {
     const r = envReport({ NEXT_PRIVATE_START_TIME: "1", __NEXT_PRIVATE_ORIGIN: "http://localhost:3000", NEXT_PUBLIC_API_KEY: "x" });
     expect(r.warnings).toContain("Secrets the app does not use, better removed from the server: NEXT_PUBLIC_API_KEY");

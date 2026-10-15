@@ -3,7 +3,7 @@
 // Paying, accepting and rejecting go through the same actions and policy checks as the operator;
 // after the customer decides, the agent releases or refunds the escrow on its own (policy-gated).
 import * as store from "./store";
-import { createOrder, recordAcceptance, type Fail } from "./actions";
+import { budgetFromRupiah, createOrder, recordAcceptance, type Fail } from "./actions";
 import { deposit, openEscrow, refund, release, syncEscrow, topUpCustomer } from "./escrow";
 import { circle } from "./circle";
 import { microToUsdc } from "./policy";
@@ -13,7 +13,9 @@ import { agreementCurrent, costingForChosen, gramPricingForChosen } from "./agre
 import { isTestnetChain, publicNetwork, type PublicNetwork } from "./network";
 import { quoteIdr } from "./owner-rules";
 import { wakeChief } from "./agent/chief";
-import type { ActualReport, ChainTx, Escrow, Order, Review, Spec } from "./types";
+import { nameOf, parseColorChoices, studioPalette, type PaletteColor } from "./colors";
+import { MATERIALS, orderMaterial } from "./pricing";
+import type { ActualReport, ChainTx, ColorChoice, Escrow, Material, Order, Review, Spec } from "./types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
 const live = (t: ChainTx) => !["FAILED", "DENIED", "CANCELLED"].includes(t.state);
@@ -53,6 +55,9 @@ export interface CustomerView {
   /** The measured size deviation is above the agreed tolerance: a warning before "Accept", never a block. */
   overTolerance: boolean;
   review: Review | null;
+  /** The material and colours the customer picked (English names: pages translate them). They may change them while
+   *  Kesuni has not priced the order yet (canChange); the material is fixed once a quote exists (materialLocked). */
+  choice: { material: Material | null; colors: ColorChoice[]; canChange: boolean; materialLocked: boolean };
 }
 
 export function customerView(order: Order, token: string): CustomerView {
@@ -101,6 +106,18 @@ export function customerView(order: Order, token: string): CustomerView {
     } : null,
     overTolerance: overTolerance(order) !== null,
     review: order.review ?? null,
+    choice: choiceOf(order),
+  };
+}
+
+/** While the customer may still change colours but a quote exists, the material is the one it was priced in
+ *  (no material is priced as PLA). Otherwise only what the customer chose. */
+function choiceOf(order: Order): CustomerView["choice"] {
+  const canChange = order.status === "CREATED";
+  const materialLocked = store.listQuotes(order.id).length > 0;
+  return {
+    material: order.material ?? (canChange && materialLocked ? orderMaterial(order) ?? "PLA" : null),
+    colors: order.preferredColors ?? [], canChange, materialLocked,
   };
 }
 
@@ -224,18 +241,69 @@ export async function customerDecide(
   return { ok: true, settled: true };
 }
 
-/** A customer places an order through the invite link. Prices are set later by Kesuni. */
+/** A customer places an order through the invite link. Prices are set later by Kesuni.
+ *  material / colors: the customer's pick from the studio's loaded spools (see readColorChoice), both optional. */
 export function customerCreateOrder(input: {
   name: string; product: string; quantity: number; deadline: string; budgetIdr: number; note: string;
+  material?: unknown; colors?: unknown;
 }): { ok: true; order: Order } | Fail {
   const r: string[] = [];
   if (!input.name.trim()) r.push("Name is required");
   if (input.product.trim().length > 200) r.push("Product name is too long (at most 200 characters)");
   if (!Number.isFinite(input.budgetIdr) || input.budgetIdr < 1000) r.push("Budget minimal Rp1.000");
-  if (r.length) return fail(400, "The order is incomplete", r);
-  const mandateMicro = Math.round((input.budgetIdr / idrPerUsdc()) * 1e6);
+  const choice = readColorChoice(input.material, input.colors, studioPalette(store.listPrinters()));
+  if (!choice.ok) r.push(...choice.reasons);
+  if (r.length || !choice.ok) return fail(400, "The order is incomplete", r);
+  // The rupiah as typed and the rate used, so the USDC budget can always be explained (same helper as New order).
   return createOrder({
     product: input.product, quantity: input.quantity, deadline: input.deadline, designVersion: "v1",
-    mandateMicro, label: "real", customerName: input.name, customerNote: input.note,
+    label: "real", customerName: input.name, customerNote: input.note, ...budgetFromRupiah(input.budgetIdr),
+    material: choice.material, preferredColors: choice.preferredColors,
   });
+}
+
+/**
+ * The customer's material and colours from a request body: material "PLA" | "PETG" (or none: Kesuni picks), colors
+ * [{ type, color }] that must be loaded in the studio right now (the palette). One material per order: colours without a
+ * material set it. Names are always the English nameOf(color), whatever the page sent.
+ */
+export function readColorChoice(
+  material: unknown, colors: unknown, palette: Pick<PaletteColor, "type" | "color">[],
+): { ok: true; material?: Material; preferredColors: ColorChoice[] } | { ok: false; reasons: string[] } {
+  const picked = MATERIALS.find((m) => m === material);
+  if (!picked && material !== undefined && material !== null && material !== "") return { ok: false, reasons: ["Material must be PLA or PETG"] };
+  const plain = Array.isArray(colors)
+    ? colors.map((c) => (c && typeof c === "object" ? { type: (c as ColorChoice).type, color: (c as ColorChoice).color } : c))
+    : colors;
+  const r = parseColorChoices(plain, palette);
+  if (!r.ok) return r;
+  const chosen = picked ?? r.choices[0]?.type;
+  if (r.choices.some((c) => c.type !== chosen)) return { ok: false, reasons: ["Pick the colours of one material"] };
+  return { ok: true, material: chosen, preferredColors: r.choices.map((c) => ({ type: c.type, color: c.color, name: nameOf(c.color) })) };
+}
+
+/**
+ * The customer changes their material or colours on their order page. Only while Kesuni has not priced the order
+ * (CREATED); once a quote exists the material stays, because the price per gram may depend on it (colours of the same
+ * material may still change). Logged for the operator; the Chief reads the choice from get_order.
+ */
+export function customerSetColors(
+  orderId: string, input: { material: unknown; colors: unknown },
+): { ok: true; choice: { material: Material | null; colors: ColorChoice[] } } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (order.status !== "CREATED") return fail(409, "Kesuni has already priced your order. To change the material or colours, message Kesuni.");
+  const c = readColorChoice(input.material, input.colors, studioPalette(store.listPrinters()));
+  if (!c.ok) return fail(400, "These colours cannot be chosen", c.reasons);
+  const pricedAs = (m: Material | null | undefined) => m ?? "PLA"; // no material is priced as PLA
+  if (pricedAs(c.material) !== pricedAs(orderMaterial(order)) && store.listQuotes(orderId).length) {
+    return fail(409, "Kesuni is already pricing your order. To change the material, message Kesuni.");
+  }
+  // undefined clears the field (the row is stored as JSON).
+  store.saveOrder({ ...order, material: c.material, preferredColors: c.preferredColors.length ? c.preferredColors : undefined });
+  store.addLog({
+    orderId, actor: "human", tool: "customer_colors", input: { material: c.material ?? null, colors: c.preferredColors },
+    ok: true, output: {}, at: new Date().toISOString(),
+  });
+  return { ok: true, choice: { material: c.material ?? null, colors: c.preferredColors } };
 }

@@ -3,7 +3,7 @@
 // card on the home page changes when the config does. Plus today's activity from the agent log. Read-only.
 import * as store from "../store";
 import { ownerRules } from "../owner-rules";
-import { pricingConfig } from "../pricing";
+import { pricingConfig, pricingFor } from "../pricing";
 import { network } from "../network";
 import { LLM_TOOLS } from "./tools";
 import { maxWakesPerHour } from "./chief";
@@ -45,8 +45,12 @@ export function chiefAuthority(now: Date = new Date()): ChiefAuthority {
   const beat = heartbeatIntervalSeconds();
   const mainnetUnlocked = process.env.KESUNI_ALLOW_MAINNET === "1";
 
+  // PLA and PETG (owner, 15 Oct 2026); one price when PETG costs the customer the same as PLA, else both.
+  const pla = pricingFor(pc, "PLA").pricePerGramIdr;
+  const petg = pricingFor(pc, "PETG").pricePerGramIdr;
+  const perGram = pla === petg ? `${rp(pla)}/g` : `PLA ${rp(pla)}/g, PETG ${rp(petg)}/g`;
   const llm: [string, string][] = [
-    ["price_by_weight", `Price by weight from the slicer grams a person entered: ${rp(pc.pricePerGramIdr)}/g, unit price rounded up to ${rp(pc.roundIdr)}`],
+    ["price_by_weight", `Price PLA and PETG by weight from the slicer grams a person entered: ${perGram}, unit price rounded up to ${rp(pc.roundIdr)}`],
     ["choose_plan", "Choose the production plan within the customer's budget and the owner's rules"],
     ["choose_printer", "Choose a ready printer once the customer has paid into escrow"],
     ["create_operator_task", "Ask the operator for filament changes and printer checks"],
@@ -96,7 +100,8 @@ export function chiefAuthority(now: Date = new Date()): ChiefAuthority {
   const handedToPerson: HandOff[] = [
     { id: "qc", text: "Whether a print passes QC, and whether to reprint it", enforcedBy: "code", how: "no QC tool, and the Chief's task tool refuses reprints: a person records QC and the customer accepts or rejects" },
     { id: "printability", text: "Whether a design can be printed (size, supports, strength)", enforcedBy: "code", how: "no slicer or file access: grams per unit come only from a person" },
-    { id: "material", text: "Materials other than plain PLA", enforcedBy: "code", how: "price_by_weight refuses when the spec is not plain PLA or the order text names another material (a keyword list, so a person double-checks)" },
+    { id: "material", text: "Materials other than PLA and PETG", enforcedBy: "code", how: "price_by_weight refuses when the spec is not PLA or PETG or the order text names another material (a keyword list, so a person double-checks)" },
+    { id: "printers", text: "Starting, pausing or stopping a print", enforcedBy: "code", how: "no printer control tool: people start and control prints on the website, each with their name" },
     { id: "machines", text: "Machines Kesuni does not run", enforcedBy: "code", how: "the Chief only picks among the studio's printers and the quotes people entered; partners only within the owner's rules" },
     { id: "price_change", text: "A price change after the plan is chosen, discounts, exceptions to the owner's rules", enforcedBy: "code", how: "quotes close once a plan is chosen; the policy refuses exceptions until the owner approves" },
     { id: "money", text: "Moving money", enforcedBy: "code", how: "no payment tool: release and refund run in code after the customer decides" },

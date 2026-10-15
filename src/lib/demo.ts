@@ -7,7 +7,7 @@ import { addEvidence, approveByOwner, chooseQuote, createOrder, recordAcceptance
 import { quoteByWeight, setSpec } from "./agreement";
 import { idrToMicro } from "./costing";
 import { ownerRuleReasons, ownerRules } from "./owner-rules";
-import { MAX_GRAMS_PER_UNIT, priceByWeight, pricingConfig } from "./pricing";
+import { MAX_GRAMS_PER_UNIT, priceByWeight, pricingConfig, type ColorMode } from "./pricing";
 import { notReadyReason } from "./printer/actions";
 import type { Order, OrderStatus, Quote } from "./types";
 import { makeT, type T } from "../i18n/core";
@@ -72,13 +72,15 @@ const EN: T = makeT("en", {});
 // ---------- scenario setups ----------
 
 type Band = "inside" | "above" | "below";
-interface Setup { product: string; quantity: number; gramsPerUnit: number; band: Band; dueToday?: boolean }
+interface Setup { product: string; quantity: number; gramsPerUnit: number; band: Band; dueToday?: boolean; colorMode?: ColorMode }
 
 const SETUP: Record<ScenarioId, Setup> = {
   smooth: { product: "Phone stand (PLA)", quantity: 10, gramsPerUnit: 12, band: "inside" },
   "above-limit": { product: "Lighter case (PLA)", quantity: 50, gramsPerUnit: 16, band: "above" },
   "below-minimum": { product: "Name keychain (PLA)", quantity: 1, gramsPerUnit: 8, band: "below" },
-  "late-deadline": { product: "Desk organizer (PLA)", quantity: 4, gramsPerUnit: 60, band: "inside", dueToday: true },
+  // Multi colour: 4 × 60 g at up to 15 min per gram, two rounds on the studio's printers, is over a day of printing,
+  // so it cannot be ready by the end of today whatever the time.
+  "late-deadline": { product: "Desk organizer (multi-colour PLA)", quantity: 4, gramsPerUnit: 60, band: "inside", dueToday: true, colorMode: "multi" },
   "customer-rejects": { product: "Wall hook (PLA)", quantity: 6, gramsPerUnit: 15, band: "inside" },
   "printer-offline": { product: "Cable clip set (PLA)", quantity: 20, gramsPerUnit: 5, band: "inside" },
 };
@@ -108,7 +110,7 @@ export function fitGrams(base: number, quantity: number, band: Band): number | n
   const r = ownerRules();
   const cfg = pricingConfig();
   const total = (g: number) => {
-    const p = priceByWeight(g, quantity, cfg);
+    const p = priceByWeight(g, quantity, "single", cfg); // the colour mode never changes the price
     return p.ok ? p.price.totalIdr : NaN;
   };
   // 5% away from each limit, so the rupiah/USDC tolerance of the owner's rules cannot flip the outcome.
@@ -142,7 +144,7 @@ export function runScenario(id: string, now: Date = new Date()): ScenarioResult 
   const setup = SETUP[sc.id];
   const grams = fitGrams(setup.gramsPerUnit, setup.quantity, setup.band);
   if (grams === null) return fail(409, "The owner's rules leave no price for this scenario", [`Check the limits in .env.local (scenario: ${sc.title})`]);
-  const priced = priceByWeight(grams, setup.quantity);
+  const priced = priceByWeight(grams, setup.quantity, setup.colorMode);
   if (!priced.ok) return fail(409, "Invalid sample weight", priced.reasons);
   // Budget a quarter above the price, so only the owner's rules decide (never the budget).
   const mandateMicro = Math.ceil((idrToMicro(priced.price.totalIdr) * 1.25) / 1e6) * 1e6;
@@ -159,7 +161,7 @@ export function runScenario(id: string, now: Date = new Date()): ScenarioResult 
       must(setSpec(orderId, SPEC[sc.id]!));
       steps.push("Spec and quality promise set");
     }
-    const quote = must(quoteByWeight(orderId, { gramsPerUnit: grams, source: SOURCE, by: "human" })).quote;
+    const quote = must(quoteByWeight(orderId, { gramsPerUnit: grams, source: SOURCE, colorMode: setup.colorMode, by: "human" })).quote;
     steps.push(`Priced by weight: ${setup.quantity} × ${grams} g = ${rp(priced.price.totalIdr)}`);
     BUILD[sc.id](orderId, quote, steps);
     store.addLog({ orderId, actor: "human", tool: "demo_scenario", input: { scenario: sc.id }, ok: true, output: { steps }, at: new Date().toISOString() });
@@ -173,9 +175,12 @@ export function runScenario(id: string, now: Date = new Date()): ScenarioResult 
 const choose = (orderId: string, quote: Quote, reason: string) => must(chooseQuote(orderId, quote.id, "human", `Demo: ${reason}`));
 
 /** The plan must be refused here: that refusal is what the scenario shows. */
-function refused(orderId: string, quote: Quote): string[] {
+function refused(orderId: string, quote: Quote, check = "the limits"): string[] {
+  const notRefused = () => new StepFailed(fail(409, `The owner's rules did not refuse this plan; check ${check} in .env.local`));
+  // Checked first, so a plan the rules allow is never chosen for a scenario that is about the refusal.
+  if (ownerRuleReasons(store.getOrder(orderId)!, quote).reasons.length === 0) throw notRefused();
   const r = chooseQuote(orderId, quote.id, "human", "Demo: try the plan");
-  if (r.ok) throw new StepFailed(fail(409, "The owner's rules did not refuse this plan; check the limits in .env.local"));
+  if (r.ok) throw notRefused();
   return r.reasons ?? [r.error];
 }
 
@@ -203,7 +208,7 @@ const BUILD: Record<ScenarioId, (orderId: string, quote: Quote, steps: string[])
     steps.push("Plan chosen");
   },
   "late-deadline"(orderId, quote, steps) {
-    const reasons = refused(orderId, quote);
+    const reasons = refused(orderId, quote, "KESUNI_PRINTER_COUNT and KESUNI_PRINT_MIN_PER_GRAM_MULTI");
     steps.push(`Plan refused: ${reasons.join("; ")}`);
     ask(orderId, `Demo: ${reasons.join("; ")}. Ask the customer for a later date, or decline the order.`);
     steps.push("Task opened: talk to the customer");
@@ -235,12 +240,21 @@ export function demoFacts(t: T = EN): Record<ScenarioId, string> {
     smooth: t("{price} per gram, own studio", { price: rp(cfg.pricePerGramIdr) }),
     "above-limit": t("Owner approval above {amount}", { amount: rp(r.approvalAboveIdr) }),
     "below-minimum": t("Owner minimum {amount}", { amount: rp(r.minOrderIdr) }),
-    "late-deadline": t("24 h prep + {rate} g/h of printing", { rate: cfg.gramsPerHour * cfg.printerCount }),
+    "late-deadline": lateDeadlineFact(t),
     "customer-rejects": t("No escrow opened: no USDC moves"),
     "printer-offline": printers.length
       ? t("Live: {online} of {total} printers online", { online, total: printers.length })
       : t("No printers connected yet"),
   };
+}
+
+/** The late-deadline order's own ETA against its due date, e.g. "4 × 60 g multi colour: ready in ± 31 h, due today". */
+function lateDeadlineFact(t: T): string {
+  const s = SETUP["late-deadline"];
+  const grams = fitGrams(s.gramsPerUnit, s.quantity, s.band);
+  const p = grams === null ? null : priceByWeight(grams, s.quantity, s.colorMode);
+  if (!p?.ok) return t("Print time + {hours} h handling must end before the deadline", { hours: pricingConfig().handlingHours });
+  return t("{qty} × {grams} g multi colour: ready in ± {n} h, due today", { qty: s.quantity, grams: p.price.gramsPerUnit, n: p.price.etaHours });
 }
 
 export type Tone = "ok" | "warn" | "bad" | "";

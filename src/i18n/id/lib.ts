@@ -58,6 +58,17 @@ const PRINTER_STATE: Dict = {
   RUNNING: "MENCETAK",
   PAUSE: "JEDA",
   FINISH: "SELESAI",
+  INIT: "INISIALISASI",
+};
+/** Print job state (src/lib/printer/jobs.ts), lower case. */
+const JOB_STATE: Dict = {
+  queued: "dalam antrean",
+  uploading: "sedang diunggah",
+  sent: "sudah dikirim",
+  printing: "sedang mencetak",
+  done: "selesai",
+  failed: "gagal",
+  cancelled: "dibatalkan",
 };
 
 const id: Dict = {
@@ -100,8 +111,9 @@ const id: Dict = {
   "updates on the customer's order page": "kabar di halaman pesanan pelanggan",
 
   // ---------- what the Chief decides alone (src/lib/agent/authority.ts) ----------
-  "Price by weight from the slicer grams a person entered: {price}/g, unit price rounded up to {round}":
-    "Harga per berat dari gram slicer yang diisi orang: {price}/g, harga satuan dibulatkan ke atas ke {round}",
+  // {price} is "Rp1.500/g", or "PLA Rp1.500/g, PETG Rp1.800/g" when PETG has its own price.
+  "Price PLA and PETG by weight from the slicer grams a person entered: {price}, unit price rounded up to {round}":
+    "Harga PLA dan PETG per berat dari gram slicer yang diisi orang: {price}, harga satuan dibulatkan ke atas ke {round}",
   "Choose the production plan within the customer's budget and the owner's rules": "Memilih rencana produksi sesuai anggaran pelanggan dan aturan pemilik",
   "Choose a ready printer once the customer has paid into escrow": "Memilih printer yang siap setelah pelanggan membayar ke escrow",
   "Ask the operator for filament changes and printer checks": "Meminta operator mengganti filamen dan mengecek printer",
@@ -139,9 +151,12 @@ const id: Dict = {
     "tidak ada alat QC, dan alat tugas Chief menolak cetak ulang: orang mencatat QC, pelanggan menerima atau menolak",
   "Whether a design can be printed (size, supports, strength)": "Apakah desain bisa dicetak (ukuran, support, kekuatan)",
   "no slicer or file access: grams per unit come only from a person": "tanpa akses slicer atau file: gram per unit hanya dari orang",
-  "Materials other than plain PLA": "Material selain PLA biasa",
-  "price_by_weight refuses when the spec is not plain PLA or the order text names another material (a keyword list, so a person double-checks)":
-    "price_by_weight menolak jika spesifikasi bukan PLA biasa atau teks pesanan menyebut material lain (daftar kata kunci, jadi orang tetap mengecek ulang)",
+  "Materials other than PLA and PETG": "Material selain PLA dan PETG",
+  "price_by_weight refuses when the spec is not PLA or PETG or the order text names another material (a keyword list, so a person double-checks)":
+    "price_by_weight menolak jika spesifikasi bukan PLA atau PETG atau teks pesanan menyebut material lain (daftar kata kunci, jadi orang tetap mengecek ulang)",
+  "Starting, pausing or stopping a print": "Memulai, menjeda, atau menghentikan cetakan",
+  "no printer control tool: people start and control prints on the website, each with their name":
+    "tanpa alat kontrol printer: orang yang memulai dan mengendalikan cetakan di situs, masing-masing dengan namanya",
   "Machines Kesuni does not run": "Mesin yang tidak dijalankan Kesuni",
   "the Chief only picks among the studio's printers and the quotes people entered; partners only within the owner's rules":
     "Chief hanya memilih dari printer studio dan penawaran yang diisi orang; mitra hanya sesuai aturan pemilik",
@@ -224,6 +239,7 @@ const id: Dict = {
   "Say where the grams come from (slicer, plate, settings)": "Sebutkan asal gram (slicer, plate, pengaturan)",
   "by must be \"agent\" or \"human\"": "by harus \"agent\" atau \"human\"",
   "Invalid weight": "Berat tidak valid",
+  "Colour mode must be \"single\" or \"multi\"": "Mode warna harus \"single\" atau \"multi\"",
   "Who entered the grams is required": "Nama yang mengisi gram wajib diisi",
   "The price is not ready to approve yet": "Harga belum siap disetujui",
   "Name is required": "Nama wajib diisi",
@@ -365,6 +381,8 @@ const id: Dict = {
   "Check the limits in .env.local (scenario: {title})": "Cek batasnya di .env.local (skenario: {title})",
   "Invalid sample weight": "Berat contoh tidak valid",
   "The owner's rules did not refuse this plan; check the limits in .env.local": "Aturan pemilik tidak menolak rencana ini; cek batasnya di .env.local",
+  "The owner's rules did not refuse this plan; check KESUNI_PRINTER_COUNT and KESUNI_PRINT_MIN_PER_GRAM_MULTI in .env.local":
+    "Aturan pemilik tidak menolak rencana ini; cek KESUNI_PRINTER_COUNT dan KESUNI_PRINT_MIN_PER_GRAM_MULTI di .env.local",
 
   // ---------- other API answers shown in forms (src/app/api) ----------
   "Send a JSON body": "Kirim body JSON",
@@ -392,6 +410,292 @@ const id: Dict = {
   "Wrong operator password": "Kata sandi operator salah",
   "Admin routes are closed: set OPERATOR_PASSWORD on the server first": "Rute admin tertutup: atur OPERATOR_PASSWORD di server dulu",
   "profile must be \"test\" or \"demo\"": "profile harus \"test\" atau \"demo\"",
+
+  // ---------- printer stages: "what it is doing now" (src/lib/printer/bambu.ts STAGES, Bambu Studio's words) ----------
+  // "Printing", "Preparing" and "Paused" are in order.ts / machines-capacity.ts.
+  "Auto bed leveling": "Perataan bed otomatis",
+  "Heatbed preheating": "Memanaskan heatbed",
+  "Vibration compensation": "Kompensasi getaran",
+  "Changing filament": "Mengganti filamen",
+  "M400 pause": "Jeda M400",
+  "Paused (filament ran out)": "Dijeda (filamen habis)",
+  "Heating nozzle": "Memanaskan nozzle",
+  "Calibrating dynamic flow": "Kalibrasi aliran dinamis",
+  "Scanning bed surface": "Memindai permukaan bed",
+  "Inspecting first layer": "Memeriksa lapisan pertama",
+  "Identifying build plate type": "Mengenali jenis build plate",
+  "Calibrating Micro Lidar": "Kalibrasi Micro Lidar",
+  "Homing toolhead": "Homing toolhead",
+  "Cleaning nozzle tip": "Membersihkan ujung nozzle",
+  "Checking extruder temperature": "Memeriksa suhu extruder",
+  "Paused by the user": "Dijeda oleh pengguna",
+  "Pause (front cover fall off)": "Jeda (penutup depan lepas)",
+  "Calibrating the micro lidar": "Kalibrasi micro lidar",
+  "Calibrating flow ratio": "Kalibrasi rasio aliran",
+  "Pause (nozzle temperature malfunction)": "Jeda (suhu nozzle bermasalah)",
+  "Pause (heatbed temperature malfunction)": "Jeda (suhu heatbed bermasalah)",
+  "Filament unloading": "Mengeluarkan filamen",
+  "Pause (step loss)": "Jeda (step loss)",
+  "Filament loading": "Memasukkan filamen",
+  "Motor noise cancellation": "Peredaman bising motor",
+  "Pause (AMS offline)": "Jeda (AMS offline)",
+  "Pause (low speed of the heatbreak fan)": "Jeda (kipas heatbreak terlalu pelan)",
+  "Pause (chamber temperature control problem)": "Jeda (masalah kontrol suhu ruang cetak)",
+  "Cooling chamber": "Mendinginkan ruang cetak",
+  "Pause (G-code inserted by user)": "Jeda (G-code sisipan pengguna)",
+  "Motor noise showoff": "Demo bunyi motor",
+  "Pause (nozzle clumping)": "Jeda (nozzle menggumpal)",
+  "Pause (cutter error)": "Jeda (pemotong bermasalah)",
+  "Pause (first layer error)": "Jeda (lapisan pertama bermasalah)",
+  "Pause (nozzle clog)": "Jeda (nozzle tersumbat)",
+  "Measuring motion precision": "Mengukur presisi gerak",
+  "Enhancing motion precision": "Meningkatkan presisi gerak",
+  "Measuring motion accuracy": "Mengukur akurasi gerak",
+  "Nozzle offset calibration": "Kalibrasi offset nozzle",
+  "High-temperature auto bed leveling": "Perataan bed otomatis suhu tinggi",
+  "Auto check: quick release lever": "Cek otomatis: tuas quick release",
+  "Auto check: door and upper cover": "Cek otomatis: pintu dan penutup atas",
+  "Laser calibration": "Kalibrasi laser",
+  "Auto check: platform": "Cek otomatis: platform",
+  "Confirming BirdsEye camera location": "Memastikan posisi kamera BirdsEye",
+  "Calibrating BirdsEye camera": "Kalibrasi kamera BirdsEye",
+  "Auto bed leveling: phase 1": "Perataan bed otomatis: tahap 1",
+  "Auto bed leveling: phase 2": "Perataan bed otomatis: tahap 2",
+  "Heating chamber": "Memanaskan ruang cetak",
+  "Adjusting heatbed temperature": "Menyesuaikan suhu heatbed",
+  "Printing calibration lines": "Mencetak garis kalibrasi",
+  "Auto check: material": "Cek otomatis: material",
+  "Live View camera calibration": "Kalibrasi kamera Live View",
+  "Waiting for heatbed to reach target temperature": "Menunggu heatbed mencapai suhu target",
+  "Auto check: material position": "Cek otomatis: posisi material",
+  "Cutting module offset calibration": "Kalibrasi offset modul pemotong",
+  "Measuring surface": "Mengukur permukaan",
+  "Thermal preconditioning for first layer": "Prakondisi panas untuk lapisan pertama",
+  "Waiting for the chamber temperature to equalize": "Menunggu suhu ruang cetak merata",
+  "Preparing hotend": "Menyiapkan hotend",
+  "Calibrating the nozzle clumping detection": "Kalibrasi deteksi nozzle menggumpal",
+  "Purifying the chamber air": "Membersihkan udara ruang cetak",
+  "Measuring rotary attachment": "Mengukur aksesori putar",
+  "Moving the toolhead above the purge chute": "Toolhead bergerak ke atas saluran buang",
+  "Cooling down the nozzle": "Mendinginkan nozzle",
+  "Moving the toolhead to the bed centre": "Toolhead bergerak ke tengah bed",
+  "Active arc fitting": "Active arc fitting",
+  "Hotend type detection": "Deteksi jenis hotend",
+  "Build plate alignment detection": "Deteksi posisi build plate",
+  "Heatbed surface foreign object detection": "Deteksi benda asing di permukaan heatbed",
+  "Heatbed underside foreign object detection": "Deteksi benda asing di bawah heatbed",
+  "Pre-extrusion before printing": "Pra-ekstrusi sebelum mencetak",
+  "Preparing AMS": "Menyiapkan AMS",
+  "Working (stage {n})": "Bekerja (tahap {n})",
+
+  // ---------- print speed and fault levels (src/lib/printer/bambu.ts) ----------
+  // "Standard" is in customer.ts (Standar).
+  "Silent": "Senyap",
+  "Sport": "Sport",
+  "Ludicrous": "Ludicrous",
+  "fatal": "fatal",
+  "serious": "serius",
+  "common": "umum",
+  "info": "info",
+  // A fault task (issueTaskText in src/lib/printer/actions.ts); the page puts Bambu's own words in the page's language.
+  "{printer} reports {code} ({level}): {words} Check the printer before the next print. {url}":
+    "{printer} melaporkan {code} ({level}): {words} Periksa printer sebelum cetakan berikutnya. {url}",
+  "{printer} reports error {code}: {words} Check the printer before the next print. {url}":
+    "{printer} melaporkan error {code}: {words} Periksa printer sebelum cetakan berikutnya. {url}",
+  "{printer} reports {code}: {words} Check the printer before the next print. {url}":
+    "{printer} melaporkan {code}: {words} Periksa printer sebelum cetakan berikutnya. {url}",
+  "Bambu has no description for this code.": "Bambu tidak punya keterangan untuk kode ini.",
+  "unknown": "tidak diketahui",
+
+  // ---------- colour names (src/lib/colors.ts) ----------
+  // "Black" is in order.ts (Hitam).
+  "Charcoal": "Arang",
+  "Grey": "Abu-abu",
+  "Silver": "Perak",
+  "White": "Putih",
+  "Ivory": "Gading",
+  "Beige": "Krem",
+  "Brown": "Cokelat",
+  "Dark red": "Merah tua",
+  "Red": "Merah",
+  "Pink": "Merah muda",
+  "Magenta": "Magenta",
+  "Orange": "Oranye",
+  "Gold": "Emas",
+  "Yellow": "Kuning",
+  "Lime": "Hijau limau",
+  "Green": "Hijau",
+  "Dark green": "Hijau tua",
+  "Mint": "Hijau mint",
+  "Teal": "Hijau toska",
+  "Cyan": "Sian",
+  "Sky blue": "Biru langit",
+  "Blue": "Biru",
+  "Navy": "Biru dongker",
+  "Purple": "Ungu",
+  "Lavender": "Lavender",
+  "Unknown colour": "Warna tidak diketahui",
+
+  // ---------- printer controls and print jobs (src/lib/printer/control.ts, jobs.ts, actions.ts) ----------
+  "Unknown printer command": "Perintah printer tidak dikenal",
+  "kind must be one of pause, resume, stop, speed, light, get_version, camera_snapshot":
+    "kind harus salah satu dari pause, resume, stop, speed, light, get_version, camera_snapshot",
+  "The printer is offline (no report in the last 2 min)": "Printer offline (tidak ada laporan dalam 2 menit terakhir)",
+  "Pause works only while the printer is printing or preparing": "Jeda hanya bisa saat printer sedang mencetak atau bersiap",
+  "Resume works only while the printer is paused": "Lanjutkan hanya bisa saat printer sedang dijeda",
+  "Stop works only while a print is on the printer": "Hentikan hanya bisa saat ada cetakan di printer",
+  "The speed can only change while the printer is printing": "Kecepatan hanya bisa diubah saat printer sedang mencetak",
+  "Speed level must be 1 (silent), 2 (standard), 3 (sport) or 4 (ludicrous)":
+    "Level kecepatan harus 1 (senyap), 2 (standar), 3 (sport) atau 4 (ludicrous)",
+  "Say whether the light goes on or off": "Sebutkan lampu dinyalakan atau dimatikan",
+  "A person's name is required": "Nama orang wajib diisi",
+  "Confirm first": "Konfirmasi dulu",
+  "Send confirm: true after the person confirmed": "Kirim confirm: true setelah orangnya mengonfirmasi",
+  "The printer cannot do that now": "Printer tidak bisa melakukan itu sekarang",
+  "One command every 3 seconds per printer": "Satu perintah tiap 3 detik per printer",
+  "The same command is already waiting for the bridge": "Perintah yang sama sudah menunggu bridge",
+  "A person must be at the printer when it starts": "Harus ada orang di dekat printer saat mulai mencetak",
+  "A person must confirm the bed is empty and clean": "Orang harus memastikan bed kosong dan bersih",
+  "The printer has not reported in the last minute (is the bridge running?)": "Printer belum melapor dalam 1 menit terakhir (apakah bridge berjalan?)",
+  "The printer is {state}: it must be idle or finished": "Printer berstatus {state}: harus siaga atau selesai",
+  "The printer is linked to {order}": "Printer sedang terhubung ke {order}",
+  "Another print job ({id}) on this printer has not started yet": "Job cetak lain ({id}) di printer ini belum mulai",
+  "Printer error {code}: fix it before printing": "Error printer {code}: perbaiki dulu sebelum mencetak",
+  "Printer warning {code}: check it before printing": "Peringatan printer {code}: cek dulu sebelum mencetak",
+  "The bridge does not report the SD card yet: update and restart the bridge": "Bridge belum melaporkan kartu SD: perbarui dan jalankan ulang bridge",
+  "No microSD card in the printer (printing needs one)": "Tidak ada kartu microSD di printer (mencetak butuh kartu ini)",
+  "The printer reports a problem with the SD card": "Printer melaporkan masalah pada kartu SD",
+  "The 3MF could not be read: {error}": "3MF tidak bisa dibaca: {error}",
+  "Not a sliced file: in Bambu Studio use File > Export > Export plate sliced file (.gcode.3mf)":
+    "Bukan file hasil slice: di Bambu Studio pakai File > Export > Export plate sliced file (.gcode.3mf)",
+  "The file is sliced for {model}, not the Bambu Lab A1": "File ini di-slice untuk {model}, bukan Bambu Lab A1",
+  "The file does not say which printer it is sliced for": "File tidak menyebut di-slice untuk printer apa",
+  "Plate {n} is not in the sliced file": "Plate {n} tidak ada di file hasil slice",
+  "The file is for a {want} mm nozzle; the printer has {have} mm": "File untuk nozzle {want} mm; printer memakai {have} mm",
+  "The plate uses no filament": "Plate ini tidak memakai filamen",
+  "The AMS mapping needs {n} entries, one per filament in the project": "Pemetaan AMS butuh {n} isian, satu per filamen di proyek",
+  "The AMS mapping holds an invalid slot": "Pemetaan AMS berisi slot yang tidak valid",
+  "The bridge does not report the AMS yet: update and restart the bridge": "Bridge belum melaporkan AMS: perbarui dan jalankan ulang bridge",
+  "Filament {id} ({type}) has no AMS slot": "Filamen {id} ({type}) belum punya slot AMS",
+  "Filament {id} ({type}) is mapped to {slot}, which is empty": "Filamen {id} ({type}) dipetakan ke {slot}, yang kosong",
+  "Filament {id} needs {type}, but {slot} holds {tray}": "Filamen {id} butuh {type}, tetapi {slot} berisi {tray}",
+  "Without the AMS only one filament can print, from the external spool": "Tanpa AMS hanya satu filamen yang bisa dicetak, dari spool eksternal",
+  "No external spool is set on the printer": "Belum ada spool eksternal yang diatur di printer",
+  "The external spool holds {type}; the file needs {need}": "Spool eksternal berisi {type}; file butuh {need}",
+  "Check the warnings and tick \"I checked this\"": "Cek peringatannya lalu centang \"Sudah saya cek\"",
+  "The file does not belong to this order": "File ini bukan milik pesanan ini",
+  "Only a sliced Bambu Studio file (.gcode.3mf) can be printed": "Hanya file hasil slice Bambu Studio (.gcode.3mf) yang bisa dicetak",
+  "Filament {id}: the file asks for {want}, the spool is {have}": "Filamen {id}: file meminta {want}, spool-nya {have}",
+  "The customer has not paid into escrow yet": "Pelanggan belum membayar ke escrow",
+  "One print start per printer per minute": "Satu kali mulai cetak per printer per menit",
+  "The print cannot start": "Cetakan tidak bisa dimulai",
+  "Not linked to {order}: {error}": "Tidak terhubung ke {order}: {error}",
+  "Print job not found": "Job cetak tidak ditemukan",
+  "The job is {jobState}; stop the print on the printer instead": "Job berstatus {jobState}; hentikan cetakan lewat printer saja",
+  "Cancelled by {name}": "Dibatalkan oleh {name}",
+  "Printer error {code}": "Error printer {code}",
+  "The bridge did not pick it up within 60 s": "Bridge tidak mengambilnya dalam 60 dtk",
+  "No answer from the bridge": "Tidak ada jawaban dari bridge",
+  "The bridge did not pick it up within 5 min. Check the bed again and start again.":
+    "Bridge tidak mengambilnya dalam 5 mnt. Cek bed lagi lalu mulai lagi.",
+  "Camera frame is larger than 2 MB": "Gambar kamera lebih dari 2 MB",
+  "Not a JPEG image": "Bukan gambar JPEG",
+  "No camera frame yet": "Belum ada gambar kamera",
+  "Who checked the colours is required": "Nama yang mengecek warna wajib diisi",
+  "The printer has not reported its AMS yet": "Printer belum melaporkan AMS-nya",
+  "Expected { kind, params?, by, confirm? }": "Kirim { kind, params?, by, confirm? }",
+  "Expected { printerId, attachmentId, plate, amsMapping, by, bedEmptyConfirmed, personPresent }":
+    "Kirim { printerId, attachmentId, plate, amsMapping, by, bedEmptyConfirmed, personPresent }",
+  "Expected { action: \"cancel\", by }": "Kirim { action: \"cancel\", by }",
+  "Expected { action: \"link\", orderId } | { action: \"unlink\" } | { action: \"clear_bed\", by } | { action: \"confirm_colors\", by }":
+    "Kirim { action: \"link\", orderId } | { action: \"unlink\" } | { action: \"clear_bed\", by } | { action: \"confirm_colors\", by }",
+
+  // ---------- new order fields: budget in rupiah, material, the customer's colours (src/lib/actions.ts, colors.ts) ----------
+  "Budget in rupiah must be a positive amount": "Anggaran dalam rupiah harus jumlah positif",
+  "The rupiah per USDC rate must be a positive number": "Kurs rupiah per USDC harus angka positif",
+  "Material must be PLA or PETG": "Material harus PLA atau PETG",
+  "Colours must be a list": "Warna harus berupa daftar",
+  "Pick at most {n} colours": "Pilih paling banyak {n} warna",
+  "A colour must be written as #RRGGBB": "Warna harus ditulis sebagai #RRGGBB",
+  "{type} {name} ({color}) is not loaded in the studio right now": "{type} {name} ({color}) sedang tidak terpasang di studio",
+
+  // ---------- sliced 3MF files (src/lib/threemf.ts) ----------
+  "The file is larger than 200 MB": "File lebih dari 200 MB",
+  "Not a ZIP archive": "Bukan arsip ZIP",
+  "Split ZIP archives are not supported": "Arsip ZIP terpecah tidak didukung",
+  "ZIP64 archives are not supported": "Arsip ZIP64 tidak didukung",
+  "More than {n} files in the archive": "Lebih dari {n} file di dalam arsip",
+  "Broken ZIP archive": "Arsip ZIP rusak",
+  "Unsafe file name in the archive": "Ada nama file yang tidak aman di dalam arsip",
+  "Oversized entry in the archive": "Ada isi arsip yang terlalu besar",
+  "Suspicious compression ratio (zip bomb)": "Rasio kompresi mencurigakan (zip bomb)",
+  "Encrypted entries are not supported": "Isi arsip terenkripsi tidak didukung",
+  "The archive holds two files with the same name": "Arsip berisi dua file dengan nama yang sama",
+  "The file's metadata is too large": "Metadata file terlalu besar",
+  "{file} is too large to read": "{file} terlalu besar untuk dibaca",
+
+  // ---------- printer state in words, safety checks before a control or a start (control.ts, jobs.ts, actions.ts) ----------
+  "The printer is preparing: it must be idle or finished": "Printer sedang bersiap: harus siaga atau selesai",
+  "The printer is slicing: it must be idle or finished": "Printer sedang slicing: harus siaga atau selesai",
+  "The printer is printing: it must be idle or finished": "Printer sedang mencetak: harus siaga atau selesai",
+  "The printer is paused: it must be idle or finished": "Printer sedang dijeda: harus siaga atau selesai",
+  "The printer is starting up: it must be idle or finished": "Printer sedang menyala: harus siaga atau selesai",
+  "The printer is not reporting its state: it must be idle or finished": "Printer tidak melaporkan statusnya: harus siaga atau selesai",
+  "The printer paused because of a fault: fix it, then tick \"I fixed the cause\"":
+    "Printer berhenti karena gangguan: perbaiki dulu, lalu centang \"Penyebabnya sudah saya perbaiki\"",
+  "printer error {code}": "error printer {code}",
+  "urlForm must be sdcard or ftp": "urlForm harus sdcard atau ftp",
+  "The bed was confirmed more than 10 min ago: nothing was sent. Check the bed again and start again.":
+    "Bed dikonfirmasi lebih dari 10 mnt lalu: tidak ada yang dikirim. Cek bed lagi lalu mulai lagi.",
+  "A print ended on this printer after the bed was confirmed: nothing was sent. Clear the bed and start again.":
+    "Ada cetakan yang selesai di printer ini setelah bed dikonfirmasi: tidak ada yang dikirim. Kosongkan bed lalu mulai lagi.",
+  "The bridge stopped answering during the upload. Check the printer screen, then start again.":
+    "Bridge berhenti menjawab saat mengunggah. Cek layar printer, lalu mulai lagi.",
+  "The printer never showed the print starting. Check the printer screen, then start again.":
+    "Printer tidak pernah menunjukkan cetakan dimulai. Cek layar printer, lalu mulai lagi.",
+
+  // ---------- what the LAN bridge reports back on a control or a print (scripts/bridge/logic.mjs, runner.mjs) ----------
+  "The printer paused": "Printer sudah dijeda",
+  "The printer is printing again": "Printer mencetak lagi",
+  "The printer stopped the print": "Printer sudah menghentikan cetakan",
+  "The print speed changed": "Kecepatan cetak sudah berubah",
+  "The light is on": "Lampu menyala",
+  "The light is off": "Lampu mati",
+  "The printer sent its firmware versions": "Printer sudah mengirim versi firmware-nya",
+  "The printer accepted it": "Printer menerimanya",
+  "Camera frame sent": "Gambar kamera terkirim",
+  "The printer refused: {reason}": "Printer menolak: {reason}",
+  "The printer refused with error {code}": "Printer menolak dengan error {code}",
+  "The printer refused the print: {reason}": "Printer menolak cetakan: {reason}",
+  "The printer refused the print with error {code}": "Printer menolak cetakan dengan error {code}",
+  "Printer error {code}: the print did not start": "Error printer {code}: cetakan tidak dimulai",
+  "The printer did not start the print": "Printer tidak memulai cetakan",
+  "The printer did not start within 45 s: check the printer screen, then start again":
+    "Printer tidak mulai dalam 45 dtk: cek layar printer, lalu mulai lagi",
+  "The printer has not paused yet: check the printer": "Printer belum jeda: cek printernya",
+  "The printer did not resume: check the printer screen": "Printer tidak melanjutkan: cek layar printer",
+  "The printer has not stopped yet: check the printer": "Printer belum berhenti: cek printernya",
+  "No answer from the printer within 15 s: check the printer": "Tidak ada jawaban dari printer dalam 15 dtk: cek printernya",
+  "Could not send it to the printer: {error}": "Tidak bisa mengirimnya ke printer: {error}",
+  "Not sent: {error}": "Tidak dikirim: {error}",
+  "The bridge is not connected to the printer": "Bridge tidak terhubung ke printer",
+  "The bridge hit an error: {error}": "Bridge mengalami error: {error}",
+  "New printer warning {code} since the print was queued: check it and start again":
+    "Ada peringatan printer baru {code} sejak cetakan diantrekan: cek lalu mulai lagi",
+  "Another print ({id}) is starting on this printer": "Cetakan lain ({id}) sedang dimulai di printer ini",
+  "The job has no download link from this app": "Job ini tidak punya tautan unduhan dari aplikasi ini",
+  "Could not download the file (the app answered {http})": "File tidak bisa diunduh (aplikasi menjawab {http})",
+  "Could not download the file: {error}": "File tidak bisa diunduh: {error}",
+  "The file is empty": "File kosong",
+  "The app did not send the file's checksum": "Aplikasi tidak mengirim checksum file",
+  "The file changed on the way (checksum mismatch)": "File berubah di jalan (checksum tidak cocok)",
+  "The file is not the one the job was made with (checksum mismatch)": "File ini bukan file saat job dibuat (checksum tidak cocok)",
+  "The file has {n} bytes; the job says {m}": "File berukuran {n} byte; job menyebut {m}",
+  "Upload to the printer failed: {error}": "Unggah ke printer gagal: {error}",
+  "The app could not record the start; nothing was sent to the printer": "Aplikasi tidak bisa mencatat mulai cetak; tidak ada yang dikirim ke printer",
+  "This printer reports no camera": "Printer ini tidak melaporkan kamera",
+  "No camera frame: {error}": "Tidak ada gambar kamera: {error}",
+  "Dry run: nothing was sent to the printer": "Uji coba (dry run): tidak ada yang dikirim ke printer",
 };
 
 // ---------- the same texts filled in, so a plain t(value) finds them ----------
@@ -404,7 +708,7 @@ function filled(en: string, rows: [Vars, Vars?][]): void {
 }
 
 // Today's config (the defaults, as on the live site): the authority card and the Chief page render these.
-filled("Price by weight from the slicer grams a person entered: {price}/g, unit price rounded up to {round}", [[{ price: "Rp1.500", round: "Rp500" }]]);
+filled("Price PLA and PETG by weight from the slicer grams a person entered: {price}, unit price rounded up to {round}", [[{ price: "Rp1.500/g", round: "Rp500" }]]);
 filled("Heartbeat checks every {every}: wakes the Chief when an order needs a decision", [
   ...[1, 2, 3, 5, 10, 15, 30, 60].map((n): [Vars, Vars] => [{ every: `${n} min` }, { every: `${n} mnt` }]),
   ...[10, 15, 20, 30, 45, 90].map((n): [Vars, Vars] => [{ every: `${n} s` }, { every: `${n} dtk` }]),
@@ -435,6 +739,10 @@ for (const en of [
 filled("Escrow is {state}, not FUNDED", each(ESCROW_STATE, "state"));
 filled("Escrow is {state}", each(ESCROW_STATE, "state"));
 filled("printer state is {state}", each({ ...PRINTER_STATE, FAILED: "GAGAL", UNKNOWN: "TIDAK DIKETAHUI" }, "state"));
+filled("The printer is {state}: it must be idle or finished", each({ ...PRINTER_STATE, FAILED: "GAGAL", UNKNOWN: "TIDAK DIKETAHUI" }, "state"));
+filled("The job is {jobState}; stop the print on the printer instead", each(JOB_STATE, "jobState"));
+filled("More than {n} files in the archive", [[{ n: 2000 }]]);
+filled("Pick at most {n} colours", [[{ n: 4 }]]);
 filled("Expected a {kind}, got \"{ext}\"", [
   [{ kind: "design file (STL, 3MF, STEP, OBJ)", ext: "no extension" }, { kind: "file desain (STL, 3MF, STEP, OBJ)", ext: "tanpa ekstensi" }],
   [{ kind: "reference image (JPG, PNG, WEBP)", ext: "no extension" }, { kind: "gambar referensi (JPG, PNG, WEBP)", ext: "tanpa ekstensi" }],

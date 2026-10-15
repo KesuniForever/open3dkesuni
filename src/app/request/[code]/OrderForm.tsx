@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useLocale, useT } from "@/i18n/client";
 import { CustTop } from "@/app/c/CustTop";
+import ColorPicker, { NO_CHOICE, useStudioColors, type Choice } from "@/app/c/ColorPicker";
+import { tLib } from "@/lib/lib-text";
 
 export default function OrderForm({ code }: { code: string }) {
   const t = useT();
@@ -14,6 +16,9 @@ export default function OrderForm({ code }: { code: string }) {
   const [errors, setErrors] = useState<string[]>([]);
   const [f, setF] = useState({ name: "", product: "", quantity: "1", deadline: "", budgetIdr: "", note: "" });
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
+  // Material and colours from the spools loaded in the studio right now (optional: Kesuni picks when left empty).
+  const palette = useStudioColors();
+  const [choice, setChoice] = useState<Choice>(NO_CHOICE);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,7 +28,10 @@ export default function OrderForm({ code }: { code: string }) {
       const res = await fetch("/api/c", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...f, invite: code, quantity: Number(f.quantity), budgetIdr: Number(f.budgetIdr.replace(/\D/g, "")) }),
+        body: JSON.stringify({
+          ...f, invite: code, quantity: Number(f.quantity), budgetIdr: Number(f.budgetIdr.replace(/\D/g, "")),
+          material: choice.material, colors: choice.colors.map(({ type, color }) => ({ type, color })),
+        }),
       });
       const data = await res.json();
       if (!res.ok) return setErrors(data.reasons ?? [data.error]);
@@ -59,11 +67,15 @@ export default function OrderForm({ code }: { code: string }) {
           <label>{t("Maximum budget (Rupiah)")}
             <input value={f.budgetIdr} onChange={set("budgetIdr")} inputMode="numeric" placeholder="50000" required />
           </label>
+          <fieldset className="cust-fieldset">
+            <legend>{t("Material and colour")}</legend>
+            <ColorPicker value={choice} onChange={setChoice} palette={palette} disabled={busy} />
+          </fieldset>
           <label>{t("Notes (size, colour, design)")}
             <textarea value={f.note} onChange={set("note")} rows={3} maxLength={1000} placeholder={t("Optional")} />
           </label>
           <p className="cust-note">{t("Do not write your address or phone number here. Kesuni asks for them directly on WhatsApp.")}</p>
-          {errors.length > 0 && <div className="alert bad"><ul>{errors.map((m) => <li key={m}>{m && t(m)}</li>)}</ul></div>}
+          {errors.length > 0 && <div className="alert bad"><ul>{errors.map((m) => <li key={m}>{m && tLib(t, m)}</li>)}</ul></div>}
           <button className="primary cust-cta" disabled={busy}>{busy ? t("Sending…") : t("Send order")}</button>
         </form>
       </section>

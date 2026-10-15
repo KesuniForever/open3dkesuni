@@ -7,6 +7,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import * as store from "./store";
 import type { Fail } from "./actions";
+import { parse3mf } from "./threemf";
 import type { Attachment, Evidence } from "./types";
 
 export const MAX_BYTES = 50 * 1024 * 1024;
@@ -84,6 +85,8 @@ export async function addAttachment(orderId: string, input: {
   const attachment: Attachment = {
     id, orderId, kind, filename, size: input.bytes.byteLength, mime: MIME[ext],
     uploadedBy: input.uploadedBy.trim(), at: new Date().toISOString(), storageKey,
+    // A Bambu Studio file: which plates can print, their time, weight and colours (read in memory, never unpacked to disk).
+    ...(ext === ".3mf" ? { parsed3mf: parse3mf(input.bytes) } : {}),
   };
   store.saveAttachment(attachment);
 

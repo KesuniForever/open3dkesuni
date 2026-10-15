@@ -81,6 +81,15 @@ export function parseCostInput(raw: Record<string, unknown>): { ok: true; input:
   return reasons.length ? { ok: false, reasons } : { ok: true, input };
 }
 
+/**
+ * Ready in, whole hours, for a quote from this calculator: the order's machine time + its labour hours (labour already
+ * covers collecting, checking and packing). No fixed prep day on top. Rounded in hundredths first, so 2.2 h + 0.8 h is
+ * 3 h, not 4 h.
+ */
+export function costingEtaHours(i: Pick<CostInput, "machineHours" | "laborHours">): number {
+  return Math.max(1, Math.ceil(Math.round((i.machineHours + i.laborHours) * 100) / 100));
+}
+
 export function calculate(i: CostInput): CostResult {
   const filamentGrams = i.quantity * i.gramsPerUnit * (1 + i.supportWastePct / 100);
   const material = filamentGrams * (i.filamentIdrPerKg / 1000);
@@ -129,6 +138,9 @@ export const idrPerUsdc = (): number => {
   const n = Number(process.env.IDR_PER_USDC);
   return Number.isFinite(n) && n > 0 ? n : 16_500;
 };
-/** Rupiah to micro-USDC, rounded to whole cents (0.01 USDC) so prices read cleanly. */
-export const idrToMicro = (idr: number): number => Math.round((idr / idrPerUsdc()) * 100) * 10_000;
+/**
+ * Rupiah to micro-USDC, rounded to the micro-USDC: the same rounding as a rupiah budget's mandate (budget.ts idrBudget),
+ * so a price equal to the rupiah budget is never "over budget" by a rounding cent.
+ */
+export const idrToMicro = (idr: number): number => Math.round((idr * 1_000_000) / idrPerUsdc());
 export const microToIdr = (micro: number): number => Math.round((micro / 1e6) * idrPerUsdc());

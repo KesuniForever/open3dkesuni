@@ -5,7 +5,9 @@ import type { CustomerView as View } from "@/lib/customer";
 import { dateLocale, type Locale, type T } from "@/i18n/core";
 import { useLocale, useT } from "@/i18n/client";
 import { CustTop, bold } from "../CustTop";
+import ColorPicker, { ChoiceSummary, keepOffered, swatchesFor, useStudioColors, type Choice } from "../ColorPicker";
 import { tLib } from "@/lib/lib-text";
+import { finishingText } from "@/lib/spec-choices";
 
 // English text is the key; useT() gives the Indonesian when the visitor chose ID.
 const STEPS = ["Order received", "Price and payment", "Printing", "Quality check", "Done"];
@@ -144,7 +146,7 @@ export default function CustomerView({ token }: { token: string }) {
           <div className="cust-pay">
             <div className="cust-price">
               <span className="big">{v.price.usdc} USDC</span>
-              <span className="muted">≈ {rupiah(v.price.idr)} · {t("about {n} hours", { n: v.price.etaHours })}</span>
+              <span className="muted">≈ {rupiah(v.price.idr)} · {t(v.price.etaHours === 1 ? "about {n} hour" : "about {n} hours", { n: v.price.etaHours })}</span>
             </div>
             {v.weightPrice && <WeightPrice w={v.weightPrice} t={t} />}
             <AgreeAndPay v={v} busy={busy} onPay={act} t={t} />
@@ -175,6 +177,10 @@ export default function CustomerView({ token }: { token: string }) {
           </div>
         )}
       </section>
+
+      {(v.choice.canChange || v.choice.material || v.choice.colors.length > 0) && (
+        <ChoiceCard token={token} choice={v.choice} onSaved={load} />
+      )}
 
       <ol className="cust-steps" aria-label={t("Order steps")}>
         {STEPS.map((label, i) => (
@@ -293,6 +299,73 @@ export default function CustomerView({ token }: { token: string }) {
   );
 }
 
+/** The material and colours the customer picked: they can change them while Kesuni prepares the price. */
+function ChoiceCard({ token, choice, onSaved }: { token: string; choice: View["choice"]; onSaved: () => Promise<void> }) {
+  const t = useT();
+  const [editing, setEditing] = useState(false);
+  const chosen = Boolean(choice.material || choice.colors.length);
+  return (
+    <section className="card">
+      <div className="cc-card-head">
+        <h2>{t("Material and colour")}</h2>
+        {choice.canChange && !editing && <button type="button" onClick={() => setEditing(true)}>{chosen ? t("Change") : t("Choose")}</button>}
+      </div>
+      {editing
+        ? <ChoiceEditor token={token} choice={choice} onDone={async (saved) => { if (saved) await onSaved(); setEditing(false); }} />
+        : <>
+          <ChoiceSummary choice={choice} />
+          {choice.colors.length > 1 && <p className="cust-note" style={{ marginTop: 8 }}>{t("Multi-colour: remember to send Kesuni the 3MF file.")}</p>}
+          {choice.canChange && <p className="cust-note" style={{ marginTop: 8 }}>{t("You can change this until Kesuni sends the price.")}</p>}
+        </>}
+    </section>
+  );
+}
+
+function ChoiceEditor({ token, choice, onDone }: { token: string; choice: View["choice"]; onDone: (saved: boolean) => void }) {
+  const t = useT();
+  const palette = useStudioColors();
+  const [value, setValue] = useState<Choice>({ material: choice.material, colors: choice.colors });
+  const [busy, setBusy] = useState(false);
+  // English texts (from this page or the server); translated when shown.
+  const [error, setError] = useState<{ text: string; reasons?: string[] } | null>(null);
+  // Colours no longer loaded drop out: they could not be saved.
+  const clean = palette ? keepOffered(value, swatchesFor(palette)) : value;
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/c/${token}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "colors", material: clean.material, colors: clean.colors.map(({ type, color }) => ({ type, color })) }),
+      });
+      const data = await res.json();
+      if (!res.ok) return setError({ text: data.error, reasons: data.reasons });
+      onDone(true);
+    } catch {
+      setError({ text: "Connection lost. Please try again." });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <ColorPicker value={clean} onChange={setValue} palette={palette} materialLocked={choice.materialLocked} disabled={busy} />
+      {error && (
+        <div className="alert bad" role="status">
+          {error.text && t(error.text)}
+          {error.reasons && error.reasons.length > 0 && <ul>{error.reasons.map((r) => <li key={r}>{tLib(t, r)}</li>)}</ul>}
+        </div>
+      )}
+      <div className="cc-actions">
+        <button type="button" className="primary" disabled={busy || palette === null} onClick={save}>{busy ? t("Saving…") : t("Save")}</button>
+        <button type="button" disabled={busy} onClick={() => onDone(false)}>{t("Cancel")}</button>
+      </div>
+    </>
+  );
+}
+
 /** Kesuni's official price by weight, as the customer reads it. No cost or margin. */
 function WeightPrice({ w, t }: { w: NonNullable<View["weightPrice"]>; t: T }) {
   return (
@@ -366,7 +439,7 @@ function SpecList({ spec, deadline, t }: { spec: NonNullable<View["spec"]>; dead
       <div><dt>{t("Size")}</dt><dd>{spec.dimensions} (±{spec.toleranceMm} mm)</dd></div>
       <div><dt>{t("Material & colour")}</dt><dd>{spec.material}{spec.color && ` · ${spec.color}`}</dd></div>
       <div><dt>{t("Layer / infill")}</dt><dd>{spec.layerMm} mm / {spec.infillPct}%</dd></div>
-      <div><dt>{t("Finishing")}</dt><dd>{spec.finishing === "Standar" ? t("Standard") : spec.finishing /* older specs kept the Indonesian default */}</dd></div>
+      <div><dt>{t("Finishing")}</dt><dd>{finishingText(spec.finishing, t)}</dd></div>
       <div><dt>{t("Done by")}</dt><dd>{deadline}</dd></div>
       <div><dt>{t("How the result is checked")}</dt><dd style={{ fontWeight: 400, textAlign: "right" }}>{spec.promise}</dd></div>
     </dl>

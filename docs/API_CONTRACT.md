@@ -7,16 +7,16 @@ Data is stored in SQLite (`src/lib/store.ts`, file `data/local/kesuni.db`, git-i
 | Method & path | Body | Result |
 |---|---|---|
 | `GET /api/orders` | none | `{ orders }` |
-| `POST /api/orders` | `{ product, quantity, deadline: "YYYY-MM-DD", designVersion, budgetUsdc: "32.5", label: "real"\|"simulated" }` | 201 `{ order }`, or 400 with reasons |
+| `POST /api/orders` | `{ product, quantity, deadline: "YYYY-MM-DD", designVersion, label: "real"\|"simulated", customerName?, budgetIdr: "50.000" \| budgetUsdc: "32.5" (exactly one), material?: "PLA"\|"PETG", preferredColors?: [{ type, color: "#RRGGBB" }] }` | 201 `{ order }`, or 400 with reasons (budget, material, colours not loaded in the studio now). Rupiah typed is kept as `budgetIdr` with the app rate `rateIdrPerUsdc` (`IDR_PER_USDC`, default 16.500) and `mandateMicro = round(budgetIdr × 1e6 / rate)`; USDC typed keeps the mandate exactly and stores `budgetIdr = USDC × rate`. The server always uses its own rate |
 | `GET /api/orders/:id` | none | order + vendors, quotes, decisions, evidence, acceptance, agentLog, paymentIntents |
 | `POST /api/orders/:id/quotes` | `{ vendorId, priceUsdc: "30", etaHours }` (or `priceMicro`) | 201 `{ quote }`. Only while order is `CREATED` |
 | `POST /api/orders/:id/decision` | `{ quoteId, decidedBy: "agent"\|"human", reason }` | 200 `{ order }`, or **422** with policy reasons |
 | `POST /api/orders/:id/evidence` | `{ kind: "log"\|"photo"\|"qc", note, label }` | 201 `{ evidence }` |
 | `POST /api/orders/:id/acceptance` | `{ accepted, by, note }` (human only) | 200 `{ acceptance, order }` |
 | `POST /api/orders/:id/agent-plan` | none | 200 `{ result, log }`: runs the Chief Kesuni Officer on the order (Claude, or the rule-based planner in rules mode). `result` = `{ mode, outcome: "done"\|"fallback"\|"busy"\|"error", summary, turns }`; `log` lists every tool call |
-| `POST /api/orders/:id/price-by-weight` | `{ gramsPerUnit, source, etaHours? }` (operator; always recorded `by: "human"`, `by: "agent"` is refused) | 201 `{ quote, price, gramPricing }`: Kesuni's own quote at grams × Rp1.500, unit price rounded up to Rp500. Only while `CREATED` |
+| `POST /api/orders/:id/price-by-weight` | `{ gramsPerUnit, source, colorMode?, etaHours? }` (operator; `colorMode` is `"single"` by default or `"multi"`: it sets the ETA, not the price; always recorded `by: "human"`, `by: "agent"` is refused) | 201 `{ quote, price, gramPricing }`: Kesuni's own quote at grams × Rp1.500, unit price rounded up to Rp500. Only while `CREATED` |
 | `POST /api/orders/:id/messages` | `{ text, by?: "human" }` | 200 `{ message }`: a short update on the customer's page. **422** for links, wallet addresses, phone numbers, emails or a repeat of the last message. Only the Chief writes as `agent` (its own tool, max one per 10 min) |
-| `POST /api/orders/:id/slicer-grams` | `{ gramsPerUnit, source, by }` (operator; no agent tool) | 200 `{ order }`: grams per unit from the slicer, the only grams the Chief may price with (`price_by_weight` refuses others). Wakes the Chief. Only while `CREATED` |
+| `POST /api/orders/:id/slicer-grams` | `{ gramsPerUnit, source, by, colorMode? }` (operator; no agent tool; the Chief prices with this colour mode) | 200 `{ order }`: grams per unit from the slicer, the only grams the Chief may price with (`price_by_weight` refuses others). Wakes the Chief. Only while `CREATED` |
 | `POST /api/orders/:id/owner-approval` | `{ quoteId?, by, note }` (owner only; no agent tool) | 200 `{ order }`: lifts the owner's own rule (minimum or approval limit) for this quote at its current price; a new or re-priced quote needs a new approval. Without `quoteId`, the only quote the owner can approve. Closes the order's open questions (`needs_info`) and wakes the Chief. Only while `CREATED` |
 | `POST /api/orders/:id/payment-intent` | `{ recipient, amountMicro, idempotencyKey }` | 201 `{ intent, replayed:false }`, replay 200 `replayed:true`, or **422** |
 
@@ -78,11 +78,38 @@ The Circle gateway refuses an API key from the wrong environment before any clie
 ## Customer page (`/c/<token>`, open: the token is the secret)
 | Method & path | Body | Result |
 |---|---|---|
-| `GET /api/c/:token` | none | The customer's view (`CustomerView` in `src/lib/customer.ts`), no wallet ids, vendor addresses or agent log. `overTolerance: true` when the operator's measured `maxDeviationMm` is above the agreed `spec.toleranceMm` |
+| `POST /api/c` | `{ invite, name, product, quantity, deadline, budgetIdr, note, material?: "PLA"\|"PETG", colors?: [{ type, color }] }` | The invite order form (`/request/<code>`). Colours must be loaded in the studio now (one material, at most 4); names are stored in English. 201 `{ order }`; 429 after 5 orders per address or 20 in total per hour |
+| `GET /api/studio/colors` | none (open) | `{ colors: [{ type, color, name, checked }], at }`: the PLA/PETG colours loaded in the studio's AMS now (no printers or slots). `checked` = an RFID spool or a person confirmed it |
+| `GET /api/c/:token` | none | The customer's view (`CustomerView` in `src/lib/customer.ts`), no wallet ids, vendor addresses or agent log. `overTolerance: true` when the operator's measured `maxDeviationMm` is above the agreed `spec.toleranceMm`. `choice: { material, colors, canChange, materialLocked }` |
+| `POST /api/c/:token` | `{ action: "colors", material: "PLA"\|"PETG"\|null, colors: [{ type, color }] }` | While the order is `CREATED`: the customer changes material and colours (material locked once a quote exists). Logged as `customer_colors`; does not wake the Chief |
 | `POST /api/c/:token` | `{ action: "agree", by }` \| `{ action: "pay", agree?: true, by? }` | Approve the price and spec; pay into escrow (testnet: test USDC first) |
 | `POST /api/c/:token` | `{ action: "accept", by, note, checked: true }` | Accept the goods. `checked` must be exactly `true` (the customer ticked "Saya sudah memeriksa ukuran, warna, finishing, dan fungsi barang yang saya terima."), else **400**. Above the tolerance the page warns but accepting is allowed: the acceptance note gets "[Diterima walau selisih ukuran X mm melebihi batas ±Y mm]" and the `customer_decision` log entry `acceptedOverTolerance: { maxDeviationMm, toleranceMm }`. Then code releases the escrow through the policy (`checkRelease`, unchanged). `{ ok, settled, reasons? }` |
 | `POST /api/c/:token` | `{ action: "reject", by, note }` | Reject (no tick needed); code refunds through the policy. `{ ok, settled, reasons? }` |
 | `POST /api/c/:token` | `{ action: "review", quality, communication, value, text, by }` | The customer's review after payout |
+
+## Printing from the website (people only; the LAN bridge carries it out)
+Operator routes (`src/proxy.ts`): from any device but the studio PC itself they need `OPERATOR_PASSWORD`, also on the
+studio Wi-Fi. Bridge routes check `Authorization: Bearer PRINTER_BRIDGE_TOKEN` (503 unset, 401 wrong). The Chief has no
+route or tool here: it can read printer status, never control a printer.
+
+| Method & path | Who | Body | Result |
+|---|---|---|---|
+| `POST /api/printers/:id/command` | person | `{ kind: "pause"\|"resume"\|"stop"\|"speed"\|"light"\|"camera_snapshot"\|"get_version", params?, by, confirm? }`. `speed {level: 1..4}`, `light {on}`, `resume {fixed?: true}` (needed after a fault pause). `confirm: true` for pause, resume, stop | 201 `{ command }`; 400 name/confirm/kind, 404, 409 with `reasons` (printer state), 429 one control per 3 s per printer (camera frames and firmware checks do not count; Stop is never held back) |
+| `GET /api/printers/:id/command` | operator | none | `{ commands }`, the last 20 |
+| `POST /api/printers/:id` | operator | `{ action: "link", orderId }` \| `"unlink"` \| `{ action: "clear_bed", by }` \| `{ action: "confirm_colors", by }` | `{ printer }` |
+| `POST /api/print-jobs` | person | `{ orderId?, printerId, attachmentId, plate, amsMapping, options?, by, bedEmptyConfirmed: true, personPresent: true, warningsChecked?, urlForm?: "sdcard"\|"ftp" }` | 201 `{ job, warnings, match }`; 409 `{ error, reasons, warnings, match }` |
+| `GET /api/print-jobs?orderId=` / `?printerId=` | operator | none | `{ jobs }`, newest first |
+| `POST /api/print-jobs/:id` | person | `{ action: "cancel", by }` | `{ job }`: while queued or uploading (the bridge then sends nothing) |
+| `GET /api/printers/:id/camera` | operator | none | `image/jpeg`, header `x-frame-at`; 404 none yet |
+| `GET /api/printers/queue?printers=a1,a1-2` | bridge | none | `{ commands, jobs, now }`. A job carries `fileUrl`, `md5`, `size`, `urlForm`, `sendBy` |
+| `POST /api/printers/queue/:id` | bridge | `{ state, error?, result?, md5? }` | Forward moves only; taking an item (queued → sent / uploading) works once. A job's `sent` is refused (409, job failed) more than 10 min after the person confirmed the bed, or when a print ended on that printer since |
+| `GET /api/print-jobs/:id/file` | bridge | none | The 3MF (`x-file-md5`), while queued or uploading |
+| `POST /api/printers/:id/camera` | bridge | `image/jpeg` ≤ 2 MB | 201 `{ at, size }` |
+| `POST /api/printers/report` | bridge | `{ printerId, snapshot, events }` | Status, AMS, faults; moves the print job (sent → printing → done / failed / cancelled) |
+
+Stale requests never fire later: a command not taken in 60 s expires; a job not taken in 5 min fails; a job stuck
+uploading 30 min, or sent but never seen on the printer for 15 min, fails. The bridge takes commands from one app
+(`CONTROL_APP_URL`, default the studio's own app) and checks everything again against its live view of the printer.
 
 ## Order status flow
 `CREATED → PLAN_CHOSEN → IN_PRODUCTION → EVIDENCE_SUBMITTED → ACCEPTED | REJECTED`, then `ACCEPTED → PAID`

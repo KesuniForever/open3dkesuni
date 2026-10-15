@@ -76,7 +76,7 @@ describe("one Chief, five skills", () => {
 });
 
 describe("know your limits", () => {
-  it("the Chief may only price plain PLA: another material in the order goes to a person, who can still price it", () => {
+  it("the Chief prices only PLA or the PETG an order chose: PETG it did not choose goes to a person, who can still price it", () => {
     const id = order("Casing korek", "Pakai PETG ya, warna hitam");
     expect((callTool("get_order", { orderId: id }).data as { pricingBlockedBy: string | null }).pricingBlockedBy).toContain('"PETG"');
     const r = price(id);
@@ -96,11 +96,11 @@ describe("know your limits", () => {
     expect(JSON.stringify(price(id).data)).toContain("TPU");
   });
 
-  it("the spec must be plain PLA: filled, mixed or undecided PLA goes to a person", () => {
+  it("the spec must be plain PLA or PETG: filled, mixed or undecided material goes to a person", () => {
     for (const material of ["TPU 95A", "PLA-CF", "PLA CF", "PLA/PETG", "PLA atau PETG", "PLA + TPU", "PLA Glow"]) {
       expect(materialConcern({ product: "Gantungan kunci", spec: { ...SPEC, material } })).toContain(`"${material}"`);
     }
-    for (const material of ["PLA", "pla", "PLA+", "PLA Basic", "PLA Matte", "PLA Silk", "PLA Tough+"]) {
+    for (const material of ["PLA", "pla", "PLA+", "PLA Basic", "PLA Matte", "PLA Silk", "PLA Tough+", "PETG", "PETG Basic", "PETG HF"]) {
       expect(materialConcern({ product: "Gantungan kunci", spec: { ...SPEC, material } })).toBeNull();
     }
   });

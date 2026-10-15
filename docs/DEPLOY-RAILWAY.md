@@ -76,10 +76,13 @@ The fastest way: Variables, Raw Editor, paste the studio PC's `.env.local`, then
 **Optional (have defaults)**: `CIRCLE_BLOCKCHAIN` (ARC-TESTNET), `KESUNI_HEARTBEAT_SECONDS` (120; 0 = off),
 `KESUNI_DAILY_REVIEW_HOUR` (21, Jakarta time; `off`), `KESUNI_AGENT_MODE`, `KESUNI_AGENT_MODEL`,
 `KESUNI_MAX_WAKES_PER_HOUR`, `IDR_PER_USDC`, `KESUNI_PRICE_PER_GRAM_IDR`, `KESUNI_COST_PER_GRAM_IDR`,
-`KESUNI_PRICE_ROUND_IDR`, `KESUNI_GRAMS_PER_HOUR`, `KESUNI_PRINTER_COUNT`, `KESUNI_MIN_ORDER_IDR`,
+`KESUNI_PRICE_PER_GRAM_IDR_PETG`, `KESUNI_COST_PER_GRAM_IDR_PETG` (PLA numbers),
+`KESUNI_PRICE_ROUND_IDR`, `KESUNI_PRINT_MIN_PER_GRAM_SINGLE` (3-5), `KESUNI_PRINT_MIN_PER_GRAM_MULTI` (5-15),
+`KESUNI_HANDLING_HOURS` (1), `KESUNI_PRINTER_COUNT` (3), `KESUNI_MIN_ORDER_IDR`,
 `KESUNI_PARTNER_MIN_IDR`, `KESUNI_OWNER_APPROVAL_ABOVE_IDR`, `KESUNI_MIN_MARGIN_PCT`, `KESUNI_PARTNER_MARGIN_PCT`,
 `KESUNI_EXPLORER_TX_URL`, `KESUNI_USDC_ADDRESS`, `KESUNI_ARC_RPC_URL`, `KESUNI_ARC_CHAIN_ID`, `KESUNI_DB_PATH`,
-`KESUNI_FILES_DIR`.
+`KESUNI_FILES_DIR`. `KESUNI_GRAMS_PER_HOUR` is retired (the print time now comes from minutes per gram and the colour
+mode); nothing reads it any more, and the deploy check warns while it is still set, so delete it.
 
 **Keep unset**: `KESUNI_ALLOW_MAINNET` (real money; needs the owner's and Sabina's approval, see `docs/PILOT.md`),
 `KESUNI_ALLOW_NO_VOLUME`.
@@ -107,8 +110,16 @@ starts the heartbeat timer (`src/lib/agent/heartbeat.ts`): first beat 20 s after
 ## Who can open what (src/proxy.ts)
 
 On a public host every page and API needs `OPERATOR_PASSWORD` (Basic auth). Open without it: `/c/<token>` and
-`/api/c/...` (customer), `/request/<code>` (order form), `/api/printers/report` (has its own bearer token), and
-`/favicon.ico`. The admin routes below check the password themselves as well, also from the home network.
+`/api/c/...` (customer), `/request/<code>` (order form), `GET /api/studio/colors` (the loaded spool colours for the
+customer's colour picker: type, colour and name only), the printer bridge's own routes, which check
+`PRINTER_BRIDGE_TOKEN` themselves (`/api/printers/report`, `/api/printers/queue`, `/api/printers/queue/<id>`,
+`/api/print-jobs/<id>/file`, `POST /api/printers/<id>/camera`), and `/favicon.ico`. The admin routes below check the
+password themselves as well, also from the home network.
+
+Printer controls, print starts and cancels and the camera picture (`POST /api/printers/<id>/command`,
+`POST /api/print-jobs[/<id>]`, `GET /api/printers/<id>/camera`) need the password from every device except the
+studio PC itself (`localhost`), including phones on the studio Wi-Fi. Set `OPERATOR_PASSWORD` in `.env.local` too if
+a phone at the printer should start or stop prints.
 
 Optional healthcheck: service Settings, Deploy, Healthcheck Path `/favicon.ico` (the only path that answers 200
 without a login; it proves the server is listening). With a volume it does not prevent the short redeploy downtime.
@@ -122,7 +133,22 @@ APP_URL=https://<your-app>.up.railway.app
 ```
 
 (`http://localhost:3000,https://<your-app>.up.railway.app` while both run.) `PRINTER_BRIDGE_TOKEN` must be identical
-on the PC and on Railway. Restart the bridge after changing `.env.local`.
+on the PC and on Railway. Plain `http://` is refused for anything but the studio PC and the studio network. Restart
+the bridge after changing `.env.local`.
+
+**Who may control the printers.** Status goes to every `APP_URL`, but controls and print jobs come from ONE app:
+by default the first `APP_URL` on the studio PC or the studio network (`http://localhost:3000`). Each app has its own
+database, so two control apps could each think a printer is free. To let the Railway app start and stop prints
+instead, name it, and the bridge says so loudly at start:
+
+```
+CONTROL_APP_URL=https://<your-app>.up.railway.app
+```
+
+Anyone with Railway's `OPERATOR_PASSWORD` can then run the physical printers from the internet: choose a strong one.
+`BRIDGE_CONTROL=off` (or `node scripts/printer-bridge.mjs --read-only`) takes no commands at all.
+`node scripts/printer-bridge.mjs --dry-run` does everything except publish to the printers and upload to their SD
+cards, prints the exact messages, and logs to `logs/printer-bridge-dry-run.log`.
 
 ## Moving the existing data (once)
 
