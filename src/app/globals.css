@@ -380,7 +380,7 @@ tbody tr:hover td { background: #fbfcfa; }
 .stars button { min-width: 44px; }
 .stars button.on { background: var(--lime); color: var(--lime-text); border-color: var(--lime-strong); }
 
-/* ---------- customer pages (/c/<token>, /pesan/<code>): phone first, no sidebar ---------- */
+/* ---------- customer pages (/c/<token>, /request/<code>): phone first, no sidebar ---------- */
 .cust { max-width: 560px; margin: 0 auto; padding: 14px 16px 48px; }
 .cust-top {
   display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 0 -16px 16px; padding: 4px 16px 12px;
@@ -441,3 +441,98 @@ tbody tr:hover td { background: #fbfcfa; }
 .cust-agree summary { font-weight: 600; cursor: pointer; }
 .cust-agree[open] summary { margin-bottom: 8px; }
 .cust label.row { color: var(--text-2); font-size: 14px; }
+
+/* ---------- less text: ⓘ explanations and folded sections ---------- */
+.info { position: relative; display: inline-flex; vertical-align: middle; color: var(--faint); cursor: help; border-radius: 50%; outline-offset: 2px; }
+.info:hover, .info:focus { color: var(--text-2); }
+.info-pop {
+  display: none; position: absolute; z-index: 30; top: calc(100% + 6px); left: 50%; transform: translateX(calc(-50% + var(--nudge, 0px)));
+  width: max-content; max-width: 300px; padding: 9px 11px; border-radius: var(--radius-sm);
+  background: var(--navy); color: var(--navy-text); box-shadow: 0 6px 20px rgba(32, 41, 54, 0.18);
+  font-size: 12.5px; font-weight: 400; line-height: 1.55; letter-spacing: 0; text-align: left; white-space: normal;
+}
+.info-pop b { color: #fff; }
+.info:hover .info-pop, .info:focus .info-pop { display: block; }
+@media (max-width: 700px) {
+  .info-pop { position: fixed; top: auto; bottom: 16px; left: 16px; right: 16px; transform: none; width: auto; max-width: none; }
+}
+.fold > summary { cursor: pointer; font-size: 13px; color: var(--muted); list-style: none; display: inline-flex; align-items: center; gap: 4px; }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "▸"; font-size: 11px; transition: transform 0.15s; }
+.fold[open] > summary::before { transform: rotate(90deg); }
+.fold[open] > summary { margin-bottom: 10px; }
+.fold > summary:hover { color: var(--text); }
+.more-text { margin-top: 2px; }
+.more-text > p { margin: 0; font-size: 13px; white-space: pre-wrap; }
+.one-line { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-line { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; color: var(--text-2); margin: 0 0 8px; }
+
+/* ---------- shared page kit (TIMBAL layout): tabs, callout, tiles ---------- */
+.tabs {
+  display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin: 0 0 18px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; max-width: 100%;
+}
+.tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 7px;
+  font-size: 13px; font-weight: 500; color: var(--muted); text-decoration: none; white-space: nowrap;
+}
+.tab:hover { color: var(--text); }
+.tab.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(32, 41, 54, 0.08); font-weight: 600; }
+.tab-count { font-size: 11px; color: var(--faint); background: var(--surface-2); border-radius: 6px; padding: 0 6px; }
+.callout {
+  display: flex; align-items: center; gap: 14px; padding: 16px 18px; margin: 0 0 18px;
+  border-radius: var(--radius); border: 1px solid #dfe9d2; background: var(--tint);
+}
+.callout.blue { background: var(--blue-bg); border-color: #dbe3ef; }
+.callout.amber { background: var(--warn-bg); border-color: #f1e2c8; }
+.callout-icon {
+  display: inline-grid; place-items: center; width: 38px; height: 38px; flex: none; border-radius: 10px;
+  background: var(--surface); color: var(--tint-text); border: 1px solid #dfe9d2;
+}
+.callout.blue .callout-icon { color: var(--blue); border-color: #dbe3ef; }
+.callout.amber .callout-icon { color: var(--warn); border-color: #f1e2c8; }
+.callout-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--text-2); }
+.callout-body b { font-size: 14px; color: var(--text); }
+.callout-aside { flex: none; }
+@media (max-width: 600px) { .callout { align-items: flex-start; } .callout-aside { display: none; } }
+.tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.tile {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+}
+.tile-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.tile-icon {
+  display: inline-grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: 10px;
+  background: var(--tint); color: var(--tint-text);
+}
+.tile h3 { font-size: 15px; margin: 4px 0 0; font-weight: 650; letter-spacing: -0.2px; }
+.tile p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.55; }
+.kv-rows { display: flex; flex-direction: column; margin: 0; }
+.kv-rows > div { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.kv-rows > div:last-child { border-bottom: 0; }
+.kv-rows dt { color: var(--muted); }
+.kv-rows dd { margin: 0; color: var(--text); font-weight: 500; text-align: right; overflow-wrap: anywhere; }
+.btn-link {
+  display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; border-radius: var(--radius-sm);
+  background: var(--lime); color: var(--lime-text); font-weight: 600; font-size: 14px; text-decoration: none; border: 1px solid var(--lime-strong);
+}
+.btn-link:hover { background: var(--lime-strong); }
+.btn-link.ghost { background: var(--surface); color: var(--text-2); border-color: var(--border); font-weight: 500; }
+/* On a phone the tabs wrap onto a second line, so every tab (and the active one) stays in view. */
+@media (max-width: 600px) {
+  .tabs { display: flex; }
+  .tab { padding: 6px 11px; }
+}
+
+/* ---------- EN | ID language switch ---------- */
+.lang-switch {
+  display: inline-flex; flex: none; padding: 3px; gap: 2px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
+}
+.lang-switch button {
+  min-width: 34px; height: 26px; padding: 0 9px; border: 0; border-radius: 999px; background: transparent;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.4px; color: var(--muted); cursor: pointer;
+}
+.lang-switch button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.lang-switch button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(32, 41, 54, 0.1); }
+.shell-top-right { display: flex; align-items: center; gap: 10px; flex: none; }

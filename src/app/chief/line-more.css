@@ -1,0 +1,24 @@
+/* A one-line result that opens to the rest (LineMore.tsx). Font size and colour come from the row it sits in. */
+.line-more > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; min-width: 0; border-radius: 6px;
+}
+.line-more > summary::-webkit-details-marker { display: none; }
+.line-more.still > summary { cursor: default; }
+.line-more-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line-more:not(.still) > summary:hover .line-more-text { color: var(--text); }
+.line-more-toggle { flex: none; font-size: 12px; color: var(--muted); }
+/* The words come from LineMore.tsx (data-more / data-less), so they follow the visitor's language. */
+.line-more-toggle::after { content: attr(data-more); }
+.line-more[open] .line-more-toggle::after { content: attr(data-less); }
+/* Opened with the full text below, the cut line steps aside. Opened without, the line itself unwraps. */
+.line-more.has-full[open] > summary .line-more-text { display: none; }
+.line-more.has-full[open] > summary { justify-content: flex-end; }
+.line-more:not(.has-full)[open] > summary { align-items: flex-start; }
+.line-more:not(.has-full)[open] .line-more-text { white-space: normal; overflow-wrap: anywhere; }
+.line-more-full {
+  margin-top: 4px; padding: 12px 14px; border-radius: 9px; background: #fafbf8; border: 1px solid var(--border-soft);
+  font-size: 13px; color: var(--text-2); line-height: 1.6;
+}
+.line-more-full h4 { margin: 10px 0 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.8px; text-transform: uppercase; color: var(--faint); }
+.line-more-full h4:first-child { margin-top: 0; }
+.line-more-full p { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }

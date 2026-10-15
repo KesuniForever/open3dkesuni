@@ -2,10 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useT } from "@/i18n/client";
 
 /** Writes (or rewrites) a day's review now. The Chief uses Claude when it is on, else the code template. */
-export default function ReviewButton({ day, label = "Write review now" }: { day?: string; label?: string }) {
+export default function ReviewButton({ day, label }: { day?: string; label?: string }) {
   const router = useRouter();
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -29,8 +31,10 @@ export default function ReviewButton({ day, label = "Write review now" }: { day?
 
   return (
     <span className="row" style={{ gap: 8 }}>
-      <button className="primary" onClick={() => void run()} disabled={busy}>{busy ? "Writing… (Claude can take a minute)" : label}</button>
-      {error && <span className="alert bad" style={{ margin: 0 }}>{error}</span>}
+      <button className="primary" onClick={() => void run()} disabled={busy}>
+        {busy ? t("Writing… (Claude can take a minute)") : label ?? t("Write review now")}
+      </button>
+      {error && <span className="alert bad" style={{ margin: 0 }}>{t(error)}</span>}
     </span>
   );
 }

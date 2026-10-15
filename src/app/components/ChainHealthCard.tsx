@@ -3,16 +3,22 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { ChainHealth } from "@/lib/chain-health";
+import { dateLocale, type Locale } from "@/i18n/core";
+import { useLocale, useT } from "@/i18n/client";
+import Info from "./Info";
 
 const ARC_TEXT: Record<ChainHealth["arc"]["status"], string> = {
   ok: "live", stale: "stale", wrong_chain: "wrong chain", bad_token: "USDC mismatch", unreachable: "unreachable", not_configured: "not configured",
 };
 const CIRCLE_TEXT: Record<ChainHealth["circle"]["status"], string> = { ok: "reachable", unreachable: "unreachable", not_configured: "not configured" };
 const tone = (s: string) => (s === "ok" ? "ok" : s === "stale" || s === "not_configured" ? "" : "bad");
-const time = (iso: string) => `${new Date(iso).toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`;
+const time = (iso: string, locale: Locale) =>
+  `${new Date(iso).toLocaleTimeString(dateLocale(locale), { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit" })} WIB`;
 
 /** Arc RPC and Circle health, loaded after the page so a slow or blocked network never delays or breaks it. */
 export default function ChainHealthCard() {
+  const t = useT();
+  const locale = useLocale();
   const [h, setH] = useState<ChainHealth | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -42,41 +48,53 @@ export default function ChainHealthCard() {
     <section className="card">
       <h2>
         Arc + Circle {h && <span className="badge">{h.network.label}</span>}
+        <Info>
+          {h
+            ? t("Read-only checks of the networks the escrow runs on ({name}); nothing is sent.", { name: h.network.name })
+            : t("Read-only checks of the networks the escrow runs on; nothing is sent.")}
+          {h && ` ${h.cached ? t("Checked {time} (refreshes every minute).", { time: time(h.at, locale) }) : t("Checked {time}.", { time: time(h.at, locale) })}`}
+        </Info>
         <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", fontWeight: 400, fontSize: 13 }}>
-          <Link href="/arc">Check a transaction</Link>
-          <button onClick={checkNow} disabled={busy}>{busy ? "Checking…" : "Check now"}</button>
+          <Link href="/arc?tab=check">{t("Check a transaction")}</Link>
+          <button onClick={checkNow} disabled={busy}>{busy ? t("Checking…") : t("Check now")}</button>
         </span>
       </h2>
-      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-        Read-only checks of the networks the escrow runs on{h ? ` (${h.network.name})` : ""}; nothing is sent.
-        {h && ` Checked ${time(h.at)}${h.cached ? " (cached, refreshes every minute)" : ""}.`}
-      </p>
-      {error && <div className="alert bad" style={{ fontSize: 13 }}>{error}</div>}
-      {!h && !error && <p className="muted">Checking Arc and Circle…</p>}
+      {error && <div className="alert bad" style={{ fontSize: 13 }}>{t(error)}</div>}
+      {!h && !error && <p className="muted">{t("Checking Arc and Circle…")}</p>}
       {arc && circ && (
+        <p className="status-line" style={{ marginBottom: 4 }}>
+          <span>Arc <span className={`badge ${tone(arc.status)}`}>{t(ARC_TEXT[arc.status])}</span></span>
+          <span>Circle <span className={`badge ${tone(circ.status)}`}>{t(CIRCLE_TEXT[circ.status])}</span></span>
+          {circ.wallet && <span>{t("Demo funds")} <b>{circ.wallet.usdc} USDC</b>{h.network.isTestnet && <span className="muted"> {t("(test)")}</span>}</span>}
+        </p>
+      )}
+      {arc && circ && (
+        <details className="fold" open={arc.status !== "ok" || circ.status !== "ok"}>
+        <summary>{t("Details")}</summary>
         <div className="grid">
           <div>
             <div className="muted" style={{ fontSize: 12 }}>Arc RPC</div>
-            <span className={`badge ${tone(arc.status)}`}>{ARC_TEXT[arc.status]}</span>
+            <span className={`badge ${tone(arc.status)}`}>{t(ARC_TEXT[arc.status])}</span>
             <div style={{ fontSize: 13, marginTop: 4 }}>
-              {arc.chainId !== undefined && <>chain {arc.chainId}{arc.chainId === arc.expectedChainId ? " ✓" : ` (expected ${arc.expectedChainId})`}<br /></>}
-              {arc.blockNumber && <>block {arc.blockNumber} · {arc.blockAgeSec} s old<br /></>}
-              {arc.usdcDecimals !== undefined && <>USDC decimals {arc.usdcDecimals}{arc.usdcDecimals === 6 ? " ✓" : ""}<br /></>}
-              {arc.reason && <span className="muted">{arc.reason}</span>}
+              {arc.chainId !== undefined && <>{t("chain {id}", { id: arc.chainId })}{arc.chainId === arc.expectedChainId ? " ✓" : ` ${t("(expected {id})", { id: String(arc.expectedChainId) })}`}<br /></>}
+              {arc.blockNumber && <>{t("block {n} · {s} s old", { n: arc.blockNumber, s: arc.blockAgeSec ?? "" })}<br /></>}
+              {arc.usdcDecimals !== undefined && <>{t("USDC decimals {n}", { n: arc.usdcDecimals })}{arc.usdcDecimals === 6 ? " ✓" : ""}<br /></>}
+              {arc.reason && <span className="muted">{t(arc.reason)}</span>}
             </div>
           </div>
           <div>
-            <div className="muted" style={{ fontSize: 12 }}>Circle wallets</div>
-            <span className={`badge ${tone(circ.status)}`}>{CIRCLE_TEXT[circ.status]}</span>
+            <div className="muted" style={{ fontSize: 12 }}>{t("Circle wallets")}</div>
+            <span className={`badge ${tone(circ.status)}`}>{t(CIRCLE_TEXT[circ.status])}</span>
             <div style={{ fontSize: 13, marginTop: 4 }}>
-              {circ.walletSet && <>wallet set {circ.walletSet}<br /></>}
-              {circ.wallet && <>demo-funds wallet {circ.wallet.address} · {circ.wallet.state.toLowerCase()}<br /><b>{circ.wallet.usdc} USDC</b>{h.network.isTestnet && <span className="muted"> (test USDC)</span>}<br /></>}
-              {circ.wallet === null && <span className="muted">demo-funds wallet not found in Circle<br /></span>}
-              {circ.reason && <span className="muted">{circ.reason}</span>}
-              {circ.status === "unreachable" && <span className="muted"><br />On a blocked ISP, turn on WARP and check again.</span>}
+              {circ.walletSet && <>{t("wallet set {state}", { state: t(circ.walletSet) })}<br /></>}
+              {circ.wallet && <>{t("demo-funds wallet {address} · {state}", { address: circ.wallet.address, state: circ.wallet.state.toLowerCase() })}<br /><b>{circ.wallet.usdc} USDC</b>{h.network.isTestnet && <span className="muted"> {t("(test USDC)")}</span>}<br /></>}
+              {circ.wallet === null && <span className="muted">{t("demo-funds wallet not found in Circle")}<br /></span>}
+              {circ.reason && <span className="muted">{t(circ.reason)}</span>}
+              {circ.status === "unreachable" && <span className="muted"><br />{t("On a blocked ISP, turn on WARP and check again.")}</span>}
             </div>
           </div>
         </div>
+        </details>
       )}
     </section>
   );

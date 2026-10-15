@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as store from "./store";
 import { setCircleGateway } from "./circle";
 import { addEvidence, chooseQuote, ensureCustomerToken } from "./actions";
@@ -7,6 +7,7 @@ import { DEMO, fakeCircle } from "./fake-circle.test-helper";
 import { customerAgree } from "./agreement";
 import { GET as view, POST as act } from "@/app/api/c/[token]/route";
 import { POST as createViaInvite } from "@/app/api/c/route";
+import { clientIp } from "./http";
 
 const SHOP = "0x1111111111111111111111111111111111111111";
 const ORDER = "ORD-001";
@@ -189,6 +190,33 @@ describe("ordering through the invite link", () => {
     expect(sixth.status).toBe(429);
     expect((await sixth.json()).error).toMatch(/Too many orders/);
     expect((await createViaInvite(req("198.51.100.7"))).status).toBe(201);
+  });
+
+  it("reads the address from the header the host writes: X-Real-IP on Railway, CF-Connecting-IP behind the tunnel", () => {
+    const r = new Request("http://x", { headers: { "cf-connecting-ip": "10.9.9.9", "x-real-ip": "203.0.113.5", "x-forwarded-for": "10.1.1.1, 203.0.113.5" } });
+    expect(clientIp(r, true)).toBe("203.0.113.5");
+    expect(clientIp(r, false)).toBe("10.9.9.9");
+    expect(clientIp(new Request("http://x", { headers: { "x-forwarded-for": "10.1.1.1, 203.0.113.6" } }), true)).toBe("203.0.113.6");
+  });
+
+  it("on Railway a made-up CF-Connecting-IP does not reset the limit, and all addresses together are capped", async () => {
+    process.env.CUSTOMER_INVITE_CODE = "kesuni-pilot-2026";
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 3_600_000 }); // the earlier tests' orders are over an hour old
+    const req = (headers: Record<string, string>) => new Request("http://x/api/c", {
+      method: "POST", headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify({ invite: "kesuni-pilot-2026", name: "A", product: "Casing", quantity: 1, deadline: "2026-10-20", budgetIdr: 50000 }),
+    });
+    try {
+      process.env.RAILWAY_ENVIRONMENT_ID = "test";
+      for (let i = 0; i < 5; i++) expect((await createViaInvite(req({ "x-real-ip": "203.0.113.50", "cf-connecting-ip": `10.0.0.${i}` }))).status).toBe(201);
+      expect((await createViaInvite(req({ "x-real-ip": "203.0.113.50", "cf-connecting-ip": "10.0.0.99" }))).status).toBe(429);
+      delete process.env.RAILWAY_ENVIRONMENT_ID;
+      for (let i = 0; i < 15; i++) expect((await createViaInvite(req({ "x-forwarded-for": `198.51.100.${i + 10}` }))).status).toBe(201);
+      expect((await createViaInvite(req({ "x-forwarded-for": "198.51.100.200" }))).status).toBe(429); // 20 orders this hour
+    } finally {
+      delete process.env.RAILWAY_ENVIRONMENT_ID;
+      vi.useRealTimers();
+    }
   });
 
   it("the customer API answers 404 for an unknown token and pays for a known one", async () => {

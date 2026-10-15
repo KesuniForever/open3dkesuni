@@ -71,6 +71,25 @@ describe("createOrder", () => {
     const r = realOrder();
     expect(r.ok && r.order).toMatchObject({ id: "ORD-002", jobId: "JOB-002", status: "CREATED", label: "real" });
   });
+  it("skips the number of a removed order whose Chief log and task were left behind", () => {
+    realOrder(); realOrder(); // ORD-002, ORD-003
+    store.setMeta("lastOrderNo", null); // a database from before the counter
+    const at = new Date().toISOString();
+    store.addLog({ orderId: "ORD-004", actor: "agent", tool: "agent_summary", input: {}, ok: true, output: { text: "old run" }, at });
+    store.saveTask({ id: "T-14", orderId: "ORD-004", kind: "check_printer", text: "old", status: "open", createdBy: "agent", at });
+    const r = realOrder();
+    expect(r.ok && r.order.id).toBe("ORD-005");
+    expect(store.listLog("ORD-005")).toEqual([]);
+    expect(store.listTasks("ORD-005")).toEqual([]);
+  });
+  it("never hands out a number again, even after the demo reset deleted that order completely", () => {
+    const sim = createOrder({ product: "Demo", quantity: 1, deadline: "2026-10-30", designVersion: "v1", mandateMicro: 5_000_000, label: "simulated" });
+    expect(sim.ok && sim.order.id).toBe("ORD-002");
+    store.resetSimulated();
+    expect(store.getOrder("ORD-002")).toBeUndefined();
+    const r = realOrder();
+    expect(r.ok && r.order).toMatchObject({ id: "ORD-003", jobId: "JOB-003" });
+  });
   it("rejects bad input with readable reasons", () => {
     const r = createOrder({ product: "", quantity: 0, deadline: "tomorrow", designVersion: "", mandateMicro: 0, label: "real" });
     expect(r.ok).toBe(false);

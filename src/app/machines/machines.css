@@ -1,0 +1,118 @@
+/* "My machines" (/machines): machine cards with live LAN readings, TIMBAL machine-registry layout. */
+.mach-tag {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-2); font-size: 12.5px; font-weight: 500; white-space: nowrap;
+}
+.mach-tag svg { color: var(--ok); }
+
+.mach-head { display: flex; justify-content: space-between; align-items: center; gap: 8px 16px; flex-wrap: wrap; margin: 4px 0 14px; font-size: 13px; color: var(--muted); }
+.mach-live { display: inline-flex; align-items: center; gap: 4px; }
+.mach-live.off { color: var(--bad); }
+
+/* ---------- printer cards ---------- */
+.mach-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.mach-card {
+  display: flex; flex-direction: column; min-width: 0; container-type: inline-size;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow);
+}
+.mach-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.mach-symbol {
+  display: grid; place-items: center; width: 54px; height: 54px; flex: none; border-radius: 14px;
+  background: var(--tint); color: #6f8c58; border: 1px solid #e3ebd9;
+}
+.mach-card.offline .mach-symbol { background: var(--surface-2); color: var(--faint); border-color: var(--border); }
+
+.mach-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 7px;
+  font-size: 12px; font-weight: 600; line-height: 1.2; white-space: nowrap; max-width: 100%;
+  background: var(--surface-2); color: var(--muted);
+}
+.mach-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.mach-pill.ok { background: var(--ok-bg); color: var(--ok); }
+.mach-pill.busy { background: var(--primary); color: var(--lime); }
+.mach-pill.busy::before { animation: pulse 1.6s infinite; }
+.mach-pill.warn { background: var(--warn-bg); color: var(--warn); }
+.mach-pill.bad { background: var(--bad-bg); color: var(--bad); }
+@media (prefers-reduced-motion: reduce) { .mach-pill.busy::before { animation: none; } }
+
+.mach-id { padding: 18px 0 14px; }
+.mach-eyebrow { display: block; font-size: 10px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
+.mach-id h2 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; margin: 0; }
+.mach-id p { font-size: 12.5px; color: var(--muted); margin: 4px 0 0; }
+
+.mach-progress { display: grid; gap: 7px; padding: 14px; margin-bottom: 14px; border-radius: 10px; background: var(--surface-2); }
+.mach-progress-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2); }
+.mach-progress-head b { font-size: 24px; font-weight: 650; letter-spacing: -0.6px; color: var(--text); font-variant-numeric: tabular-nums; }
+.mach-bar { height: 10px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.mach-bar span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--lime-strong), #9fca63); transition: width 0.8s ease; }
+.mach-progress.paused .mach-bar span { background: var(--warn); opacity: 0.7; }
+@media (prefers-reduced-motion: reduce) { .mach-bar span { transition: none; } }
+
+.mach-sensors {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 0 6px; padding: 14px 0;
+  border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft);
+}
+.mach-sensors > div { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; border-right: 1px solid var(--border-soft); padding: 0 4px; text-align: center; }
+.mach-sensors > div:last-child { border-right: 0; }
+.mach-sensors strong { font-size: 17px; font-weight: 600; letter-spacing: -0.3px; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mach-sensors small { font-size: 11px; color: var(--faint); }
+.mach-card.offline .mach-sensors strong { color: var(--faint); }
+@container (max-width: 300px) {
+  .mach-sensors { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
+  .mach-sensors > div:nth-child(2) { border-right: 0; }
+}
+
+.mach-card .kv-rows dd { min-width: 0; }
+.mach-card .kv-rows dd .one-line { max-width: 190px; }
+.mach-warn { color: var(--warn); }
+
+.mach-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.mach-actions button { min-height: 34px; padding: 6px 12px; font-size: 13px; }
+.mach-ask { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+.mach-ask input { flex: 1 1 100px; min-width: 0; min-height: 34px; padding: 6px 10px; width: auto; }
+.mach-ask button { min-height: 34px; padding: 6px 12px; font-size: 13px; }
+.mach-note { font-size: 12.5px; margin: 10px 0 0; }
+.mach-note.ok { color: var(--ok); }
+.mach-note.bad { color: var(--bad); }
+.mach-card .fold { margin-top: auto; padding-top: 12px; }
+
+/* ---------- open printer tasks ---------- */
+.mach-tasks { margin-top: 16px; }
+.mach-tasks .attention-sub .badge { margin-left: 4px; }
+
+/* ---------- connection tab ---------- */
+.mach-caps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0; }
+.mach-cap { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 16px 18px; border-right: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+.mach-cap:nth-child(3n) { border-right: 0; }
+.mach-cap:nth-last-child(-n + 3) { border-bottom: 0; }
+.mach-cap-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--muted); }
+.mach-cap strong { font-size: 14px; font-weight: 600; color: var(--text); }
+.mach-cap small { font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.mach-cap.no { background: #fcfcfd; }
+.mach-cap.no strong { color: var(--text-2); }
+@media (max-width: 900px) {
+  .mach-caps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mach-cap:nth-child(3n) { border-right: 1px solid var(--border-soft); }
+  .mach-cap:nth-child(2n) { border-right: 0; }
+  .mach-cap:nth-last-child(-n + 3) { border-bottom: 1px solid var(--border-soft); }
+  .mach-cap:nth-last-child(-n + 2) { border-bottom: 0; }
+}
+@media (max-width: 520px) {
+  .mach-caps { grid-template-columns: minmax(0, 1fr); }
+  .mach-cap, .mach-cap:nth-child(3n) { border-right: 0; }
+  .mach-cap:nth-last-child(-n + 2) { border-bottom: 1px solid var(--border-soft); }
+  .mach-cap:last-child { border-bottom: 0; }
+}
+.mach-card-flush { padding: 0; overflow: hidden; }
+.mach-card-flush > h2 { padding: 18px 20px 0; }
+.mach-table .badge { vertical-align: baseline; }
+@media (max-width: 600px) {
+  .mach-table .mach-pid { display: none; }
+  .mach-table th, .mach-table td { padding: 10px 6px; }
+}
+@media (max-width: 600px) {
+  .mach-card { padding: 16px; }
+  .mach-symbol { width: 44px; height: 44px; border-radius: 12px; }
+  .mach-symbol svg { width: 24px; height: 24px; }
+  .mach-id { padding: 12px 0 10px; }
+}

@@ -46,7 +46,7 @@ export function setSpec(orderId: string, raw: Record<string, unknown>): { ok: tr
   const spec: Spec = {
     dimensions: text("dimensions"), toleranceMm: num("toleranceMm"), material: text("material") || "PLA",
     color: text("color"), layerMm: num("layerMm"), infillPct: num("infillPct"),
-    finishing: text("finishing") || "Standar", promise: text("promise", 500),
+    finishing: text("finishing") || "Standard", promise: text("promise", 500),
   };
   const r: string[] = [];
   if (!spec.dimensions) r.push("Dimensions are required");

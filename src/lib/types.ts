@@ -88,7 +88,7 @@ export interface Spec {
   color: string;
   layerMm: number;
   infillPct: number;
-  finishing: string;       // "Standar"
+  finishing: string;       // "Standard"
   promise: string;         // how the result will be checked, in the customer's words
 }
 

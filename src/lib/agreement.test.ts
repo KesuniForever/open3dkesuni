@@ -82,6 +82,11 @@ describe("agreement", () => {
     const r = setSpec(ORDER, { ...SPEC, promise: "" });
     expect(r.ok).toBe(false);
   });
+
+  it("an empty finishing becomes \"Standard\"", () => {
+    const r = setSpec(ORDER, { ...SPEC, finishing: "" });
+    expect(r.ok && r.order.spec?.finishing).toBe("Standard");
+  });
 });
 
 describe("plan vs actual, reviews and reputation", () => {
@@ -103,7 +108,8 @@ describe("plan vs actual, reviews and reputation", () => {
   it("a review is possible once, after acceptance", async () => {
     expect(customerReview(ORDER, { quality: 5, communication: 5, value: 5, by: "Aini" }).ok).toBe(false);
     await finish("real");
-    expect(customerReview(ORDER, { quality: 6, communication: 5, value: 5, by: "Aini" }).ok).toBe(false);
+    const bad = customerReview(ORDER, { quality: 6, communication: 5, value: 5, by: "Aini" });
+    expect(!bad.ok && bad.reasons).toEqual(["Quality rating must be 1 to 5"]);
     expect(customerReview(ORDER, { quality: 5, communication: 4, value: 5, by: "Aini", text: "rapi" }).ok).toBe(true);
     expect(customerReview(ORDER, { quality: 5, communication: 4, value: 5, by: "Aini" }).ok).toBe(false);
   });

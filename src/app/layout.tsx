@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AppShell from "./components/AppShell";
 import { publicNetwork } from "@/lib/network";
+import { getLocale } from "@/i18n/server";
+import { LocaleProvider } from "@/i18n/client";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -19,14 +21,17 @@ export const metadata: Metadata = {
   description: "Order, production evidence and USDC payment for a 3D-print business.",
 };
 
-// The whole site is English (lang="en" here). AppShell adds the operator sidebar everywhere except the customer pages
-// (/c, /pesan).
-export default function RootLayout({ children }: LayoutProps<"/">) {
+// English by default; the EN | ID switch sets the "lang" cookie for Indonesian. AppShell adds the operator sidebar
+// everywhere except the customer pages (/c, /request).
+export default async function RootLayout({ children }: LayoutProps<"/">) {
   const net = publicNetwork();
+  const locale = await getLocale();
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+    <html lang={locale} className={`${geistSans.variable} ${geistMono.variable}`}>
       <body>
-        <AppShell network={{ name: net.name, isTestnet: net.isTestnet }}>{children}</AppShell>
+        <LocaleProvider locale={locale}>
+          <AppShell network={{ name: net.name, isTestnet: net.isTestnet }}>{children}</AppShell>
+        </LocaleProvider>
       </body>
     </html>
   );

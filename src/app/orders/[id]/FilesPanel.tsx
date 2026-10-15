@@ -2,6 +2,9 @@
 
 import { useRef, useState } from "react";
 import type { Attachment, Order } from "@/lib/types";
+import Info from "@/app/components/Info";
+import { useT } from "@/i18n/client";
+import { tLib } from "@/lib/lib-text";
 
 const KINDS: { value: Attachment["kind"]; label: string; accept: string }[] = [
   { value: "design", label: "Design file (STL / 3MF / STEP / OBJ)", accept: ".stl,.3mf,.step,.stp,.obj" },
@@ -18,6 +21,7 @@ export default function FilesPanel({ order, attachments, onChange }: {
   attachments: Attachment[];
   onChange: () => void;
 }) {
+  const t = useT();
   const [kind, setKind] = useState<Attachment["kind"]>("design");
   const [by, setBy] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,11 +41,11 @@ export default function FilesPanel({ order, attachments, onChange }: {
       form.set("by", by);
       const res = await fetch(`/api/orders/${order.id}/files`, { method: "POST", body: form });
       const data = await res.json();
-      setMsg(res.ok ? { ok: true, text: `Uploaded ${data.attachment.filename}.` } : { ok: false, text: data.error, reasons: data.reasons });
+      setMsg(res.ok ? { ok: true, text: t("Uploaded {file}.", { file: data.attachment.filename }) } : { ok: false, text: data.error, reasons: data.reasons });
       if (res.ok && input.current) input.current.value = "";
       onChange();
     } catch {
-      setMsg({ ok: false, text: "Upload failed. Is the server running?" });
+      setMsg({ ok: false, text: t("Upload failed. Is the server running?") });
     } finally {
       setBusy(false);
     }
@@ -49,9 +53,9 @@ export default function FilesPanel({ order, attachments, onChange }: {
 
   return (
     <section className="card">
-      <h2><span className="step">F</span> Files</h2>
+      <h2><span className="step">F</span> {t("Files")} <Info>{t("Files stay with Kesuni and are never sent to the AI agent. A QC photo is also recorded as photo evidence; it does not replace the QC result.")}</Info></h2>
       {attachments.length === 0 ? (
-        <p className="muted">No files yet. Upload the design for the operator&apos;s slicer, reference images, or QC photos.</p>
+        <p className="muted">{t("No files yet. Upload the design for the operator's slicer, reference images, or QC photos.")}</p>
       ) : (
         <ul style={{ listStyle: "none", padding: 0 }}>
           {attachments.map((a) => (
@@ -62,9 +66,9 @@ export default function FilesPanel({ order, attachments, onChange }: {
                   style={{ objectFit: "cover", borderRadius: 6, border: "1px solid #ddd" }} />
               )}
               <span>
-                <span className="badge">{KIND_LABEL[a.kind]}</span>{" "}
+                <span className="badge">{t(KIND_LABEL[a.kind])}</span>{" "}
                 <a href={`/api/files/${a.id}`} target={a.mime.startsWith("image/") ? "_blank" : undefined} rel="noreferrer">{a.filename}</a>{" "}
-                <span className="muted" style={{ fontSize: 13 }}>{size(a.size)} · by {a.uploadedBy}</span>
+                <span className="muted" style={{ fontSize: 13 }}>{size(a.size)} · {t("by {name}", { name: a.uploadedBy })}</span>
               </span>
             </li>
           ))}
@@ -72,27 +76,24 @@ export default function FilesPanel({ order, attachments, onChange }: {
       )}
       <form className="form" onSubmit={upload} style={{ marginTop: 8 }}>
         <div className="row">
-          <label style={{ flex: "1 1 220px" }}>Type
+          <label style={{ flex: "1 1 220px" }}>{t("Type")}
             <select value={kind} onChange={(e) => setKind(e.target.value as Attachment["kind"])} disabled={busy}>
-              {KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
+              {KINDS.map((k) => <option key={k.value} value={k.value}>{t(k.label)}</option>)}
             </select>
           </label>
-          <label style={{ flex: "1 1 160px" }}>Uploaded by
-            <input value={by} onChange={(e) => setBy(e.target.value)} placeholder="Your name" disabled={busy} />
+          <label style={{ flex: "1 1 160px" }}>{t("Uploaded by")}
+            <input value={by} onChange={(e) => setBy(e.target.value)} placeholder={t("Your name")} disabled={busy} />
           </label>
-          <label style={{ flex: "2 1 240px" }}>File (max 50 MB)
+          <label style={{ flex: "2 1 240px" }}>{t("File (max 50 MB)")}
             <input ref={input} type="file" accept={KINDS.find((k) => k.value === kind)!.accept} disabled={busy} />
           </label>
         </div>
         {msg && (
           <div className={`alert ${msg.ok ? "ok" : "bad"}`}>
-            {msg.text}{msg.reasons && <ul>{msg.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
+            {t(msg.text)}{msg.reasons && <ul>{msg.reasons.map((r) => <li key={r}>{tLib(t, r)}</li>)}</ul>}
           </div>
         )}
-        <div><button className="primary" disabled={busy || !by.trim()}>{busy ? "Uploading…" : "Upload"}</button></div>
-        <p className="muted" style={{ fontSize: 13 }}>
-          Files stay with Kesuni and are never sent to the AI agent. A QC photo is also recorded as photo evidence; it does not replace the QC result.
-        </p>
+        <div><button className="primary" disabled={busy || !by.trim()}>{busy ? t("Uploading…") : t("Upload")}</button></div>
       </form>
     </section>
   );

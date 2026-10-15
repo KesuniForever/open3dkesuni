@@ -79,10 +79,21 @@ export function saveOrder(o: Order): void {
   conn().prepare("INSERT INTO orders (id, data) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data")
     .run(o.id, JSON.stringify(o));
 }
+/**
+ * A number no order has ever used. A deleted order can leave rows behind (a Chief run that finished after the reset),
+ * and its Circle wallets keep its id, so a reused number would hand that history to a new, maybe real, order.
+ * Highest of: the order count, any ORD-<n> in orders or the order tables, and the last number handed out.
+ */
 export function nextOrderIds(): { id: string; jobId: string } {
-  const n = count("orders") + 1;
+  const c = conn();
+  const refs = ["SELECT id AS ref FROM orders", ...ORDER_TABLES.map((t) => `SELECT order_id AS ref FROM ${t}`)].join(" UNION ");
+  // ORD- plus 3 to 6 digits: the old ORD-<timestamp> fallback ids do not count as numbers.
+  const used = (c.prepare(`SELECT MAX(CAST(substr(ref, 5) AS INTEGER)) AS n FROM (${refs})
+    WHERE ref GLOB 'ORD-[0-9][0-9][0-9]*' AND length(ref) <= 10 AND NOT substr(ref, 5) GLOB '*[^0-9]*'`).get() as { n: number | null }).n ?? 0;
+  const n = Math.max(count("orders"), used, getMeta<number>("lastOrderNo") ?? 0) + 1;
+  setMeta("lastOrderNo", n);
   const pad = String(n).padStart(3, "0");
-  return getOrder(`ORD-${pad}`) ? { id: `ORD-${Date.now()}`, jobId: `JOB-${Date.now()}` } : { id: `ORD-${pad}`, jobId: `JOB-${pad}` };
+  return { id: `ORD-${pad}`, jobId: `JOB-${pad}` };
 }
 
 // ---------- vendors ----------

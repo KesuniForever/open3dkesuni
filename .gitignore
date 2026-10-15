@@ -55,3 +55,6 @@ data/local/
 # Circle entity secret recovery files (keep outside the repo)
 recovery_file_*.dat
 *-recovery*.dat
+
+# printer bridge log
+logs/

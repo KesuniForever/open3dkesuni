@@ -2,10 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useT } from "@/i18n/client";
 import Icon from "./Icon";
 
 export default function NewOrderForm() {
   const router = useRouter();
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
@@ -15,7 +17,7 @@ export default function NewOrderForm() {
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setF({ ...f, [k]: e.target.value });
 
-  if (!open) return <button className="primary accent" onClick={() => setOpen(true)}><Icon name="plus" size={16} />New order</button>;
+  if (!open) return <button className="primary accent" onClick={() => setOpen(true)}><Icon name="plus" size={16} />{t("New order")}</button>;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -39,40 +41,40 @@ export default function NewOrderForm() {
 
   return (
     <form className="card form new-order" onSubmit={submit}>
-      <h2>New order</h2>
-      <label>Customer name (no phone or address)
-        <input value={f.customerName} onChange={set("customerName")} placeholder="e.g. Aini" maxLength={80} />
+      <h2>{t("New order")}</h2>
+      <label>{t("Customer name (no phone or address)")}
+        <input value={f.customerName} onChange={set("customerName")} placeholder={t("e.g. Aini")} maxLength={80} />
       </label>
-      <label>Product
-        <input value={f.product} onChange={set("product")} placeholder="e.g. Custom lamp side table, walnut top, 4 printed legs" required />
+      <label>{t("Product")}
+        <input value={f.product} onChange={set("product")} placeholder={t("e.g. Custom lamp side table, walnut top, 4 printed legs")} required />
       </label>
       <div className="row">
-        <label style={{ flex: "1 1 100px" }}>Quantity
+        <label style={{ flex: "1 1 100px" }}>{t("Quantity")}
           <input type="number" min={1} value={f.quantity} onChange={set("quantity")} required />
         </label>
-        <label style={{ flex: "1 1 160px" }}>Deadline
+        <label style={{ flex: "1 1 160px" }}>{t("Deadline")}
           <input type="date" value={f.deadline} onChange={set("deadline")} required />
         </label>
-        <label style={{ flex: "1 1 120px" }}>Design version
+        <label style={{ flex: "1 1 120px" }}>{t("Design version")}
           <input value={f.designVersion} onChange={set("designVersion")} required />
         </label>
-        <label style={{ flex: "1 1 140px" }}>Budget (USDC)
+        <label style={{ flex: "1 1 140px" }}>{t("Budget (USDC)")}
           <input value={f.budgetUsdc} onChange={set("budgetUsdc")} inputMode="decimal" placeholder="32" required />
         </label>
       </div>
-      <label>Is this a real order?
+      <label>{t("Is this a real order?")}
         <select value={f.label} onChange={set("label")}>
-          <option value="real">Real: a real customer placed it</option>
-          <option value="simulated">Simulated: test or demo only</option>
+          <option value="real">{t("Real: a real customer placed it")}</option>
+          <option value="simulated">{t("Simulated: test or demo only")}</option>
         </select>
       </label>
       <p className="muted" style={{ fontSize: 13, margin: 0 }}>
-        Don&apos;t type customer phone numbers or home addresses here yet. Keep personal data out until we decide where it lives.
+        {t("Don't type customer phone numbers or home addresses here yet. Keep personal data out until we decide where it lives.")}
       </p>
-      {errors.length > 0 && <div className="alert bad"><ul>{errors.map((m) => <li key={m}>{m}</li>)}</ul></div>}
+      {errors.length > 0 && <div className="alert bad"><ul>{errors.map((m) => <li key={m}>{t(m)}</li>)}</ul></div>}
       <div className="row">
-        <button className="primary" disabled={busy}>{busy ? "Saving…" : "Create order"}</button>
-        <button type="button" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
+        <button className="primary" disabled={busy}>{busy ? t("Saving…") : t("Create order")}</button>
+        <button type="button" onClick={() => setOpen(false)} disabled={busy}>{t("Cancel")}</button>
       </div>
     </form>
   );

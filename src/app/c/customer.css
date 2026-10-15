@@ -1,0 +1,8 @@
+/* Customer pages (/c/<token>, /request/<code>): the order label and the EN | ID switch share the top right. */
+.cust-top-right { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
+.cust-top-right > .muted { font-size: 13px; text-align: right; overflow-wrap: anywhere; min-width: 0; text-wrap: balance; }
+@media (max-width: 420px) {
+  .cust-top { gap: 8px; }
+  .cust-top-right { gap: 8px; }
+  .cust-top-right > .muted { font-size: 12px; line-height: 1.35; }
+}

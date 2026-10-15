@@ -1,0 +1,68 @@
+/* Chief (AI) page: decision feed on the left, authority limits on the right. Classes are prefixed chief-. */
+.chief-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); gap: 0 16px; align-items: start; }
+.chief-col { display: grid; gap: 0; min-width: 0; }
+@media (max-width: 1100px) { .chief-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- recent decisions ---------- */
+.chief-feed { list-style: none; margin: 0; padding: 0; }
+.chief-item { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border-soft); }
+.chief-item:first-child { padding-top: 4px; }
+.chief-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.chief-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.chief-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.chief-top > b { font-size: 14px; font-weight: 600; color: var(--text); }
+.chief-when { margin-left: auto; font-size: 12px; color: var(--faint); white-space: nowrap; }
+.chief-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12.5px; color: var(--muted); min-width: 0; }
+.chief-meta a { font-weight: 600; }
+.chief-meta .mono { font-size: 11.5px; color: var(--faint); }
+.chief-product { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chief-line { font-size: 13.5px; color: var(--text-2); margin: 0; min-width: 0; }
+.chief-ask {
+  display: flex; align-items: center; gap: 6px; margin: 2px 0 0; padding: 5px 9px; border-radius: 7px; min-width: 0;
+  background: var(--warn-bg); color: var(--warn); font-size: 12.5px;
+}
+.chief-ask svg { flex: none; }
+
+/* The result line and its More fold: LineMore.tsx (line-more.css). */
+
+.chief-steps { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.chief-step {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 5px;
+  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 11px; line-height: 1.6;
+  background: var(--tint); color: var(--tint-text);
+}
+.chief-step svg { opacity: 0.75; }
+.chief-step small { font-size: 10px; color: var(--muted); }
+.chief-step.bad { background: var(--bad-bg); color: var(--bad); }
+
+.chief-all { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--border-soft); font-size: 13px; }
+
+/* ---------- authority limits ---------- */
+.chief-safe {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 14px; padding: 9px 11px; border-radius: 9px;
+  background: var(--ok-bg); color: var(--ok); font-size: 13px; font-weight: 500;
+}
+.chief-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+.chief-checks li { display: flex; align-items: flex-start; gap: 10px; font-size: 13.5px; color: var(--text-2); line-height: 1.45; }
+.chief-checks.locked { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
+.chief-checks.locked li { color: var(--muted); }
+.chief-mark {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; flex: none; border-radius: 6px;
+  background: var(--surface-2); color: var(--muted); margin-top: -1px;
+}
+.chief-mark.ok { background: var(--ok-bg); color: var(--ok); }
+.chief-by {
+  margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--faint); background: var(--surface-2); border-radius: 5px; padding: 1px 6px; vertical-align: 1px; white-space: nowrap;
+}
+.chief-by.warn { background: var(--warn-bg); color: var(--warn); }
+.chief-fold { margin-top: 14px; }
+.chief-fold + .chief-fold { margin-top: 8px; }
+.chief-plain { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); line-height: 1.55; display: grid; gap: 5px; }
+.chief-plain b { font-weight: 600; color: var(--text-2); }
+
+@media (max-width: 600px) {
+  .chief-item .attention-icon { width: 32px; height: 32px; }
+  .chief-when { margin-left: 0; }
+  .chief-product { display: none; }
+}

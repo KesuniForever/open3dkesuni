@@ -22,8 +22,9 @@ export function customerReview(orderId: string, raw: Record<string, unknown>): {
     text: String(raw.text ?? "").trim().slice(0, 1000), by: String(raw.by ?? "").trim().slice(0, 80), at: new Date().toISOString(),
   };
   const r: string[] = [];
+  const RATING = { quality: "Quality", communication: "Communication", value: "Value" } as const;
   for (const k of ["quality", "communication", "value"] as const) {
-    if (!Number.isInteger(review[k]) || review[k] < 1 || review[k] > 5) r.push(`Nilai ${k} harus 1 sampai 5`);
+    if (!Number.isInteger(review[k]) || review[k] < 1 || review[k] > 5) r.push(`${RATING[k]} rating must be 1 to 5`);
   }
   if (!review.by) r.push("Name is required");
   if (r.length) return fail(400, "The review is incomplete", r);

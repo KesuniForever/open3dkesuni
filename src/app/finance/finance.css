@@ -1,0 +1,90 @@
+/* /finance only. Every class starts with fin- (route stylesheets stay loaded after navigating away). */
+
+/* stat cards: the simulated pot, under the real number, never added to it */
+.fin-stat-sub { font-size: 12px; color: var(--muted); }
+.fin-sim {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px dashed var(--border); font-size: 12px; color: var(--faint);
+}
+.fin-sim .badge { font-size: 10px; padding: 0 6px; }
+.fin-sim b { color: var(--muted) !important; font-weight: 600; }
+
+/* tables: numbers right-aligned, a muted second line under a value */
+.fin-table td, .fin-table th { vertical-align: middle; }
+.fin-table th.fin-num, .fin-table td.fin-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fin-table td { font-size: 14px; }
+.fin-sub { display: block; font-size: 12px; color: var(--muted); font-weight: 400; margin-top: 1px; }
+.fin-sub .badge { font-size: 10px; padding: 0 6px; margin-left: 4px; }
+.fin-amt { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fin-order { color: var(--text); text-decoration: none; display: block; min-width: 0; max-width: 300px; }
+.fin-order:hover b { text-decoration: underline; text-decoration-color: var(--faint); }
+.fin-order b { font-weight: 600; }
+.fin-simrow td { background: #fcfcfb; }
+.fin-simrow .fin-amt, .fin-simrow .fin-order b { color: var(--text-2); }
+.fin-go { width: 36px; text-align: right; }
+.fin-go a {
+  display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px;
+  color: var(--faint); border: 1px solid var(--border); background: var(--surface);
+}
+.fin-go a:hover { color: var(--text); background: var(--surface-2); }
+.fin-hash { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-family: var(--font-geist-mono), ui-monospace, monospace; white-space: nowrap; }
+.fin-dash { color: var(--faint); font-size: 13px; }
+.fin-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 12px; text-align: center; color: var(--muted); font-size: 14px; }
+.fin-empty .attention-icon { margin-bottom: 4px; }
+.fin-empty b { color: var(--text); font-weight: 600; }
+.fin-foot { margin: 12px 0 0; font-size: 12px; color: var(--faint); }
+
+/* journal: account balances, then one block per entry (debits first, credits indented) */
+.fin-accounts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 0 0 18px; }
+.fin-account { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; background: #fbfcfa; min-width: 0; }
+.fin-account-name { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.fin-account-side { margin-left: auto; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+.fin-account > b { display: block; font-size: 20px; font-weight: 650; letter-spacing: -0.5px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+.fin-account > b small { font-size: 11px; font-weight: 400; color: var(--faint); margin-left: 4px; letter-spacing: 0; }
+.fin-journal th.fin-num, .fin-journal td.fin-num { width: 110px; }
+.fin-journal tbody.fin-entry tr:not(.fin-entry-head) td { padding-top: 7px; padding-bottom: 7px; }
+.fin-entry-head td { background: var(--surface-2); border-bottom: 0; padding-top: 9px; padding-bottom: 9px; }
+tbody.fin-entry:hover .fin-journal tbody.fin-entry tr:not(.fin-entry-head) td { padding-top: 7px; padding-bottom: 7px; }
+.fin-entry-head td { background: var(--surface-2); }
+.fin-entry-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; color: var(--text-2); }
+.fin-entry-line b { color: var(--text); font-weight: 600; }
+.fin-entry-line .fin-time { color: var(--muted); font-size: 12px; }
+.fin-entry-line .fin-push { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.fin-cr { padding-left: 28px !important; color: var(--text-2); }
+.fin-journal tbody.fin-entry tr:last-child td { border-bottom: 1px solid var(--border); }
+.fin-journal tbody.fin-entry + tbody.fin-entry .fin-journal tbody.fin-entry tr:not(.fin-entry-head) td { padding-top: 7px; padding-bottom: 7px; }
+.fin-entry-head td { border-top: 10px solid var(--surface); }
+
+/* pricing */
+.fin-tile-eyebrow { margin: 0 0 2px; }
+.fin-rule { font-size: 26px; font-weight: 650; letter-spacing: -0.8px; margin: 2px 0 0; color: var(--text); font-variant-numeric: tabular-nums; }
+.fin-rule small { font-size: 13px; font-weight: 400; color: var(--faint); letter-spacing: 0; margin-left: 4px; }
+.fin-pricing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; margin: 16px 0 18px; }
+.fin-pricing > .card { margin-bottom: 0; }
+.fin-check { display: flex; flex-direction: column; gap: 10px; }
+.fin-check p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.55; }
+@media (max-width: 900px) { .fin-pricing { grid-template-columns: minmax(0, 1fr); } }
+
+/* phones: each table row becomes a small card of "label  value" lines */
+@media (max-width: 700px) {
+  .fin-stack thead { display: none; }
+  .fin-stack, .fin-stack tbody, .fin-stack tr, .fin-stack td { display: block; width: 100%; }
+  .fin-stack tr { padding: 10px 0; border-bottom: 1px solid var(--border-soft); position: relative; }
+  .fin-stack tr:last-child { border-bottom: 0; }
+  .fin-stack td { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 3px 0; border: 0; text-align: right; }
+  .fin-stack td::before { content: attr(data-label); flex: none; font-size: 12px; color: var(--muted); text-align: left; }
+  .fin-stack td > div { text-align: right; min-width: 0; }
+  .fin-stack td.fin-num { white-space: normal; }
+  .fin-stack td.fin-num .fin-sub { display: inline; margin-left: 5px; }
+  .fin-stack td.fin-main { display: block; text-align: left; padding: 0 44px 6px 0; }
+  .fin-stack td.fin-main::before { content: none; }
+  .fin-stack td.fin-go { position: absolute; top: 10px; right: 0; width: auto; padding: 0; }
+  .fin-stack td.fin-go::before { content: none; }
+  .fin-stack tbody tr:hover td { background: transparent; }
+  .fin-stack .fin-simrow td { background: transparent; }
+  .fin-order { max-width: none; }
+  .fin-journal th.fin-num, .fin-journal td.fin-num { width: auto; }
+  .fin-cr { padding-left: 16px !important; }
+  .fin-entry-line .fin-push { margin-left: 0; }
+  .fin-account-side { display: none; }
+}

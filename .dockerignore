@@ -1,0 +1,26 @@
+# Never send secrets, local data or build output into the image (Railway builds from the Git repo, where these are
+# git-ignored anyway; this also covers a build from a local folder).
+.git
+node_modules
+.next
+out
+build
+coverage
+logs
+data
+.env*
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.key
+*.pem
+wallet.yaml
+.arc-canteen
+recovery_file_*.dat
+*-recovery*.dat
+.cp-images
+.claude
+.vercel
+*.tsbuildinfo
+npm-debug.log*
