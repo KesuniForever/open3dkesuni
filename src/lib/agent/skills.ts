@@ -31,7 +31,7 @@ const BY_TOOL: Record<string, Skill> = {
   clear_bed: "Machines",
   // Customer
   message_customer: "Customer", customer_agreement: "Customer", customer_review: "Customer", customer_decision: "Customer",
-  customer_colors: "Customer",
+  customer_colors: "Customer", customer_budget_raise: "Customer",
 };
 
 const TASK_SKILL: Record<string, Skill> = {

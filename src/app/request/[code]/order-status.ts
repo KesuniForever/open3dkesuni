@@ -4,7 +4,7 @@
 import type { CustomerView } from "@/lib/customer";
 
 export type OrderStage =
-  | "weighing" | "preparing" | "price" | "paying" | "waiting" | "printing" | "paused" | "checking" | "check" | "done" | "refunding" | "refunded";
+  | "weighing" | "preparing" | "budget" | "price" | "paying" | "waiting" | "printing" | "paused" | "checking" | "check" | "done" | "refunding" | "refunded";
 
 export interface OrderStatus {
   stage: OrderStage;
@@ -12,7 +12,7 @@ export interface OrderStatus {
   text: string;
   /** The badge colour. */
   tone: "" | "ok" | "warn" | "testnet";
-  /** The customer has something to do on the order page: pay, or accept or reject the item. */
+  /** The customer has something to do on the order page: raise their budget to Kesuni's price, pay, or accept or reject. */
   yourTurn: boolean;
   /** Only while printing. */
   percent: number | null;
@@ -23,12 +23,17 @@ const status = (stage: OrderStage, text: string, tone: OrderStatus["tone"], your
   ({ stage, text, tone, yourTurn, percent: null });
 
 export function orderStatus(
-  v: Pick<CustomerView, "order" | "escrow" | "paying" | "printing" | "printedOn"> & { design?: Pick<NonNullable<CustomerView["design"]>, "state"> | null },
+  v: Pick<CustomerView, "order" | "escrow" | "paying" | "printing" | "printedOn"> & { design?: Pick<NonNullable<CustomerView["design"]>, "state"> | null }
+    & Partial<Pick<CustomerView, "overBudget" | "budgetRaised">>,
 ): OrderStatus {
   const s = v.order.status;
   const funded = Boolean(v.escrow && v.escrow.state !== "AWAITING_DEPOSIT");
   if (s === "PAID" || s === "ACCEPTED") return status("done", "Done", "ok");
   if (s === "REJECTED") return v.escrow?.state === "REFUNDED" ? status("refunded", "Refunded", "") : status("refunding", "Refunding", "testnet");
+  // Kesuni's price is above the customer's budget: their turn to raise it on the order page (or message Kesuni).
+  if (s === "CREATED" && v.overBudget) return status("budget", "Above your budget", "warn", true);
+  // They raised it: Kesuni prepares the agreement at that price (the order page says the same).
+  if (s === "CREATED" && v.budgetRaised) return status("preparing", "Preparing your agreement", "");
   // The customer's own design is being weighed for the price (the order page says the same).
   if (s === "CREATED") return v.design?.state === "weighing" ? status("weighing", "Weighing your design", "") : status("preparing", "Preparing your price", "");
   if (!funded) return v.paying ? status("paying", "Processing payment", "testnet") : status("price", "Price ready", "warn", true);

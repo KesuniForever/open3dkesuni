@@ -2,7 +2,7 @@
 // in USDC: the order keeps the USDC mandate in micro-USDC (mandateMicro, all 6 decimals). Since 15 Oct 2026 it also
 // keeps the rupiah as typed (or worked out from the USDC typed) and the app rate used: idrPerUsdc() in costing.ts,
 // which reads the env, so pages pass the rate in. Pure: client components import this too.
-import type { T } from "../i18n/core";
+import { dateLocale, type Locale, type T } from "../i18n/core";
 import type { Order } from "./types";
 
 export type BudgetCurrency = "IDR" | "USDC";
@@ -106,4 +106,16 @@ export const looksLikeThousands = (typed: string): boolean => /^\d{1,3}\.\d{3}$/
 export function budgetText(o: Pick<Order, "mandateMicro" | "budgetIdr">, t: T, testnet = false): string {
   const usdc = `${usdcText(o.mandateMicro)} ${testnet ? t("test USDC") : "USDC"}`;
   return o.budgetIdr !== undefined ? `${rp(o.budgetIdr)} · ${usdc}` : usdc;
+}
+
+/**
+ * The customer's latest budget raise (src/lib/budget-raise.ts), for the operator's "Budget mandate" row under
+ * budgetText: "raised by the customer from Rp1.500.000 (Aini, 17 Oct)". Null when the customer never raised it.
+ */
+export function budgetRaiseText(o: Pick<Order, "budgetRaises">, t: T, locale: Locale = "en", testnet = false): string | null {
+  const r = o.budgetRaises?.at(-1);
+  if (!r) return null;
+  const from = r.fromIdr !== null ? rp(r.fromIdr) : `${usdcText(r.fromMicro)} ${testnet ? t("test USDC") : "USDC"}`;
+  const date = new Date(r.at).toLocaleDateString(dateLocale(locale), { timeZone: "Asia/Jakarta", day: "numeric", month: "short" });
+  return t("raised by the customer from {from} ({name}, {date})", { from, name: r.by, date });
 }

@@ -39,7 +39,8 @@ function stepOf(v: View): number {
   return s === "EVIDENCE_SUBMITTED" ? 3 : 2;
 }
 
-function headline(v: View, t: T): { title: string; sub: string } {
+/** The big title and the line under it (an empty line is left out). */
+export function headline(v: View, t: T): { title: string; sub: string } {
   const s = v.order.status;
   const funded = v.escrow && v.escrow.state !== "AWAITING_DEPOSIT";
   if (s === "PAID") return { title: t("Done. Thank you!"), sub: t("Your payment has been released to Kesuni.") };
@@ -47,6 +48,9 @@ function headline(v: View, t: T): { title: string; sub: string } {
   if (s === "REJECTED") return v.escrow?.state === "REFUNDED"
     ? { title: t("Your money has been refunded"), sub: t("Kesuni will contact you about a fix.") }
     : { title: t("Your money is being refunded"), sub: t("Returning the escrow to your wallet.") };
+  // Kesuni's price is above the budget: the price and "Raise my budget" follow (RaiseBudget). Once raised, a line says so.
+  if (s === "CREATED" && v.overBudget) return { title: t("Your price is above your budget"), sub: "" };
+  if (s === "CREATED" && v.budgetRaised) return { title: t("Kesuni is preparing your agreement"), sub: "" };
   if (s === "CREATED") return { title: t("Kesuni is preparing your price"), sub: t("We check the design and the printers first. The price will appear on this page.") };
   if (!funded) return v.paying
     ? { title: t("Processing your payment…"), sub: t("Usually under a minute. This page updates by itself.") }
@@ -140,7 +144,14 @@ export default function CustomerView({ token }: { token: string }) {
           {v.order.label === "simulated" && <> <span className="badge simulated">{t("test order")}</span></>}
         </p>
         <h1>{h.title}</h1>
-        <p className="muted">{h.sub}</p>
+        {h.sub && <p className="muted">{h.sub}</p>}
+
+        {v.overBudget && s === "CREATED" && (
+          <RaiseBudget o={v.overBudget} limitIdr={v.ownerApprovalAboveIdr} defaultName={v.order.customerName ?? ""} busy={busy} onRaise={act} t={t} />
+        )}
+        {v.budgetRaised && !v.overBudget && s === "CREATED" && (
+          <p className="alert ok" role="status">{t("Budget raised to {price}.", { price: rupiah(v.budgetRaised.toIdr) })}</p>
+        )}
 
         {printingNow && v.printing && (
           <div className="cust-progress" aria-label={t("Print progress {n} percent", { n: Math.round(v.printing.percent) })}>
@@ -200,7 +211,7 @@ export default function CustomerView({ token }: { token: string }) {
       )}
 
       {(v.choice.canChange || v.choice.material || v.choice.colors.length > 0) && (
-        <ChoiceCard token={token} choice={v.choice} onSaved={load} />
+        <ChoiceCard token={token} choice={v.choice} onSaved={load} priceShown={Boolean(v.overBudget || v.budgetRaised)} />
       )}
 
       <ol className="cust-steps" aria-label={t("Order steps")}>
@@ -427,8 +438,13 @@ function AddDesign({ token, color, onSent }: { token: string; color: string | nu
   );
 }
 
-/** The material and colours the customer picked: they can change them while Kesuni prepares the price. */
-function ChoiceCard({ token, choice, onSaved }: { token: string; choice: View["choice"]; onSaved: () => Promise<void> }) {
+/**
+ * The material and colours the customer picked: they can change them while Kesuni prepares the price. priceShown:
+ * Kesuni's price is already on the page (above the budget, or the budget was raised to it), so no "until the price" note.
+ */
+export function ChoiceCard({ token, choice, onSaved, priceShown = false }: {
+  token: string; choice: View["choice"]; onSaved: () => Promise<void>; priceShown?: boolean;
+}) {
   const t = useT();
   const [editing, setEditing] = useState(false);
   const chosen = Boolean(choice.material || choice.colors.length);
@@ -443,7 +459,7 @@ function ChoiceCard({ token, choice, onSaved }: { token: string; choice: View["c
         : <>
           <ChoiceSummary choice={choice} />
           {choice.colors.length > 1 && <p className="cust-note" style={{ marginTop: 8 }}>{t("Multi-colour: remember to send Kesuni the 3MF file.")}</p>}
-          {choice.canChange && <p className="cust-note" style={{ marginTop: 8 }}>{t("You can change this until Kesuni sends the price.")}</p>}
+          {choice.canChange && !priceShown && <p className="cust-note" style={{ marginTop: 8 }}>{t("You can change this until Kesuni sends the price.")}</p>}
         </>}
     </section>
   );
@@ -491,6 +507,45 @@ function ChoiceEditor({ token, choice, onDone }: { token: string; choice: View["
         <button type="button" disabled={busy} onClick={() => onDone(false)}>{t("Cancel")}</button>
       </div>
     </>
+  );
+}
+
+/**
+ * Kesuni's price is above the customer's budget: the price, their budget and one button that raises the budget to
+ * exactly that price (POST "raise-budget" with the quote shown, never an amount). Their name first, as for agreeing.
+ */
+export function RaiseBudget({ o, limitIdr, defaultName, busy, onRaise, t }: {
+  o: NonNullable<View["overBudget"]>; limitIdr: number; defaultName: string; busy: boolean;
+  onRaise: (b: Record<string, unknown>) => void; t: T;
+}) {
+  const [by, setBy] = useState(defaultName);
+  const price = rupiah(o.priceIdr);
+  return (
+    <div className="cust-pay">
+      <div className="cust-price">
+        <span className="big">{price}</span>
+        <span className="muted">{o.quantity > 1 && `${t("{price} per piece", { price: rupiah(o.unitIdr) })} · `}≈ {o.priceUsdc} USDC</span>
+      </div>
+      <dl className="calc-kv" style={{ marginTop: 0 }}>
+        <div>
+          <dt>
+            {t("Your budget")}{" "}
+            <Info>
+              {t("Kesuni can only charge up to the budget you set.")} {t("Raising it lets Kesuni prepare your agreement at this price.")}
+              {o.priceIdr > limitIdr && <> {t("Above {limit} Kesuni's owner also approves.", { limit: rupiah(limitIdr) })}</>}
+            </Info>
+          </dt>
+          <dd>{rupiah(o.budgetIdr)}</dd>
+        </div>
+      </dl>
+      <label>{t("Your name")}
+        <input value={by} onChange={(e) => setBy(e.target.value)} placeholder={t("Name")} />
+      </label>
+      <button className="primary cust-cta" disabled={busy || !by.trim()} onClick={() => onRaise({ action: "raise-budget", quoteId: o.quoteId, by })}>
+        {busy ? t("Processing…") : t("Raise my budget to {price}", { price })}
+      </button>
+      <p className="cust-note">{t("You do not pay yet: you agree to the final price first.")} {t("Or message Kesuni to change the order.")}</p>
+    </div>
   );
 }
 

@@ -36,12 +36,13 @@ export const deadlineEnd = (order: Order): number => Date.parse(`${order.deadlin
 
 /**
  * The quote's value in rupiah. Kesuni's own quotes keep the rupiah that was agreed (by weight or from the
- * calculator); converting the USDC price back would be off by up to half a cent (about Rp80).
+ * calculator); converting the USDC price back would be off by up to half a cent (about Rp80). Other quotes are
+ * converted at the app rate, or at `rate` when given (the customer's budget raise uses the order's own rate).
  */
-export function quoteIdr(order: Order, quote: Quote): number {
+export function quoteIdr(order: Order, quote: Quote, rate = idrPerUsdc()): number {
   if (order.gramPricing?.quoteId === quote.id) return order.gramPricing.totalIdr;
   if (order.costing?.quoteId === quote.id) return Math.round(order.costing.input.quantity * order.costing.input.unitPriceIdr);
-  return microToIdr(quote.priceMicro);
+  return microToIdr(quote.priceMicro, rate);
 }
 
 /** The owner approved exactly this quote at exactly this price. */

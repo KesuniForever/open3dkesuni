@@ -32,6 +32,17 @@ describe("order status in My orders", () => {
     expect(stage(view("REJECTED", { escrow: escrow("REFUNDED") }))).toBe("refunded");
   });
 
+  it("Kesuni's price above the budget: the customer's turn on the order page", () => {
+    const over = { quoteId: "Q-6", priceIdr: 2_500_000, unitIdr: 500_000, quantity: 5, priceUsdc: "151.515152", budgetIdr: 1_500_000 };
+    expect(orderStatus(view("CREATED", { overBudget: over, design: { state: "weighed" } })))
+      .toEqual({ stage: "budget", text: "Above your budget", tone: "warn", yourTurn: true, percent: null });
+    expect(orderStatus(view("CREATED", { overBudget: null })).stage).toBe("preparing");
+    // Raised: Kesuni prepares the agreement, as the order page says; nothing for the customer to do yet.
+    expect(orderStatus(view("CREATED", { overBudget: null, budgetRaised: { toIdr: 2_500_000 }, design: { state: "weighed" } })))
+      .toEqual({ stage: "preparing", text: "Preparing your agreement", tone: "", yourTurn: false, percent: null });
+    expect(orderStatus(view("PLAN_CHOSEN", { budgetRaised: { toIdr: 2_500_000 } })).stage).toBe("price");
+  });
+
   it("an unpaid order is waiting for payment before anything else, as on the order page", () => {
     expect(orderStatus(view("EVIDENCE_SUBMITTED"))).toMatchObject({ stage: "price", yourTurn: true });
   });

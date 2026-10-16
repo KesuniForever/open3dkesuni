@@ -78,3 +78,7 @@
 .portal-gates b { font-size: 14px; overflow-wrap: anywhere; }
 .portal-gates b .info { vertical-align: -2px; }
 .portal-gate-n { font-size: 12px; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+/* The line under the order form's budget: what the typed amount is in rupiah and USDC (or that it is unclear). */
+.budget-live { display: block; margin-top: 6px; font-size: 13px; color: var(--muted); font-weight: 400; overflow-wrap: anywhere; }
+.budget-live.bad { color: var(--bad, #b42318); }

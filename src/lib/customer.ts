@@ -11,7 +11,8 @@ import { notReadyReason } from "./printer/actions";
 import { idrPerUsdc, idrToMicro } from "./costing";
 import { agreementCurrent, costingForChosen, gramPricingForChosen } from "./agreement";
 import { isTestnetChain, publicNetwork, type PublicNetwork } from "./network";
-import { quoteIdr } from "./owner-rules";
+import { ownerRules, quoteIdr } from "./owner-rules";
+import { raiseOffer } from "./budget-raise";
 import { wakeChief } from "./agent/chief";
 import { nameOf, parseColorChoices, studioPalette, type PaletteColor } from "./colors";
 import { MATERIALS, orderMaterial, priceByWeight, pricingConfig, pricingFor } from "./pricing";
@@ -68,6 +69,16 @@ export interface CustomerView {
   design: CustomerDesignView | null;
   /** The customer may still add their design on the order page ("Add your design": POST /api/c/<token>/design). */
   canAddDesign: boolean;
+  /**
+   * Kesuni's price is above the customer's budget, and nothing is signed or paid yet (src/lib/budget-raise.ts): they may
+   * raise their budget to exactly this price ("raise-budget"). Only the price and their own budget: no cost, margin,
+   * grams, where the price came from, or names of people at Kesuni.
+   */
+  overBudget: { quoteId: string; priceIdr: number; unitIdr: number; quantity: number; priceUsdc: string; budgetIdr: number } | null;
+  /** The customer raised their budget and Kesuni prepares the agreement (the order is still CREATED): the new budget. */
+  budgetRaised: { toIdr: number } | null;
+  /** Above this many rupiah Kesuni's owner approves the price too (the owner's rules), for the page's ⓘ. */
+  ownerApprovalAboveIdr: number;
 }
 
 /**
@@ -105,6 +116,10 @@ export function customerView(order: Order, token: string): CustomerView {
   const printers = store.listPrinters();
   const p = printers.find((x) => x.currentOrderId === order.id);
   const acc = store.getAcceptance(order.id);
+  const offer = raiseOffer(order);
+  const lastRaise = order.budgetRaises?.at(-1);
+  const raised = !offer && lastRaise && order.status === "CREATED" ? { toIdr: lastRaise.toIdr } : null;
+  const design = designOf(order);
   return {
     order: {
       id: order.id, product: order.product, quantity: order.quantity, deadline: order.deadline, status: order.status,
@@ -146,8 +161,16 @@ export function customerView(order: Order, token: string): CustomerView {
     overTolerance: overTolerance(order) !== null,
     review: order.review ?? null,
     choice: choiceOf(order),
-    design: designOf(order),
+    // Kesuni's own price is on the page (or the budget was raised to it): the design card's estimate by weight would be a
+    // second, maybe different price.
+    design: design && (offer || raised) ? { ...design, estimate: null } : design,
     canAddDesign: customerDesignClosed(order) === null,
+    overBudget: offer ? {
+      quoteId: offer.quote.id, priceIdr: offer.priceIdr, unitIdr: offer.unitIdr, quantity: order.quantity,
+      priceUsdc: microToUsdc(offer.quote.priceMicro), budgetIdr: offer.budgetIdr,
+    } : null,
+    budgetRaised: raised,
+    ownerApprovalAboveIdr: ownerRules().approvalAboveIdr,
   };
 }
 

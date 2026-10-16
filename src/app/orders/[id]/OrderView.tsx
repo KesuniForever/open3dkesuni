@@ -22,13 +22,13 @@ import Info from "@/app/components/Info";
 import MoreText from "@/app/components/MoreText";
 import { oneLine } from "@/lib/text";
 import { skillOf } from "@/lib/agent/skills";
-import { useT } from "@/i18n/client";
+import { useLocale, useT } from "@/i18n/client";
 import type { T } from "@/i18n/core";
 import { rich, units } from "./rich";
 import { tLib } from "@/lib/lib-text";
 import type { IssueTexts } from "@/app/machines/printer-details";
 import { useIssueTexts } from "@/app/machines/use-issue-texts";
-import { budgetText } from "@/lib/budget";
+import { budgetRaiseText, budgetText } from "@/lib/budget";
 import { nameOf } from "@/lib/colors";
 import ColorSwatch from "@/app/components/ColorSwatch";
 import { ConfirmDialog } from "@/app/components/PrinterControls";
@@ -74,6 +74,7 @@ async function post(url: string, body?: unknown) {
 /** issueTexts: Bambu's words for the printer faults reported when the page was made (the table is server-only). */
 export default function OrderView({ id, issueTexts = {} }: { id: string; issueTexts?: IssueTexts }) {
   const t = useT();
+  const locale = useLocale();
   const [data, setData] = useState<OrderData | null>(null);
   useIssueTexts(data?.printers ?? [], issueTexts);
   const [missing, setMissing] = useState(false);
@@ -120,6 +121,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
   const chosenVendor = chosen ? vendors.find((v) => v.id === chosen.vendorId) : undefined;
   const usdc = data.network.isTestnet ? t("test USDC") : "USDC";
   const stepIndex = order.status === "REJECTED" ? 3 : FLOW.indexOf(order.status === "PAID" ? "ACCEPTED" : order.status);
+  const raised = budgetRaiseText(order, t, locale, data.network.isTestnet);
 
   return (
     <main className="wrap">
@@ -176,7 +178,10 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
               <div><dt>{t("Quantity")}</dt><dd>{order.quantity}</dd></div>
               <div><dt>{t("Deadline")}</dt><dd>{order.deadline}</dd></div>
               <div><dt>{t("Design version")}</dt><dd>{order.designVersion}</dd></div>
-              <div><dt>{t("Budget mandate")}</dt><dd>{budgetText(order, t, data.network.isTestnet)}</dd></div>
+              <div><dt>{t("Budget mandate")}</dt><dd>
+                {budgetText(order, t, data.network.isTestnet)}
+                {raised && <small className="muted" style={{ display: "block", fontWeight: 400 }}>{raised}</small>}
+              </dd></div>
               {(order.material || order.preferredColors?.length) && (
                 <div><dt>{t("Material")}</dt><dd>
                   {order.material ?? ""}
@@ -261,6 +266,9 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
                     {e.attachmentId && <> <a href={`/api/files/${e.attachmentId}`} target="_blank" rel="noreferrer">{t("view photo")}</a></>}</li>
                 ))}
               </ul>
+            )}
+            {!["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status) && (
+              <p className="muted">{t("Opens once a plan is chosen, after the price is agreed.")}</p>
             )}
             <EvidenceForm disabled={busy || !["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status)}
               onSubmit={(b) => act(`${base}/evidence`, b, t("Recorded {kind} evidence.", { kind: b.kind }))} />
@@ -448,6 +456,9 @@ function summarize(e: AgentLogEntry, t: T): string {
     });
   }
   if (e.tool === "customer_review") return t("customer left a review");
+  if (e.tool === "customer_budget_raise") {
+    return t("customer raised the budget to Rp{total} (quote {quote})", { total: Number(input.toIdr).toLocaleString("id-ID"), quote: String(input.quoteId) });
+  }
   if (e.tool === "customer_colors") {
     const names = Array.isArray(input.colors) ? (input.colors as { name?: string; color?: string }[]).map((c) => t(c.name ?? nameOf(String(c.color)))) : [];
     return t("customer chose {choice}", { choice: [input.material ? String(input.material) : "", ...names].filter(Boolean).join(" · ") || t("none") });

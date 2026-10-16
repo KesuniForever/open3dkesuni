@@ -73,6 +73,9 @@ export interface Order {
    *  mandateMicro (src/lib/costing.ts idrPerUsdc()). Missing on orders made before 15 Oct 2026: their budget is USDC only. */
   budgetIdr?: number;
   rateIdrPerUsdc?: number;
+  /** The customer raised their budget to Kesuni's price on their order page (src/lib/budget-raise.ts), oldest first.
+   *  budgetIdr and mandateMicro above are already the raised budget. */
+  budgetRaises?: BudgetRaise[];
   /** Material chosen on the order. Older orders only have spec.material (free text). */
   material?: Material;
   /** Colours the customer picked from the spools loaded in the studio (GET /api/studio/colors). */
@@ -85,6 +88,22 @@ export interface Order {
    *  the agent, and nothing was printed: the dispatcher counts its runs as printed (orderGate), printFinished says
    *  printed and the customer page says "Printing finished". A "simulated" log evidence and a log row record it. */
   printDoneDebug?: { by: string; at: string };
+}
+
+/**
+ * One "Raise my budget" by the customer: from their budget to exactly the price of the quote Kesuni offered them
+ * (src/lib/budget-raise.ts offeredQuote): the one the owner approved, else the official price by weight.
+ */
+export interface BudgetRaise {
+  /** null: the order's budget was in USDC only (made before rupiah budgets existed). */
+  fromIdr: number | null;
+  toIdr: number;           // the offered quote in rupiah (gramPricing.totalIdr, or its USDC price at the order's rate)
+  fromMicro: number;
+  toMicro: number;         // the quote's priceMicro, exactly
+  quoteId: string;
+  source: "owner-approved" | "by-weight";
+  by: string;              // the name the customer typed (never sent to the Chief)
+  at: string;
 }
 
 export interface OrderAutoPrint {

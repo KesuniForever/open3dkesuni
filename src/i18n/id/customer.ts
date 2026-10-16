@@ -181,6 +181,8 @@ const id: Record<string, string> = {
   "Quantity": "Jumlah",
   "Needed by": "Dibutuhkan tanggal",
   "Maximum budget (Rupiah)": "Anggaran maksimal (Rupiah)",
+  "For example: 150.000 or 150rb": "Contoh: 150.000 atau 150rb",
+  "Type the budget in rupiah, like 150.000 or 150rb": "Tulis anggaran dalam rupiah, misalnya 150.000 atau 150rb",
   "Notes (size, colour, design)": "Catatan (ukuran, warna, desain)",
   "Optional": "Opsional",
   "Do not write your address or phone number here. Kesuni asks for them directly on WhatsApp.":

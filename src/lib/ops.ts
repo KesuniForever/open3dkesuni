@@ -171,6 +171,12 @@ export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
       const colors = Array.isArray(i.colors) ? (i.colors as { name?: unknown }[]).map((c) => t(str(c?.name))).filter(Boolean) : [];
       return { title: t("Customer chose material and colours"), line: [str(i.material), ...colors].filter(Boolean).join(" · ") || undefined };
     }
+    // "Raise my budget" on the customer's page (src/lib/budget-raise.ts): to exactly the quote Kesuni offered. No name here.
+    case "customer_budget_raise": {
+      const from = typeof i.fromIdr === "number" ? rp(i.fromIdr)
+        : Number.isSafeInteger(i.fromMicro) && (i.fromMicro as number) >= 0 ? `${microToUsdc(i.fromMicro as number)} USDC` : "";
+      return { title: t("Customer raised the budget"), line: [from && `${from} → ${typeof i.toIdr === "number" ? rp(i.toIdr) : ""}`, str(i.quoteId)].filter(Boolean).join(" · ") || undefined };
+    }
     // Printing from the website: always a person (the Chief has no control tool).
     case "start_print": return { title: t("Print started by {name}", { name: str(i.by) }), line: [str(o.printer), str(o.jobId)].filter(Boolean).join(" · ") || undefined };
     case "printer_command": return { title: t("Printer control by {name}", { name: str(i.by) }), line: str(i.kind) || undefined };

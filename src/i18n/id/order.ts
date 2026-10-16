@@ -318,6 +318,7 @@ const id: Record<string, string> = {
   // 3. evidence
   "Production evidence and QC": "Bukti produksi dan QC",
   "No evidence yet.": "Belum ada bukti.",
+  "Opens once a plan is chosen, after the price is agreed.": "Terbuka setelah rencana dipilih, sesudah harga disepakati.",
   "PHOTO": "FOTO",
   "view photo": "lihat foto",
   "Recorded {kind} evidence.": "Bukti {kind} dicatat.",

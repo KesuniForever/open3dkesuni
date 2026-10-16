@@ -143,4 +143,5 @@ export const idrPerUsdc = (): number => {
  * so a price equal to the rupiah budget is never "over budget" by a rounding cent.
  */
 export const idrToMicro = (idr: number): number => Math.round((idr * 1_000_000) / idrPerUsdc());
-export const microToIdr = (micro: number): number => Math.round((micro / 1e6) * idrPerUsdc());
+/** Micro-USDC to whole rupiah at the app rate, or at `rate` (an order's own rate, Order.rateIdrPerUsdc). */
+export const microToIdr = (micro: number, rate = idrPerUsdc()): number => Math.round((micro / 1e6) * rate);

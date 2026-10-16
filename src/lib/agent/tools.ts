@@ -80,6 +80,11 @@ function orderForAgent(o: Order) {
     // PLA or PETG as chosen on the order (null: not chosen), and the colours the customer picked from the studio's spools.
     material: orderMaterial(o), preferredColors: o.preferredColors ?? [],
     budgetIdr: o.budgetIdr ?? null,
+    // The customer raised their budget on their order page to the price of one quote (mandateMicro and budgetIdr above
+    // are already the raised budget). Without the name they typed: the Chief never sees the customer's name.
+    budgetRaises: (o.budgetRaises ?? []).map((r) => ({
+      fromIdr: r.fromIdr, toIdr: r.toIdr, fromMicro: r.fromMicro, toMicro: r.toMicro, quoteId: r.quoteId, source: r.source, at: r.at,
+    })),
     // Set when the Chief may not price this order itself (not PLA or PETG): then a person prices it.
     pricingBlockedBy: materialConcern(o),
     agreementCurrent: agreementCurrent(o),

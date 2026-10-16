@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { customerDecide, customerPay, customerSetColors, customerView, orderForToken, refreshPayment } from "@/lib/customer";
-import { fail, failWith, str } from "@/lib/http";
+import { clientIp, fail, failWith, str } from "@/lib/http";
 import { readJsonCapped } from "@/lib/request-body";
 import { customerAgree } from "@/lib/agreement";
 import { customerReview } from "@/lib/reputation";
+import { customerRaiseBudget } from "@/lib/budget-raise";
+import { CROSS_SITE, TOO_MANY_TRIES, TRIES_PER_IP_PER_HOUR, crossSite, take, tries } from "@/lib/customer-limits";
 
 type Ctx = { params: Promise<{ token: string }> };
 
@@ -20,6 +22,9 @@ export async function GET(_req: Request, ctx: Ctx) {
 //    | { action: "reject", by, note }
 //    | { action: "review", quality, communication, value, text, by }
 //    | { action: "colors", material: "PLA" | "PETG" | null, colors: [{ type, color }] } (while Kesuni prepares the price)
+//    | { action: "raise-budget", quoteId, by }: Kesuni's price is above the budget and the customer raises their budget to
+//      exactly that quote's price (src/lib/budget-raise.ts). Any amount in the body is ignored: the price is Kesuni's.
+//      Counted with the tries of the order form and "Add your design" (src/lib/customer-limits.ts).
 export async function POST(req: Request, ctx: Ctx) {
   const { token } = await ctx.params;
   const order = orderForToken(token);
@@ -37,6 +42,12 @@ export async function POST(req: Request, ctx: Ctx) {
     const r = customerSetColors(order.id, { material: b?.material, colors: b?.colors });
     return r.ok ? NextResponse.json({ ok: true, choice: r.choice }) : failWith(r);
   }
+  if (action === "raise-budget") {
+    if (!take(tries, clientIp(req), Date.now(), TRIES_PER_IP_PER_HOUR)) return fail(429, TOO_MANY_TRIES);
+    if (crossSite(req)) return fail(403, CROSS_SITE);
+    const r = customerRaiseBudget(order.id, { quoteId: str(b?.quoteId), by: str(b?.by) });
+    return r.ok ? NextResponse.json({ ok: true, budgetIdr: r.raise.toIdr, repeated: r.repeated }) : failWith(r);
+  }
   if (action === "review") {
     const r = customerReview(order.id, b ?? {});
     return r.ok ? NextResponse.json({ ok: true }) : failWith(r);
@@ -51,5 +62,5 @@ export async function POST(req: Request, ctx: Ctx) {
     });
     return r.ok ? NextResponse.json(r) : failWith(r);
   }
-  return fail(400, 'Expected { action: "agree" | "pay" | "accept" | "reject" | "review" | "colors" }');
+  return fail(400, 'Expected { action: "agree" | "pay" | "accept" | "reject" | "review" | "colors" | "raise-budget" }');
 }

@@ -7,6 +7,7 @@ import { inviteValid } from "@/lib/invite";
 import { cachedLive, LIVE_REFRESH_S } from "@/lib/live";
 import { portalMachines, portalPrice, portalToken } from "@/lib/portal";
 import { tokenReadiness } from "@/lib/token-research";
+import { idrPerUsdc } from "@/lib/costing";
 import OrderForm from "./OrderForm";
 import MyOrders from "./MyOrders";
 import { MachinesTab, PORTAL_TABS, PriceTab, TokenTab, portalTab } from "./Portal";
@@ -47,7 +48,7 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
       <CustTop>{t("Customer portal")}</CustTop>
       <TabNav tabs={PORTAL_TABS} active={tab} basePath={base} t={t} />
       <main className="portal-main">
-        {tab === "order" && <OrderForm code={code} embedded />}
+        {tab === "order" && <OrderForm code={code} embedded rate={idrPerUsdc()} />}
         {tab === "orders" && <MyOrders orderHref={base} />}
         {tab === "machines" && (
           <>

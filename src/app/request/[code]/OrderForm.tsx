@@ -8,7 +8,10 @@ import ColorPicker, { NO_CHOICE, useStudioColors, type Choice } from "@/app/c/Co
 import DesignPicker, { DesignInfo } from "@/app/c/DesignPicker";
 import { tLib } from "@/lib/lib-text";
 import { rememberOrder } from "@/app/c/my-orders";
+import { budgetEquals, idrBudget } from "@/lib/budget";
+import { parseIdrTyped } from "@/lib/budget-input";
 
+const BUDGET_UNCLEAR = "Type the budget in rupiah, like 150.000 or 150rb";
 const EMPTY = { name: "", product: "", quantity: "1", deadline: "", budgetIdr: "", note: "" };
 type Fields = typeof EMPTY;
 // What the customer typed survives a switch to another tab of the portal (each tab is its own page) until the order is
@@ -33,8 +36,11 @@ function saveDraft(f: Fields | null): void {
   }
 }
 
-/** The order form. `embedded`: inside the customer portal, which has the page's header and <main> already. */
-export default function OrderForm({ code, embedded = false }: { code: string; embedded?: boolean }) {
+/**
+ * The order form. `embedded`: inside the customer portal, which has the page's header and <main> already. `rate`: the
+ * app's rupiah per USDC, for the line under the budget that shows what the typed amount is in USDC.
+ */
+export default function OrderForm({ code, embedded = false, rate }: { code: string; embedded?: boolean; rate?: number }) {
   const t = useT();
   const locale = useLocale();
   const router = useRouter();
@@ -59,14 +65,18 @@ export default function OrderForm({ code, embedded = false }: { code: string; em
   const [design, setDesign] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
+  // The budget as typed ("150rb", "1,5jt", "Rp 150.000"): what it means shows under the field while they type.
+  const budget = parseIdrTyped(f.budgetIdr);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (budget === null) return setErrors([BUDGET_UNCLEAR]);
     setBusy(true);
     setErrors([]);
     setFileError(null);
     try {
       const fields = {
-        ...f, invite: code, quantity: Number(f.quantity), budgetIdr: Number(f.budgetIdr.replace(/\D/g, "")),
+        ...f, invite: code, quantity: Number(f.quantity), budgetIdr: budget,
         material: choice.material, colors: choice.colors.map(({ type, color }) => ({ type, color })),
       };
       // With a design: one multipart request, so the order, the file and its weighing start together. The code also
@@ -120,7 +130,12 @@ export default function OrderForm({ code, embedded = false }: { code: string; em
           </label>
         </div>
         <label>{t("Maximum budget (Rupiah)")}
-          <input value={f.budgetIdr} onChange={set("budgetIdr")} inputMode="numeric" placeholder="50000" required />
+          <input value={f.budgetIdr} onChange={set("budgetIdr")} placeholder={t("For example: 150.000 or 150rb")} required maxLength={30} />
+          {f.budgetIdr.trim() !== "" && (
+            <span className={`budget-live${budget === null ? " bad" : ""}`} aria-live="polite">
+              {budget === null ? t(BUDGET_UNCLEAR) : rate ? budgetEquals(idrBudget(budget, rate)) : `Rp${budget.toLocaleString("id-ID")}`}
+            </span>
+          )}
         </label>
         <fieldset className="cust-fieldset">
           <legend>{t("Material and colour")}</legend>
