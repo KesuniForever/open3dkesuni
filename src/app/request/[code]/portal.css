@@ -1,0 +1,80 @@
+/* Customer portal (/request/<code>): the customer layout (customer.css) with a menu under the top bar. Phone first:
+   one column, 16px gutters from .cust, nothing wider than the screen. */
+.portal > .tabs { margin: 0 0 16px; }
+/* The menu on a phone: five tabs wrap to two rows, each big enough for a thumb. */
+.portal > .tabs .tab { min-height: 40px; padding: 8px 13px; font-size: 14px; }
+.portal-main { min-width: 0; }
+/* 16px text in fields: iOS Safari zooms the page into any field with smaller text. */
+.portal input, .portal select, .portal textarea { font-size: 16px; }
+
+.portal-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 12px; }
+.portal-head h2 { display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 650; letter-spacing: -0.4px; margin: 0; }
+.portal-head > .muted { font-size: 12.5px; }
+.portal-alert { margin: 0 0 12px; }
+.portal-empty { margin: 0; display: grid; gap: 12px; justify-items: start; }
+.portal-empty > p { margin: 0; }
+
+/* ---------- Machines ---------- */
+.portal-printers { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.portal-printer.card { margin: 0; display: grid; gap: 12px; }
+.portal-printer .mach-progress { margin: 0; }
+.portal-printer-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.portal-printer-top > div { min-width: 0; }
+.portal-printer-top h3 { font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0; overflow-wrap: anywhere; }
+.portal-printer-top p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; }
+.portal-printer.offline .portal-printer-top p { color: var(--bad); }
+.portal-printer .mach-pill { flex: none; max-width: 60%; white-space: normal; text-align: right; }
+/* A person at Kesuni has to act (change filament, clear the bed): the printer waits. */
+.portal-stage { margin: 0; padding: 8px 11px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: 13.5px; font-weight: 600; }
+.portal-eta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 13px; color: var(--muted); }
+.portal-eta b { color: var(--text); font-weight: 600; }
+.portal-spools { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.portal-spools li {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px 4px 5px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); font-size: 12.5px; font-weight: 600; color: var(--text-2);
+}
+.portal-spools li.on { border-color: var(--primary); }
+.portal-spools li > span { display: inline-flex; align-items: baseline; gap: 5px; }
+.portal-spools small { font-weight: 400; color: var(--muted); font-size: 12.5px; }
+
+/* ---------- My orders ---------- */
+.portal-orders { list-style: none; margin: 0; padding: 0; display: grid; }
+.portal-order { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--border-soft); min-width: 0; }
+.portal-order:first-child { border-top: 0; padding-top: 0; }
+.portal-order:last-child { padding-bottom: 0; }
+.portal-order-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; font-size: 15px; }
+.portal-order-top > b { min-width: 0; overflow-wrap: anywhere; }
+.portal-order-top > .badge { flex: none; }
+.portal-order-bar { height: 8px; }
+.portal-order-foot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+.portal-order-when { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-width: 0; }
+.portal-order-foot > .btn-link { padding: 7px 16px; margin-left: auto; }
+.portal-open { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.portal-open > label { flex: 1 1 220px; min-width: 0; }
+.portal-open > button { flex: 1 1 90px; min-height: 40px; }
+.portal-open + .alert { margin-top: 10px; }
+
+/* ---------- Price calculator ---------- */
+.portal-rates { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 14px; font-size: 13.5px; }
+.portal-rates b { color: var(--text); }
+.portal-total { margin-top: 16px; }
+.portal-total .big { overflow-wrap: anywhere; }
+.portal-note { margin-top: 12px; }
+
+/* ---------- Token research ---------- */
+.portal-research {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: 0 0 12px; padding: 9px 12px; border-radius: 9px;
+  background: var(--blue-bg); color: var(--blue); font-size: 13.5px; font-weight: 500; line-height: 1.4;
+}
+.portal-research > svg { flex: none; }
+.portal-research > span:not(.info) { flex: 1 1 0; min-width: 0; }
+.portal-passed { margin: 0 0 6px; font-size: 13px; }
+.portal-gates { list-style: none; margin: 0; padding: 0; }
+.portal-gates li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 10px 0; border-top: 1px solid var(--border-soft);
+}
+.portal-gates li:first-child { border-top: 0; }
+.portal-gates b { font-size: 14px; overflow-wrap: anywhere; }
+.portal-gates b .info { vertical-align: -2px; }
+.portal-gate-n { font-size: 12px; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }

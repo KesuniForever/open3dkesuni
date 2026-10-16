@@ -278,7 +278,7 @@ function SliceRow({ job: j, printers, busy, onCancel, onPrint, t, locale }: {
           <b>{j.sourceName}</b>
           <small className="muted">
             {j.material} {t(nameOf(j.color))} · {j.mode === "project" ? t("Project settings") : `${t(QUALITY[j.quality].label)} · ${j.infillPct}%`}
-            {p ? ` · ${shortName(p.name)} ${slotText(j.tray, t)}` : ""}{j.actor === "agent" ? ` · ${t("agent")}` : ""}
+            {p ? ` · ${shortName(p.name)} ${slotText(j.tray, t)}` : ""}{j.actor === "agent" ? ` · ${t("agent")}` : j.actor === "system" ? ` · ${t("automatic, for the price")}` : ""}
           </small>
         </span>
         <span className={`badge ${STATE_TONE[j.state]}`}>{t(STATE_LABEL[j.state])}</span>

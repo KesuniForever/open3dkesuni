@@ -8,6 +8,7 @@ import { CustTop, bold } from "../CustTop";
 import ColorPicker, { ChoiceSummary, keepOffered, swatchesFor, useStudioColors, type Choice } from "../ColorPicker";
 import { tLib } from "@/lib/lib-text";
 import { finishingText } from "@/lib/spec-choices";
+import { rememberIfNew } from "../my-orders";
 
 // English text is the key; useT() gives the Indonesian when the visitor chose ID.
 const STEPS = ["Order received", "Price and payment", "Printing", "Quality check", "Done"];
@@ -53,6 +54,19 @@ function headline(v: View, t: T): { title: string; sub: string } {
   return { title: t("Payment safe in escrow"), sub: t("Your order is waiting for its turn on a printer.") };
 }
 
+/** The design the customer sent with the order, while Kesuni prepares the price: grams only, never cost or margin. */
+function DesignStatus({ d, t, locale }: { d: NonNullable<View["design"]>; t: T; locale: Locale }) {
+  if (d.state === "weighed") {
+    const g = d.gramsPerPiece.toLocaleString(dateLocale(locale), { maximumFractionDigits: 1 });
+    return <div className="alert ok" role="status">{t("Your design: {g} g per piece", { g })}</div>;
+  }
+  return (
+    <div className="alert" role="status" style={{ background: "var(--tint)" }}>
+      {d.state === "weighing" ? t("Weighing your design…") : t("Kesuni will check your file")}
+    </div>
+  );
+}
+
 export default function CustomerView({ token }: { token: string }) {
   const t = useT();
   const locale = useLocale();
@@ -68,7 +82,11 @@ export default function CustomerView({ token }: { token: string }) {
     try {
       const res = await fetch(`/api/c/${token}`, { cache: "no-store" });
       if (res.status === 404) return setMissing(true);
-      if (res.ok) setV(await res.json());
+      if (!res.ok) return;
+      const view: View = await res.json();
+      setV(view);
+      // Into the portal's "My orders" on this phone too; once (this page refreshes every few seconds).
+      rememberIfNew(`/c/${token}`, view.order.product);
     } catch { /* offline for a moment: keep the last view */ }
   }, [token]);
 
@@ -130,6 +148,7 @@ export default function CustomerView({ token }: { token: string }) {
         </p>
         <h1>{h.title}</h1>
         <p className="muted">{h.sub}</p>
+        {v.design && <DesignStatus d={v.design} t={t} locale={locale} />}
 
         {printingNow && v.printing && (
           <div className="cust-progress" aria-label={t("Print progress {n} percent", { n: Math.round(v.printing.percent) })}>

@@ -6,20 +6,23 @@
 // Single colour only: an STL or OBJ has no colours. Multi-colour stays with 3MFs painted in Bambu Studio.
 // Stale slices never run later: one not taken by the studio PC in 15 min fails, one slicing without an answer for 20 min
 // fails. Same source and settings never slice twice at once (a UNIQUE index on the key); a finished one is reused.
+// An automatic slice (actor "system", asked by src/lib/auto-weigh.ts when a customer sends their own design) only weighs
+// it for the price: its plate weight becomes the order's grams per unit (by "slicer"), and the agent never prints its file.
 import { createHash } from "node:crypto";
 import * as store from "./store";
 import type { Fail } from "./actions";
 import { addAttachment } from "./files";
 import { colorsCheckedNow, nameOf, normalizeHex } from "./colors";
 import { pricingConfig, pricingFor, priceByWeight, toMaterial } from "./pricing";
+import { setSlicerGramsFromSlice } from "./agreement";
 import { isPersonName, ONLINE_MS } from "./printer/control";
 import { printerName } from "./printer/actions";
 import { autoPrintOn } from "./printer/autoprint";
 import { AUTO_PRINT_META } from "./printer/autoprint-rules";
 import { parse3mf } from "./threemf";
 import {
-  DEFAULT_INFILL_PCT, DEFAULT_QUALITY, MAX_SLICE_BYTES, QUALITY, SLICE_PICKUP_MS, SLICE_QUALITIES, SLICE_RUN_MS, SLICER_NAME, SUPPORT_MODES,
-  sliceKey, slicedFileName, sliceOutputProblem, sliceSourceCheck,
+  AUTO_WEIGH_BY, DEFAULT_INFILL_PCT, DEFAULT_QUALITY, MAX_SLICE_BYTES, QUALITY, SLICE_PICKUP_MS, SLICE_QUALITIES, SLICE_RUN_MS, SLICER_NAME,
+  SUPPORT_MODES, sliceHoldsSource, sliceKey, slicedFileName, sliceOutputProblem, sliceSourceCheck,
 } from "./slice-rules";
 import type { Attachment, SliceJob, SliceJobState, SliceQuality } from "./types";
 
@@ -31,6 +34,8 @@ const ID = /^[a-z0-9-]{1,32}$/;
 export const SLICER_SEEN_MS = 2 * 60_000;
 export const MAX_ACTIVE_PER_ORDER = 3;
 export const MAX_ACTIVE = 10;
+/** Automatic weighings (customers' designs) waiting at once: the rest of MAX_ACTIVE stays free for people and the agent. */
+export const MAX_ACTIVE_WEIGHING = 2;
 /** The meta key of the "Agent may start prints" switch (set by a person). OFF or missing: the agent never slices. */
 export { AUTO_PRINT_META };
 
@@ -84,9 +89,10 @@ export interface SliceRequest {
   quality?: unknown;        // "standard" (default) | "fine" | "draft"
   infillPct?: unknown;      // 0..100, default the order's spec infill, else 20
   supports?: unknown;       // "auto" (default) | "off"
-  by: unknown;              // the person's name ("agent" when actor is "agent")
-  /** "person" (default; every route) or "agent" (the dispatcher, in code). */
-  actor?: "person" | "agent";
+  by: unknown;              // the person's name (ignored for "agent" and "system")
+  /** "person" (default; every route), "agent" (the dispatcher, in code) or "system" (weighing the customer's own design
+   *  for the price, src/lib/auto-weigh.ts, in code). */
+  actor?: "person" | "agent" | "system";
   /** The dispatcher's reasons, stored on the job and in the log. */
   why?: string[];
 }
@@ -95,12 +101,16 @@ export type SliceRequestResult =
   | { ok: true; job: SliceJob; warnings: string[]; reused?: "active" | "done" }
   | (Fail & { warnings?: string[] });
 
-/** The newest slice with this key that is still running, or finished with its sliced file still on the order. */
-function existing(key: string): { job: SliceJob; reused: "active" | "done" } | null {
+/**
+ * The newest slice with this key that is still running, or finished with its sliced file still on the order. The agent
+ * never reuses a finished automatic weighing: it may not print that file (src/lib/printer/autoprint.ts), so it slices again.
+ */
+function existing(key: string, actor: SliceJob["actor"] = "person"): { job: SliceJob; reused: "active" | "done" } | null {
   const same = store.listSliceJobs().filter((j) => j.key === key).reverse();
   const active = same.find(isActive);
   if (active) return { job: active, reused: "active" };
-  const done = same.find((j) => j.state === "done" && j.resultAttachmentId && store.getAttachment(j.resultAttachmentId));
+  const done = same.find((j) => j.state === "done" && j.resultAttachmentId && store.getAttachment(j.resultAttachmentId)
+    && !(actor === "agent" && j.actor === "system"));
   return done ? { job: done, reused: "done" } : null;
 }
 
@@ -111,9 +121,11 @@ function existing(key: string): { job: SliceJob; reused: "active" | "done" } | n
  * A person: a name, the order before evidence (CREATED, PLAN_CHOSEN, IN_PRODUCTION); unchecked colours or a quiet
  * printer are warnings. The agent ("agent", only from code): the "Agent may start prints" switch is on, the order is in
  * production (PLAN_CHOSEN or IN_PRODUCTION), the printer reports and a person confirmed its colours.
+ * Automatic weighing ("system", only from code): the order waits for its price (CREATED), the printer reports and the
+ * studio PC's slicer asked for work lately. It needs no switch and no colour check: it only weighs, nothing prints.
  */
 export function requestSlice(input: SliceRequest, now = Date.now()): SliceRequestResult {
-  const actor = input.actor === "agent" ? "agent" : "person";
+  const actor: SliceJob["actor"] = input.actor === "agent" || input.actor === "system" ? input.actor : "person";
   const by = typeof input.by === "string" ? input.by.trim() : "";
   if (actor === "person" && !isPersonName(by)) return fail(400, "A person's name is required");
   if (actor === "agent" && !autoPrintOn()) {
@@ -122,7 +134,7 @@ export function requestSlice(input: SliceRequest, now = Date.now()): SliceReques
   const orderId = typeof input.orderId === "string" ? input.orderId : "";
   const order = store.getOrder(orderId);
   if (!order) return fail(404, "Order not found");
-  const statuses = actor === "agent" ? ["PLAN_CHOSEN", "IN_PRODUCTION"] : ["CREATED", "PLAN_CHOSEN", "IN_PRODUCTION"];
+  const statuses = actor === "agent" ? ["PLAN_CHOSEN", "IN_PRODUCTION"] : actor === "system" ? ["CREATED"] : ["CREATED", "PLAN_CHOSEN", "IN_PRODUCTION"];
   if (!statuses.includes(order.status)) return fail(409, `Order is ${order.status}; nothing to slice now`);
   const a = typeof input.attachmentId === "string" ? store.getAttachment(input.attachmentId) : undefined;
   if (!a || a.orderId !== order.id) return fail(404, "File not found");
@@ -161,6 +173,11 @@ export function requestSlice(input: SliceRequest, now = Date.now()): SliceReques
     if (!checked) reasons.push(`Nobody confirmed the colours on ${printerName(printerId)}`);
     if (!online) reasons.push(`${printerName(printerId)} has not reported in the last 2 min`);
     if (reasons.length) return fail(409, "The agent cannot ask for this slice", reasons);
+  } else if (actor === "system") {
+    const reasons: string[] = [];
+    if (!online) reasons.push(`${printerName(printerId)} has not reported in the last 2 min`);
+    if (!slicerStatus(now).ready) reasons.push("The studio PC's slicer has not asked for work in the last 2 min");
+    if (reasons.length) return fail(409, "The design cannot be weighed automatically now", reasons);
   } else {
     if (!checked && !spool.bambu) warnings.push(`Nobody confirmed the colours on ${printerName(printerId)}: check the spool is really ${nameOf(color)}`);
     if (!online) warnings.push(`${printerName(printerId)} has not reported in the last 2 min: its spools may have changed`);
@@ -169,28 +186,34 @@ export function requestSlice(input: SliceRequest, now = Date.now()): SliceReques
   expireStaleSlices(now);
   const base = { attachmentId: a.id, mode: source.mode, material, color, quality, infillPct, supports };
   const key = sliceKey(base);
-  const before = existing(key);
+  const before = existing(key, actor);
   if (before) return { ok: true, job: before.job, warnings, reused: before.reused };
   const active = store.listSliceJobs().filter(isActive);
   if (active.filter((j) => j.orderId === order.id).length >= MAX_ACTIVE_PER_ORDER) return fail(429, `At most ${MAX_ACTIVE_PER_ORDER} slices can wait per order`);
+  if (actor === "system" && active.filter((j) => j.actor === "system").length >= MAX_ACTIVE_WEIGHING) {
+    return fail(429, "Too many designs are being weighed: a person enters the grams");
+  }
   if (active.length >= MAX_ACTIVE) return fail(429, `At most ${MAX_ACTIVE} slices can wait on the studio PC`);
 
   const at = iso(now);
   const job: SliceJob = {
     id: store.nextSliceJobId(), orderId: order.id, sourceName: a.filename, printerId, tray, ...base, key, state: "queued", actor,
-    by: actor === "agent" ? "agent" : by, ...(input.why?.length ? { why: input.why.map(String).slice(0, 10) } : {}), createdAt: at, updatedAt: at,
+    by: actor === "agent" ? "agent" : actor === "system" ? AUTO_WEIGH_BY : by, ...(input.why?.length ? { why: input.why.map(String).slice(0, 10) } : {}), createdAt: at, updatedAt: at,
   };
   try {
     store.insertSliceJob(job);
   } catch {
     // Another request queued the same slice between our check and this insert (another process): use that one.
-    const again = existing(key);
+    const again = existing(key, actor);
     if (again) return { ok: true, job: again.job, warnings, reused: again.reused };
     return fail(409, "The same slice is already waiting");
   }
   store.addLog({
     orderId: order.id, actor: logActor(job), tool: "slice_request", ok: true, at,
-    input: { attachmentId: a.id, file: a.filename, printerId, tray, material, color, quality, infillPct, supports, mode: source.mode, by: job.by, ...(job.why ? { why: job.why } : {}) },
+    input: {
+      attachmentId: a.id, file: a.filename, printerId, tray, material, color, quality, infillPct, supports, mode: source.mode, by: job.by,
+      ...(actor === "system" ? { actor } : {}), ...(job.why ? { why: job.why } : {}),
+    },
     output: { jobId: job.id, printer: printerName(printerId), warnings },
   });
   return { ok: true, job, warnings };
@@ -293,9 +316,10 @@ export function slicePrice(weightG: number | null, material: SliceJob["material"
 /**
  * The bridge uploads the sliced file. Checked again here (sliced, A1, 0.4 mm, textured plate, one filament of the asked
  * material and colour), stored as a design file on the order, and the slice is done. A bad file fails the slice.
+ * An automatic weighing (actor "system") also gives the order its grams per unit, in the same step (autoGrams).
  */
 export async function storeSliceResult(id: string, bytes: Uint8Array, meta: { sliceMs?: unknown } = {}, now = Date.now()):
-  Promise<{ ok: true; job: SliceJob; attachment: Attachment } | Fail> {
+  Promise<{ ok: true; job: SliceJob; attachment: Attachment; autoGrams?: AutoGrams } | Fail> {
   expireStaleSlices(now);
   const j = store.getSliceJob(id);
   if (!j) return fail(404, "Slice not found");
@@ -335,7 +359,38 @@ export async function storeSliceResult(id: string, bytes: Uint8Array, meta: { sl
     output: { attachmentId: up.attachment.id, file: up.attachment.filename, weightG: plate.weightG, minutes: plate.predictionSec ? Math.round(plate.predictionSec / 60) : null,
       priceIdr: result.priceIdr, material: j.material, color: j.color, quality: j.mode === "mesh" ? QUALITY[j.quality].label : "project settings" },
   });
-  return { ok: true, job, attachment: up.attachment };
+  return { ok: true, job, attachment: up.attachment, ...(job.actor === "system" ? { autoGrams: autoGramsFromSlice(job) } : {}) };
+}
+
+// ---------- automatic weighing: the customer's own design, for the price only ----------
+
+/** What an automatic weighing gave the order: its grams per unit, or why a person enters them. */
+export type AutoGrams = { ok: true; gramsPerUnit: number } | { ok: false; reason: string };
+
+/**
+ * A finished automatic weighing sets the order's grams per unit: the one plate's weight (one piece per file; the
+ * quantity multiplies it), single colour, by "slicer", only while the order waits for its price and has no grams yet
+ * (a person's grams stay). Never from a person's or the agent's slice: a person enters those grams. Logged.
+ */
+export function autoGramsFromSlice(job: SliceJob): AutoGrams {
+  if (job.actor !== "system" || job.state !== "done") return { ok: false, reason: "Not a finished automatic weighing" };
+  const info = job.resultAttachmentId ? store.getAttachment(job.resultAttachmentId)?.parsed3mf : undefined;
+  if (!info || info.plates.length !== 1) return { ok: false, reason: "The sliced design has more than one plate: a person enters the grams" };
+  const r = setSlicerGramsFromSlice(job.orderId, {
+    gramsPerUnit: Number(info.plates[0].weightG), source: `slicer (automatic), ${job.id}, ${job.sourceName}`, jobId: job.id,
+  });
+  return r.ok ? { ok: true, gramsPerUnit: r.order.slicerGrams!.gramsPerUnit } : { ok: false, reason: r.reasons?.[0] ?? r.error };
+}
+
+/**
+ * The order's automatic weighing, newest first: "weighing" (waiting for or on the studio PC), "done", "failed" (failed,
+ * cancelled, or gone stale before it was expired), or null when the order had none. Read-only.
+ */
+export function autoWeighState(orderId: string, now = Date.now()): { state: "weighing" | "done" | "failed"; job: SliceJob } | null {
+  const job = store.listSliceJobs({ orderId }).filter((j) => j.actor === "system").at(-1);
+  if (!job) return null;
+  if (job.state === "done") return { state: "done", job };
+  return { state: sliceHoldsSource(job, now) ? "weighing" : "failed", job };
 }
 
 /** The app refused the sliced file before reading it (larger than 50 MB): the slice fails at once, not after the expiry. */

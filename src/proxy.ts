@@ -12,6 +12,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { checkOperatorAuth, onRailway } from "@/lib/deploy";
 
 const OPEN = [
+  // (the customer API, /api/c, is also left out of the matcher below)
   /^\/c\/[^/]+$/, /^\/api\/c(\/.*)?$/, /^\/request\/[^/]+$/, /^\/api\/studio\/colors$/,
   // LAN bridge (bearer PRINTER_BRIDGE_TOKEN, checked by each route)
   /^\/api\/printers\/report$/, /^\/api\/printers\/queue(\/[^/]+)?$/, /^\/api\/print-jobs\/[^/]+\/file$/,
@@ -89,6 +90,9 @@ export function proxy(req: NextRequest) {
   });
 }
 
+// The customer API (/api/c, /api/c/<token>) is left out: it is open anyway (OPEN above), and with the proxy Next.js
+// buffers every request body in memory (up to proxyClientMaxBodySize, 60 MB) before the route runs. Without it the
+// route refuses a wrong invite or a too-big design before reading the body (src/lib/request-body.ts).
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/c/|api/c$).*)"],
 };

@@ -13,9 +13,11 @@ import budgetMaterial from "./budget-material";
 import slicing from "./slicing";
 import live from "./live";
 import landing from "./landing";
+import portal from "./portal";
+import upload from "./upload";
 
 // landing first: its few common words ("Printer", "Demo") give way to the translation the rest of the app already uses.
 export const ID: Readonly<Record<string, string>> = {
   ...landing, ...lib, ...shell, ...order, ...customer, ...machinesCapacity, ...financeQuality, ...chiefOps, ...demoTokenArc,
-  ...printing, ...customerColors, ...budgetMaterial, ...slicing, ...live,
+  ...printing, ...customerColors, ...budgetMaterial, ...slicing, ...live, ...portal, ...upload,
 };

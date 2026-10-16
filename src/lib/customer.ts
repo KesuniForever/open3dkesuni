@@ -15,6 +15,7 @@ import { quoteIdr } from "./owner-rules";
 import { wakeChief } from "./agent/chief";
 import { nameOf, parseColorChoices, studioPalette, type PaletteColor } from "./colors";
 import { MATERIALS, orderMaterial } from "./pricing";
+import { customerDesignStatus, type CustomerDesignStatus } from "./auto-weigh";
 import type { ActualReport, ChainTx, ColorChoice, Escrow, Material, Order, Review, Spec } from "./types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
@@ -58,6 +59,9 @@ export interface CustomerView {
   /** The material and colours the customer picked (English names: pages translate them). They may change them while
    *  Kesuni has not priced the order yet (canChange); the material is fixed once a quote exists (materialLocked). */
   choice: { material: Material | null; colors: ColorChoice[]; canChange: boolean; materialLocked: boolean };
+  /** The design the customer sent with the order, while Kesuni prepares the price: being weighed, its grams per piece,
+   *  or Kesuni checks it. Never the file itself, its id or its name. Null without a design of their own. */
+  design: CustomerDesignStatus | null;
 }
 
 export function customerView(order: Order, token: string): CustomerView {
@@ -107,6 +111,7 @@ export function customerView(order: Order, token: string): CustomerView {
     overTolerance: overTolerance(order) !== null,
     review: order.review ?? null,
     choice: choiceOf(order),
+    design: customerDesignStatus(order),
   };
 }
 

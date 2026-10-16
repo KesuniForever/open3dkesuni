@@ -22,6 +22,11 @@ export const DEFAULT_QUALITY: SliceQuality = "standard";
 export const DEFAULT_INFILL_PCT = 20;
 /** Who uploaded a sliced file the studio PC made (the attachment's uploadedBy). */
 export const SLICER_NAME = "Bambu Studio (slicer)";
+/**
+ * Who asked for an automatic slice that only weighs the customer's own design for the price (SliceJob.by, actor
+ * "system"). Starts with "Slicer (" so the public Live page never takes it for a person's name to hide (src/lib/live.ts).
+ */
+export const AUTO_WEIGH_BY = "Slicer (automatic weighing)";
 /** The slicer stops after this (the bridge kills it): a 49 MB model took 22 s on the studio PC. */
 export const SLICE_TIMEOUT_MS = 10 * 60_000;
 /** A slice the studio PC has not taken by then fails (src/lib/slicing.ts expireStaleSlices). */

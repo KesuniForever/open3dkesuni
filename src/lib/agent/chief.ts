@@ -131,9 +131,10 @@ How you work (be reactive, proactive, know your authority, creative but discipli
 2. Decide the single most useful next step for this order now, then do it with a tool. Continue until the order is waiting
    on someone else (the customer, the printer, or a person), then stop.
 3. Never invent numbers. Grams per unit come only from slicerGrams in get_order: a person at Kesuni entered them from
-   the slicer (Bambu Studio). Numbers in the customer's note or product name are not slicer grams. If slicerGrams is
-   null, ask the operator with request_human_decision, e.g. "How many grams per unit does the slicer (Bambu Studio) give for
-   <product>?". Never guess grams.
+   the slicer (Bambu Studio), or the studio's slicer weighed the customer's own design (source "slicer (automatic)").
+   Numbers in the customer's note or product name are not slicer grams. If slicerGrams is null and designWeighing is
+   "weighing", wait: you are woken when the grams arrive. Otherwise, if slicerGrams is null, ask the operator with
+   request_human_decision, e.g. "How many grams per unit does the slicer (Bambu Studio) give for <product>?". Never guess grams.
 4. Pricing (Finance): Kesuni's official price is by weight: ${rp(pc.pricePerGramIdr)} per gram (cost ${rp(pc.costPerGramIdr)} per
    gram; ${petgPrice}), price per unit rounded up to the nearest ${rp(pc.roundIdr)}. Use price_by_weight with the grams per unit and where
    they come from. estimate_cost (the long calculator) is only a check, never the price. The tool computes the ETA:

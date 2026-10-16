@@ -9,6 +9,8 @@ import type { AgentLogEntry, ChainTx, Escrow, Order, Printer } from "./types";
 import type { Traction } from "./traction";
 import { makeT } from "../i18n/core";
 import { ID } from "../i18n/id";
+import { AUTO_WEIGH_BY } from "./slice-rules";
+import { CUSTOMER_UPLOAD_BY } from "./file-rules";
 
 // The public page must never carry these, whatever the rows hold.
 const SECRETS = [
@@ -375,6 +377,13 @@ describe("safeLine", () => {
     const h: Hide = { customers: ["Claude test"], people, products: [] };
     expect(safeLine("Task for the operator: print finished on A1 Combo #1 for Khelda, a Bridge dry-run test by Claude.", h))
       .toBe("Task for the operator: print finished on A1 Combo #1 for a person, a Bridge dry-run test by Claude.");
+  });
+
+  it("the automatic weighing's 'by' and the customer's upload are not names: 'weighing' and 'automatic' stay in the feed", () => {
+    expect(peopleIn({ tasks: [], printers: [], jobs: [], extra: [AUTO_WEIGH_BY, CUSTOMER_UPLOAD_BY, "slicer"] })).toEqual([]);
+    const h: Hide = { customers: [], people: peopleIn({ tasks: [], printers: [], jobs: [], extra: [AUTO_WEIGH_BY, "Khelda"] }), products: [] };
+    expect(safeLine("The studio's slicer is weighing the customer's design (automatic); Khelda checks it.", h))
+      .toBe("The studio's slicer is weighing the customer's design (automatic); a person checks it.");
   });
 });
 

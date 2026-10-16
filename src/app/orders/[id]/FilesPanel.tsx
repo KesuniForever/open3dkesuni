@@ -7,7 +7,7 @@ import { ConfirmDialog } from "@/app/components/PrinterControls";
 import { useLocale, useT } from "@/i18n/client";
 import { dateLocale, type Locale, type T } from "@/i18n/core";
 import { tLib } from "@/lib/lib-text";
-import { qcPhotoLocked } from "@/lib/file-rules";
+import { CUSTOMER_UPLOAD_BY, qcPhotoLocked } from "@/lib/file-rules";
 
 const KINDS: { value: Attachment["kind"]; label: string; accept: string }[] = [
   { value: "design", label: "Design file (STL / 3MF / STEP / OBJ)", accept: ".stl,.3mf,.step,.stp,.obj" },
@@ -135,6 +135,7 @@ export default function FilesPanel({ order, attachments, onChange }: {
                 )}
                 <span style={{ flex: "1 1 auto", minWidth: 0, overflowWrap: "anywhere" }}>
                   <span className="badge">{t(KIND_LABEL[a.kind])}</span>{" "}
+                  {a.uploadedBy === CUSTOMER_UPLOAD_BY && <><span className="badge ok">{t("From the customer")}</span>{" "}</>}
                   <a href={`/api/files/${a.id}`} target={a.mime.startsWith("image/") ? "_blank" : undefined} rel="noreferrer">{a.filename}</a>{" "}
                   <span className="muted" style={{ fontSize: 13 }}>{size(a.size)} · {t("by {name}", { name: a.uploadedBy })} · {when(a.at, locale)}</span>
                 </span>

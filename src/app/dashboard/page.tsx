@@ -52,7 +52,10 @@ export default async function Home() {
           <p className="eyebrow">{t("Studio overview")}</p>
           <h1>{t("Every order, from quote to payout.")}</h1>
         </div>
-        <div className="page-actions"><NewOrderForm rate={idrPerUsdc()} /></div>
+        <div className="page-actions">
+          <Link className="btn-link ghost" href="/live"><span className="live-dot" />{t("Live studio")}</Link>
+          <NewOrderForm rate={idrPerUsdc()} />
+        </div>
       </header>
 
       <div className="stat-grid">

@@ -186,6 +186,33 @@ export function setSlicerGrams(
   return { ok: true, order: updated };
 }
 
+/**
+ * The studio's slicer weighed the customer's own design (an automatic weighing, src/lib/slicing.ts autoGramsFromSlice):
+ * the plate's weight becomes the grams per unit, single colour, by "slicer". Code only: no route, no agent tool and no
+ * customer text reaches it, and it never replaces grams that are already there (a person's grams stay).
+ */
+export function setSlicerGramsFromSlice(
+  orderId: string, input: { gramsPerUnit: number; source: string; jobId: string },
+): { ok: true; order: Order } | Fail {
+  const order = store.getOrder(orderId);
+  if (!order) return fail(404, "Order not found");
+  if (order.status !== "CREATED") return fail(409, `Order is ${order.status}; quotes are closed`);
+  if (order.slicerGrams) return fail(409, "The order already has grams per unit: they stay");
+  const r = priceByWeight(Number(input.gramsPerUnit), order.quantity);
+  if (!r.ok) return fail(400, "Invalid weight", r.reasons);
+  const source = String(input.source ?? "").trim().slice(0, 300);
+  const slicerGrams = { gramsPerUnit: r.price.gramsPerUnit, source, by: "slicer", at: new Date().toISOString(), colorMode: "single" as const };
+  const updated = { ...order, slicerGrams };
+  store.saveOrder(updated);
+  // Not the Chief's step (actor "agent" counts as one), and asked by the customer's upload: logged like a person's grams.
+  store.addLog({
+    orderId, actor: "human", tool: "slicer_grams", ok: true, at: slicerGrams.at,
+    input: { gramsPerUnit: slicerGrams.gramsPerUnit, source, colorMode: "single", automatic: true, jobId: input.jobId },
+    output: { by: "slicer" },
+  });
+  return { ok: true, order: updated };
+}
+
 /** The by-weight price behind the chosen quote, if Kesuni priced it that way. */
 export function gramPricingForChosen(order: Order): GramPricing | null {
   return order.gramPricing && order.gramPricing.quoteId === order.chosenQuoteId ? order.gramPricing : null;

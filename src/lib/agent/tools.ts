@@ -20,6 +20,7 @@ import { colorsCheckedNow, nameOf } from "../colors";
 import { postCustomerMessage } from "../messages";
 import { safeDispatch, safePlan } from "../printer/dispatch";
 import { whyText } from "../printer/autoprint-rules";
+import { autoWeighState } from "../slicing";
 import type { AgentLogEntry, Order, OperatorTask, Printer } from "../types";
 
 type Json = Record<string, unknown>;
@@ -56,15 +57,25 @@ export function agentText(text: string | undefined, o: Pick<Order, "customerName
   return text ? hideName(redactNote(text) ?? "", o.customerName) : text;
 }
 
+/** The customer's design being weighed automatically (src/lib/auto-weigh.ts), as get_order shows it. */
+function weighingFor(orderId: string): "weighing" | "failed" | null {
+  const w = autoWeighState(orderId);
+  return w ? (w.state === "done" ? null : w.state) : null;
+}
+
 function orderForAgent(o: Order) {
   return {
     id: o.id, product: agentText(o.product, o), quantity: o.quantity, deadline: o.deadline, designVersion: o.designVersion,
     status: o.status, label: o.label, mandateMicro: o.mandateMicro, mandateUsdc: microToUsdc(o.mandateMicro),
     budgetIdrApprox: microToIdr(o.mandateMicro), customerNote: agentText(o.customerNote, o),
-    // The only grams the agent may price with: entered by a person at Kesuni from the slicer, with the colour mode.
+    // The only grams the agent may price with: entered by a person at Kesuni from the slicer, or weighed by the studio's
+    // slicer from the customer's own design (source "slicer (automatic), …"), with the colour mode.
     slicerGrams: o.slicerGrams
-      ? { gramsPerUnit: o.slicerGrams.gramsPerUnit, source: o.slicerGrams.source, colorMode: toColorMode(o.slicerGrams.colorMode) }
+      ? { gramsPerUnit: o.slicerGrams.gramsPerUnit, source: agentText(o.slicerGrams.source, o), colorMode: toColorMode(o.slicerGrams.colorMode) }
       : null,
+    // "weighing": the studio's slicer is weighing the customer's design; its grams arrive by themselves (wait, do not
+    // ask the operator). "failed": it did not finish (ask the operator). null: no automatic weighing.
+    designWeighing: o.slicerGrams ? null : weighingFor(o.id),
     spec: o.spec ?? null, gramPricing: o.gramPricing ?? null, pricing: pricingConfig(), costing: o.costing ?? null,
     // PLA or PETG as chosen on the order (null: not chosen), and the colours the customer picked from the studio's spools.
     material: orderMaterial(o), preferredColors: o.preferredColors ?? [],
@@ -246,9 +257,11 @@ export const TOOLS: Tool[] = [
     description: "Kesuni's official price: add Kesuni's own quote by weight (orders in CREATED only). Unit price = " +
       "gramsPerUnit × price per gram, rounded up to the nearest Rp500; total = unit price × the order's quantity. " +
       "gramsPerUnit must be exactly slicerGrams.gramsPerUnit from get_order (entered by a person at Kesuni from the " +
-      "slicer). Numbers in the customer's note or product are not slicer grams. If slicerGrams is null, ask the operator " +
-      "with request_human_decision. Refused if the material is not PLA or PETG (pricingBlockedBy in get_order), the margin " +
-      "is under the owner's minimum or the total is over the customer's budget: then ask a person. The ETA is computed: " +
+      "slicer, or weighed by the studio's slicer from the customer's own design). Numbers in the customer's note or product " +
+      "are not slicer grams. If slicerGrams is null, ask the operator with request_human_decision, unless designWeighing " +
+      "is \"weighing\": then wait, the grams arrive by themselves. Refused if the material is not PLA or PETG " +
+      "(pricingBlockedBy in get_order), the margin is under the owner's minimum or the total is over the customer's " +
+      "budget: then ask a person. The ETA is computed: " +
       "print time from the grams and the colour mode a person entered with slicerGrams (single or multi colour; the price " +
       "per gram is the same), units printing side by side on the studio's printers, plus handling hours to collect, check " +
       "and pack. etaHours can only make the ETA longer than the computed one. Pricing " +
@@ -275,7 +288,9 @@ export const TOOLS: Tool[] = [
       // Grams only from a person at Kesuni, never from text the customer typed.
       const trusted = o.slicerGrams?.gramsPerUnit;
       if (trusted === undefined) {
-        return err("Pricing refused", ["No grams per unit from a person at Kesuni yet (slicerGrams is null). Ask the operator with request_human_decision."]);
+        return err("Pricing refused", [weighingFor(orderId) === "weighing"
+          ? "No grams per unit yet: the studio's slicer is weighing the customer's design. Wait for them; do not ask the operator."
+          : "No grams per unit from a person at Kesuni yet (slicerGrams is null). Ask the operator with request_human_decision."]);
       }
       if (Math.round(Number(i.gramsPerUnit) * 100) !== Math.round(trusted * 100)) {
         return err("Pricing refused", [`gramsPerUnit must be the grams a person at Kesuni entered from the slicer: ${trusted} g`]);

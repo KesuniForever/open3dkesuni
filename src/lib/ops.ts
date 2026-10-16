@@ -130,7 +130,16 @@ export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
         : { title: t("Pricing refused"), line: reasons };
     case "price_from_costing":
       return { title: t("Priced with the cost calculator"), line: o.revenueIdr !== undefined ? t("Total {price}", { price: rp(Number(o.revenueIdr)) }) : undefined };
-    case "slicer_grams": return { title: t("Slicer grams entered"), line: t("{g} g per unit", { g: str(i.gramsPerUnit) }) };
+    case "slicer_grams":
+      return { title: t(i.automatic ? "Grams from the automatic weighing" : "Slicer grams entered"), line: t("{g} g per unit", { g: str(i.gramsPerUnit) }) };
+    // The customer's own design (src/lib/auto-weigh.ts): uploaded with the order, then weighed automatically.
+    case "customer_design":
+      return e.ok ? { title: t("Customer sent their design"), line: str(i.file) || undefined } : { title: t("Customer's design not stored"), line: reasons };
+    case "auto_weigh": return { title: t("Automatic weighing could not start"), line: reasons };
+    case "auto_weigh_result":
+      return e.ok
+        ? { title: t("Design weighed automatically"), line: t("{g} g per unit", { g: str(o.gramsPerUnit) }) }
+        : { title: t("Automatic weighing: a person enters the grams"), line: oneLine(str(o.error)) || undefined };
     case "owner_approval": {
       const d = detail(str(i.note));
       return { title: t("Owner approved an exception"), ...d, line: d.line || undefined };
@@ -175,7 +184,8 @@ export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
     // Slicing on the studio PC (src/lib/slicing.ts): asked by a person, or by the agent through the dispatcher.
     case "slice_request":
       return {
-        title: e.actor === "agent" ? t("Agent asked for a slice") : t("Slice asked by {name}", { name: str(i.by) }),
+        title: e.actor === "agent" ? t("Agent asked for a slice") : i.actor === "system" ? t("Weighing the customer's design")
+          : t("Slice asked by {name}", { name: str(i.by) }),
         line: [str(i.file), [str(i.material), str(i.color) ? t(nameOf(str(i.color))) : ""].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || undefined,
       };
     case "slice_result":

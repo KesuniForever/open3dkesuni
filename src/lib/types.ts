@@ -64,7 +64,8 @@ export interface Order {
   /** The owner allowed an exception to their rules for one quote at one price (e.g. an order under the minimum
    *  value). A new or re-priced quote needs a new approval. Never set by the agent. */
   ownerApproval?: { quoteId: string; priceMicro: number; by: string; note: string; at: string };
-  /** Grams per unit from the slicer, entered by a person at Kesuni. The only grams the agent may price with.
+  /** Grams per unit from the slicer, entered by a person at Kesuni, or by "slicer" when the studio's slicer weighed the
+   *  customer's own design (src/lib/auto-weigh.ts). The only grams the agent may price with.
    *  colorMode sets the print time; missing on rows saved before it existed, which means single colour. */
   slicerGrams?: { gramsPerUnit: number; source: string; by: string; at: string; colorMode?: ColorMode };
   /** The customer's budget in rupiah exactly as typed (or worked out from the USDC typed), with the rate used for
@@ -456,8 +457,9 @@ export interface SliceJob {
   /** Same source and settings = same key (src/lib/slice-rules.ts sliceKey): one active slice per key. */
   key: string;
   state: SliceJobState;
-  actor: "person" | "agent";
-  by: string;                // the person, or "agent"
+  /** "system": an automatic slice that only weighs the customer's own design for the price (src/lib/auto-weigh.ts). */
+  actor: "person" | "agent" | "system";
+  by: string;                // the person, "agent", or AUTO_WEIGH_BY
   /** The dispatcher's reasons, when the agent asked. */
   why?: string[];
   createdAt: string;

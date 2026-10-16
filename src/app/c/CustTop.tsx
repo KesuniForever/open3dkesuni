@@ -11,7 +11,7 @@ export function CustTop({ children, action }: { children?: ReactNode; action?: R
   return (
     <header className="cust-top">
       <span className="brand"><BrandMark size={30} />Open3DKesuni</span>
-      <div className="cust-top-right">
+      <div className={`cust-top-right${action ? " has-action" : ""}`}>
         {children != null && children !== false && <span className="muted">{children}</span>}
         {action}
         <LangSwitch />

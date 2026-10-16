@@ -9,6 +9,8 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // Builds made with KESUNI_DIST_DIR (next.config.ts): the studio PC serves one while it builds the next.
+    ".next-*/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

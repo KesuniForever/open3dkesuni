@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { customerDecide, customerPay, customerSetColors, customerView, orderForToken, refreshPayment } from "@/lib/customer";
-import { fail, failWith, readJson, str } from "@/lib/http";
+import { fail, failWith, str } from "@/lib/http";
+import { readJsonCapped } from "@/lib/request-body";
 import { customerAgree } from "@/lib/agreement";
 import { customerReview } from "@/lib/reputation";
 
@@ -23,7 +24,9 @@ export async function POST(req: Request, ctx: Ctx) {
   const { token } = await ctx.params;
   const order = orderForToken(token);
   if (!order) return fail(404, "Order not found");
-  const b = await readJson(req);
+  // At most 64 KB: this route is outside the proxy, so nothing else limits the body (src/lib/request-body.ts).
+  const b = await readJsonCapped(req, 64 * 1024);
+  if (b === "too-large") return fail(413, "The request is too long");
   const action = str(b?.action);
   if (action === "agree" || (action === "pay" && b?.agree === true)) {
     const a = customerAgree(order.id, str(b?.by));

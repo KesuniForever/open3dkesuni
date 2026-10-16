@@ -46,6 +46,7 @@ export default function WeightPricePanel({ order, quotes, pricing, budgetIdr, mi
       )}
       {order.slicerGrams && (
         <p className="muted" style={{ fontSize: 13 }}>
+          {order.slicerGrams.by === "slicer" && <><span className="badge ok">{t("Automatic slice")}</span>{" "}</>}
           {rich(t("Grams for the Chief: {grams} per unit, {mode} ({source}), entered by {by}."), {
             grams: <b>{order.slicerGrams.gramsPerUnit} g</b>, mode: t(COLOR_MODE_LABEL[toColorMode(order.slicerGrams.colorMode)]).toLowerCase(),
             source: order.slicerGrams.source, by: order.slicerGrams.by,

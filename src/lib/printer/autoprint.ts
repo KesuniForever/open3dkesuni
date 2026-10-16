@@ -15,8 +15,8 @@
 //   print did not start" task;
 // - file: only a .gcode.3mf the studio PC sliced from the order's newest design file, an STL or OBJ, with the studio's
 //   presets (a done SliceJob links it): never a file someone uploaded (its G-code was never reviewed) and never a 3MF
-//   project sliced with its own settings. For the Bambu Lab A1, 0.4 mm nozzle, textured PEI plate, one plate, in the
-//   order's material and colours;
+//   project sliced with its own settings, and never an automatic weighing's slice (it only priced the design). For the
+//   Bambu Lab A1, 0.4 mm nozzle, textured PEI plate, one plate, in the order's material and colours;
 // - pairing: every filament has a spool of the same material within the colour limit (matchJob) of the file AND of the
 //   order's colour, and canStartPrint with actor "agent" gives no reason and no warning. At "sent" (jobs.ts) the spools
 //   must still be the ones the print was queued with (agentSpoolProblem).
@@ -163,6 +163,8 @@ export function agentFileProblem(o: Order, a: Attachment): Why | null {
   // (a person prints it, and sees the warning).
   const slice = store.listSliceJobs({ orderId: o.id }).find((j) => j.resultAttachmentId === a.id && j.state === "done");
   if (!slice || slice.mode !== "mesh") return { key: "The agent prints only files the studio PC sliced from an STL or OBJ: a person prints this one" };
+  // An automatic weighing only priced the customer's design (any spool of the material, colours not confirmed).
+  if (slice.actor === "system") return { key: "Sliced only to weigh the design: the agent slices it again to print" };
   const src = store.getAttachment(slice.attachmentId);
   if (!src || src.orderId !== o.id || !sliceSourceCheck(src).ok) return { key: "The design file this was sliced from is gone" };
   if (newestDesign(o.id)?.id !== src.id) return { key: "A newer design file is on the order: this sliced file is out of date" };

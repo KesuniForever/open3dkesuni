@@ -6,6 +6,8 @@
   .cust-top-right { gap: 8px; }
   .cust-top-right > .muted { font-size: 12px; line-height: 1.35; }
 }
+/* A phone has no room for the label next to a link (the Live studio's "Dashboard"): the page itself names it. */
+@media (max-width: 480px) { .cust-top-right.has-action > .muted { display: none; } }
 
 /* Material and colour picker (ColorPicker.tsx): the spools loaded in the studio right now. */
 .cc { display: grid; gap: 14px; min-width: 0; }

@@ -18,6 +18,7 @@ import { openArcMismatchTask, verifyBatch } from "../arc-verify";
 import { microToUsdc } from "../policy";
 import { planDispatch, safeDispatch } from "../printer/dispatch";
 import { whyText } from "../printer/autoprint-rules";
+import { autoWeighState } from "../slicing";
 import type { ChainTx, OperatorTask, Order } from "../types";
 
 export type FindingKind =
@@ -92,11 +93,18 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
     if (o.status === "REJECTED" || o.status === "PAID") continue;
 
     if (o.status === "CREATED" && !hasOpen(o.id, "needs_info")) {
-      findings.push(store.listQuotes(o.id).length === 0
-        ? { key: `needs_price:${o.id}`, orderId: o.id, kind: "needs_price", wake: true,
-            text: `${label} has no price yet. Price it by weight, or ask for the grams per unit from the slicer.` }
-        : { key: `needs_plan:${o.id}`, orderId: o.id, kind: "needs_plan", wake: true,
-            text: `${label} has quotes but no plan yet. Choose a plan or ask the owner for approval.` });
+      // The customer's own design is being weighed automatically: its grams wake the Chief (src/lib/auto-weigh.ts).
+      const weigh = !o.slicerGrams ? autoWeighState(o.id, t) : null;
+      findings.push(store.listQuotes(o.id).length > 0
+        ? { key: `needs_plan:${o.id}`, orderId: o.id, kind: "needs_plan", wake: true,
+            text: `${label} has quotes but no plan yet. Choose a plan or ask the owner for approval.` }
+        : weigh?.state === "weighing"
+          ? { key: `weighing:${o.id}`, orderId: o.id, kind: "needs_price", wake: false,
+              text: `${label}: the studio's slicer is weighing the customer's design; the price follows when the grams arrive.` }
+          : { key: `needs_price:${o.id}`, orderId: o.id, kind: "needs_price", wake: true,
+              text: weigh && weigh.state !== "done"
+                ? `${label} has no price yet: the automatic weighing of the customer's design did not finish. Ask the operator for the grams per unit from the slicer.`
+                : `${label} has no price yet. Price it by weight, or ask for the grams per unit from the slicer.` });
     }
 
     const onPrinter = printers.some((p) => p.currentOrderId === o.id || p.bedOccupiedBy === o.id);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { proxy } from "./proxy";
+import { config, proxy } from "./proxy";
 
 const req = (path: string, headers: Record<string, string> = {}, method = "GET") =>
   new NextRequest(`http://localhost:3000${path}`, { method, headers: { host: "localhost:3000", ...headers } });
@@ -246,6 +246,18 @@ describe("proxy: landing page", () => {
     for (const p of ["/", "/welcome"]) {
       expect(proxy(post(p, tunnel)).status, p).toBe(401);
       expect(proxy(req(p, tunnel, "PUT")).status, p).toBe(401);
+    }
+  });
+});
+
+describe("proxy: which paths it runs on", () => {
+  // The matcher is a path-to-regexp pattern that reads the same as a plain regular expression (Next.js compiles it to
+  // this plus optional /_next/data and .rsc parts).
+  const runs = (path: string) => new RegExp(`^${config.matcher[0]}$`).test(path);
+  it("leaves the customer API out, so its bodies are not buffered before the route checks them; runs on everything else", () => {
+    for (const p of ["/api/c", "/api/c/abcdefabcdefabcdefabcdef", "/api/c/abc/files/f1"]) expect(runs(p), p).toBe(false);
+    for (const p of ["/", "/live", "/c/abcdefabcdefabcdefabcdef", "/request/code", "/api/costing", "/api/chief", "/api/cx", "/api/orders", "/api/print-jobs"]) {
+      expect(runs(p), p).toBe(true);
     }
   });
 });
