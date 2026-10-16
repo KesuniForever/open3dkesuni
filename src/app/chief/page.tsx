@@ -1,6 +1,7 @@
 import Link from "next/link";
 import PageHead from "../components/PageHead";
 import AgentCard from "../components/AgentCard";
+import AutoPrintCard, { type AutoPrintFeedRow } from "../components/AutoPrintCard";
 import SkillChip from "../components/SkillChip";
 import Callout from "../components/Callout";
 import Icon, { type IconName } from "../components/Icon";
@@ -11,7 +12,9 @@ import { agentSettings } from "@/lib/agent/chief";
 import { chiefAuthority } from "@/lib/agent/authority";
 import { SKILLS } from "@/lib/agent/skills";
 import { listOrders } from "@/lib/store";
-import { ago, allLog, chiefFeed, wib, type FeedItem } from "@/lib/ops";
+import { ago, allLog, chiefFeed, describeEntry, wib, type FeedItem } from "@/lib/ops";
+import { autoPrintFeed } from "@/lib/printer/dispatch";
+import { autoPrintSetting } from "@/lib/printer/autoprint";
 import { getLocale, getT } from "@/i18n/server";
 import type { Locale, T } from "@/i18n/core";
 import "./chief.css";
@@ -24,12 +27,14 @@ const ALONE: Record<string, string> = {
   price_by_weight: "Price by weight", choose_plan: "Choose the production plan", choose_printer: "Choose a ready printer",
   create_operator_task: "Ask the operator for tasks", message_customer: "Message the customer",
   request_human_decision: "Ask a person when unsure", qc_task: "Ask for collect and QC", heartbeat: "Run heartbeat checks",
+  request_dispatch: "Ask the dispatcher to look", auto_print: "Prints after a person empties the bed",
   arc_verify: "Check transfers on Arc", release: "Release escrow after acceptance", refund: "Refund after rejection",
 };
 const PERSON: Record<string, string> = {
   qc: "Does not approve QC or reprints", printability: "Does not judge printability", material: "No materials beyond PLA and PETG",
   machines: "No machines Kesuni does not run", price_change: "Does not change prices or rules", money: "Does not send funds",
   unknown: "Does not act on missing data", disputes: "Does not settle disputes", printers: "Does not run the printers",
+  auto_switch: "Does not turn agent prints on",
 };
 
 const FEED_ICON: Record<string, { icon: IconName; tone: string }> = {
@@ -54,11 +59,11 @@ function FeedRow({ f, now, t, locale }: { f: FeedItem; now: Date; t: T; locale: 
           <time className="chief-when" dateTime={f.at} title={`${wib(f.at, locale)} WIB`}>{ago(f.at, now, t)}</time>
         </div>
         <div className="chief-meta">
-          {f.order.tag === "removed"
+          {f.order.tag === "studio" ? <Link href="/machines">{t("Studio")}</Link> : f.order.tag === "removed"
             ? <span>{f.order.id || t("No order")}</span>
             : <Link href={`/orders/${f.order.id}`}>{f.order.id}</Link>}
           {f.order.product && <span className="chief-product">{f.order.product}</span>}
-          {f.order.tag !== "real" && <span className={`badge ${f.order.tag === "simulated" ? "simulated" : ""}`}>{t(f.order.tag === "removed" ? "order removed" : "simulated")}</span>}
+          {f.order.tag !== "real" && f.order.tag !== "studio" && <span className={`badge ${f.order.tag === "simulated" ? "simulated" : ""}`}>{t(f.order.tag === "removed" ? "order removed" : "simulated")}</span>}
           {f.model && <span className="mono">{f.model}{f.turns ? ` · ${t(f.turns === 1 ? "{n} turn" : "{n} turns", { n: f.turns })}` : ""}</span>}
         </div>
         {f.questions[0] && (
@@ -98,6 +103,12 @@ export default async function ChiefPage() {
   const feed = chiefFeed(allLog(), listOrders(), 10, t);
   const payment = a.limitedByCode.find((l) => l.id === "no_payment_tool");
   const limits = a.limitedByCode.filter((l) => l.id !== "no_payment_tool");
+  const agentPrints = autoPrintSetting();
+  const orderIds = new Set(listOrders().map((o) => o.id));
+  const autoFeed: AutoPrintFeedRow[] = autoPrintFeed(5).map((e) => {
+    const d = describeEntry(e, t);
+    return { id: e.id, title: d.title, line: d.line, when: wib(e.at, locale), orderId: e.orderId, isOrder: orderIds.has(e.orderId), ok: e.ok };
+  });
 
   return (
     <main className="wrap">
@@ -134,6 +145,9 @@ export default async function ChiefPage() {
       <div className="chief-layout">
         <div className="chief-col">
           <AgentCard settings={agentSettings()} />
+          {/* Agent prints: high on the page, also on a phone (the right column comes after the feed there). */}
+          <AutoPrintCard on={agentPrints.on} by={agentPrints.by ?? null} when={agentPrints.at ? wib(agentPrints.at, locale) : null}
+            locked={Boolean(agentPrints.locked)} feed={autoFeed} />
 
           <section className="card">
             <h2>

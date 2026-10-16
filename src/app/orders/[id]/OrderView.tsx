@@ -9,6 +9,7 @@ import type {
 import EscrowPanel from "./EscrowPanel";
 import PrinterPanel from "./PrinterPanel";
 import PrintPanel from "./PrintPanel";
+import type { OrderAutoPrintView } from "./AgentPrintRow";
 import FilesPanel from "./FilesPanel";
 import AgreementPanel from "./AgreementPanel";
 import ActualPanel from "./ActualPanel";
@@ -30,6 +31,7 @@ import { useIssueTexts } from "@/app/machines/use-issue-texts";
 import { budgetText } from "@/lib/budget";
 import { nameOf } from "@/lib/colors";
 import ColorSwatch from "@/app/components/ColorSwatch";
+import { ConfirmDialog } from "@/app/components/PrinterControls";
 
 interface OrderData {
   order: Order;
@@ -53,6 +55,7 @@ interface OrderData {
   printers: Printer[];
   attachments: Attachment[];
   messages: CustomerMessage[];
+  autoPrint?: OrderAutoPrintView | null;
 }
 
 type Notice = { kind: "ok" | "bad"; text: string; reasons?: string[] } | null;
@@ -76,6 +79,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const [resetOpen, setResetOpen] = useState(false);
 
   const [version, setVersion] = useState(0);
   const load = useCallback(() => setVersion((v) => v + 1), []);
@@ -106,7 +110,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
     }
   }
 
-  if (missing) return <main className="wrap"><p>{t("Order not found.")} <Link href="/">{t("Back")}</Link></p></main>;
+  if (missing) return <main className="wrap"><p>{t("Order not found.")} <Link href="/dashboard">{t("Back")}</Link></p></main>;
   if (!data) return <main className="wrap"><p className="muted">{t("Loading…")}</p></main>;
 
   const { order, quotes, vendors, evidence, acceptance, agentLog, paymentIntents, escrow } = data;
@@ -131,13 +135,23 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
           <span className={`badge ${order.label}`}>{t("{label} data", { label: t(order.label) })}</span>
           <button
             disabled={busy}
-            onClick={async () => { await post("/api/reset"); setNotice(null); load(); }}
+            onClick={() => setResetOpen(true)}
             title={t("Restore the simulated demo order. Real orders are not touched.")}
           >
             {t("Reset simulated demo")}
           </button>
         </div>
       </header>
+      {/* One click used to wipe every simulated order (with its Arc transfer records), so it asks first. */}
+      <ConfirmDialog open={resetOpen} danger busy={busy} title={t("Reset the simulated demo?")} confirmLabel={t("Delete and reset")}
+        onConfirm={async () => {
+          setBusy(true);
+          try { await post("/api/reset"); setNotice(null); } finally { setBusy(false); setResetOpen(false); load(); }
+        }}
+        onClose={() => setResetOpen(false)}>
+        <p style={{ margin: 0 }}>{t("This deletes every simulated order with its escrow, Arc transfer records, print jobs and files, then restores the demo order. Real orders are not touched.")}</p>
+        <p style={{ margin: 0 }}><b>{t("It cannot be undone.")}</b></p>
+      </ConfirmDialog>
       <ol className="timeline" aria-label={t("Order progress")}>
         {FLOW.map((s, i) => (
           <li key={s} className={i < stepIndex ? "done" : i === stepIndex ? "now" : ""}>{t(s.replaceAll("_", " ").toLowerCase())}</li>
@@ -233,7 +247,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
           </section>
 
           <FilesPanel order={order} attachments={data.attachments} onChange={load} />
-          <PrintPanel order={order} attachments={data.attachments} printers={data.printers} paid={escrow?.state === "FUNDED"} issueTexts={issueTexts}
+          <PrintPanel order={order} attachments={data.attachments} printers={data.printers} paid={escrow?.state === "FUNDED"} issueTexts={issueTexts} autoPrint={data.autoPrint}
             busy={busy} act={act} onChange={load} />
           <PrinterPanel order={order} printers={data.printers} tasks={data.tasks} busy={busy} act={act} onChange={load} issueTexts={issueTexts} />
 
@@ -441,6 +455,7 @@ function summarize(e: AgentLogEntry, t: T): string {
   if (e.tool === "start_print") return t("{name} started plate {plate} on {printer}", { name: String(input.by ?? ""), plate: String(input.plate ?? ""), printer: String(out?.printer ?? input.printerId ?? "") });
   if (e.tool === "printer_command") return `${String(input.kind ?? "")} · ${t("by {name}", { name: String(input.by ?? "") })}`;
   if (e.tool === "print_job") return t("sent to {printer}", { printer: String(out?.printer ?? "") });
+  if (e.tool === "remove_file") return t("{name} removed {file}", { name: String(input.by ?? ""), file: String(input.filename ?? "") });
   if (e.tool === "message_customer") return t("wrote to the customer: “{text}”", { text: String(input.text ?? "") });
   if (e.tool === "customer_decision") return (input.accepted ? t("customer accepted") : t("customer rejected"));
   if (e.tool === "release_escrow" || e.tool === "refund_escrow") return t("sent on the agent's own, after the policy check");

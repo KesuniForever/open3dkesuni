@@ -1,14 +1,17 @@
 // Printer actions: link printers to orders, take reports from the LAN bridge, and let the agent
 // turn printer events into evidence and operator tasks, pick a ready printer, and suggest a
 // reroute when one fails. Nothing here moves money: "print finished" only asks a person to
-// collect and QC the part. Nothing here controls a printer either (that is src/lib/printer/jobs.ts, people only).
+// collect and QC the part. Nothing here controls a printer either (that is src/lib/printer/jobs.ts: people, and the
+// agent dispatcher only after a person's "Bed is empty", which clearBed records here).
 import * as store from "../store";
 import { addEvidence, type Fail } from "../actions";
-import { activeIssues, errorCodeText, HMS_SEVERITY, STAGE_PAUSED, type PrinterEvent, type PrinterIssue, type PrinterSnapshot } from "./bambu";
+import {
+  activeIssues, detectEvents, errorCodeText, HMS_SEVERITY, STAGE_PAUSED, type PrinterEvent, type PrinterIssue, type PrinterSnapshot,
+} from "./bambu";
 import { issueText } from "./errors";
-import { PREPARE_WAIT_MS } from "./control";
+import { isPersonName, ONLINE_MS, PREPARE_WAIT_MS } from "./control";
 import { amsKey } from "../colors";
-import type { OperatorTask, Printer, PrintJob, PrintJobState } from "../types";
+import type { BedCheck, OperatorTask, Printer, PrintJob, PrintJobState } from "../types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
 const PRINTING_STATUSES = ["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"];
@@ -87,14 +90,35 @@ export function confirmColors(printerId: string, by: string): { ok: true; printe
   return { ok: true, printer };
 }
 
-/** A person confirms the bed is empty (part collected or failed print removed). */
-export function clearBed(printerId: string, by: string): { ok: true; printer: Printer } | Fail {
+/**
+ * A person confirms the bed is empty (part collected or failed print removed). Only a person's name counts. With grant
+ * (the default) it records the confirmation (Printer.bedCheck): the agent may then start ONE print on this printer, when
+ * agent prints are on (src/lib/printer/dispatch.ts). A person's own print start clears the bed without a grant (it uses
+ * the bed itself). Logged, unless quiet.
+ */
+export function clearBed(
+  printerId: string, by: string, opts: { via?: BedCheck["via"]; grant?: boolean; quiet?: boolean } = {}, now = Date.now(),
+): { ok: true; printer: Printer; bedCheck?: BedCheck } | Fail {
   const p = store.getPrinter(printerId);
   if (!p) return fail(404, "Printer not found");
-  if (!by.trim()) return fail(400, "Who cleared the bed is required");
-  const printer = { ...p, bedOccupiedBy: undefined };
+  if (!isPersonName(by)) return fail(400, "A person's name is required");
+  const name = by.trim();
+  const at = new Date(now).toISOString();
+  // A print that used the last confirmation is still on its way to the printer: that confirmation stays, so the
+  // print is not refused at the last gate (jobs.ts updateQueueItem "sent") and no second print gets a confirmation.
+  const used = p.bedCheck?.usedBy;
+  const onItsWay = Boolean(used && store.listPrintJobs({ printerId }).some((j) => j.id === used && ["queued", "uploading", "sent"].includes(j.state)));
+  const grant = opts.grant !== false && !onItsWay;
+  const bedCheck: BedCheck | undefined = grant ? { id: `BC-${printerId}-${now.toString(36)}`, by: name, at, via: opts.via ?? "button" } : undefined;
+  const printer: Printer = { ...p, bedOccupiedBy: undefined, ...(bedCheck ? { bedCheck } : {}) };
   store.savePrinter(printer);
-  return { ok: true, printer };
+  if (!opts.quiet) {
+    // Filed under the order whose part was on the bed, else under the printer.
+    const orderId = p.bedOccupiedBy && store.getOrder(p.bedOccupiedBy) ? p.bedOccupiedBy : printerRef(printerId);
+    store.addLog({ orderId, actor: "human", tool: "clear_bed", input: { printerId, by: name, via: opts.via ?? "button" }, ok: true,
+      output: { printer: printer.name, held: p.bedOccupiedBy ?? null, bedCheckId: bedCheck?.id ?? null }, at });
+  }
+  return { ok: true, printer, ...(bedCheck ? { bedCheck } : {}) };
 }
 
 /** The agent picks a ready printer for the order and links it, or explains why none is ready. */
@@ -127,10 +151,12 @@ export function printFinished(orderId: string): boolean {
   return last?.kind === "collect_and_qc";
 }
 
-export function createTask(orderId: string, kind: OperatorTask["kind"], text: string, printerId?: string, errorCode?: string): OperatorTask {
+export function createTask(
+  orderId: string, kind: OperatorTask["kind"], text: string, printerId?: string, errorCode?: string, key?: string,
+): OperatorTask {
   const task: OperatorTask = {
     id: store.nextTaskId(), orderId, kind, printerId, text, status: "open", createdBy: "agent", at: new Date().toISOString(),
-    ...(errorCode ? { errorCode } : {}),
+    ...(errorCode ? { errorCode } : {}), ...(key ? { key } : {}),
   };
   store.saveTask(task);
   store.addLog({ orderId, actor: "agent", tool: "create_operator_task", input: { kind, printerId, text }, ok: true, output: { taskId: task.id }, at: task.at });
@@ -302,20 +328,52 @@ function react(printer: Printer, orderId: string, e: PrinterEvent): void {
   }
 }
 
-/** Called by the LAN bridge with the latest snapshot and the events it detected. */
+const ON_PRINTER: PrinterSnapshot["state"][] = ["PREPARE", "RUNNING", "PAUSE"];
+
+/**
+ * Called by the LAN bridge with the latest snapshot and the events it detected. The app also compares the report with
+ * the state it saw last: a bridge restarted during a print sends no "finished" event (it has no earlier snapshot), so the
+ * app raises it itself and the bed still counts as full; so does a print it never saw running (IDLE -> FINISH, or a new
+ * job name while FINISH). Every start and end is timed (lastPrintStartAt/EndAt) and voids a bed confirmation nobody used
+ * yet: the agent's one print per "Bed is empty" (src/lib/printer/autoprint-rules.ts). So does a gap in the reports
+ * (nobody knows what happened on the printer meanwhile).
+ */
 export function ingestReport(
-  printerId: string, snapshot: PrinterSnapshot, events: PrinterEvent[],
+  printerId: string, snapshot: PrinterSnapshot, events: PrinterEvent[], now = Date.now(),
 ): { ok: true; printer: Printer; applied: number } | Fail {
   if (!ID.test(printerId)) return fail(400, "Invalid printer id");
   const before = ensurePrinter(printerId);
-  let printer: Printer = { ...before, name: printerName(printerId), snapshot, lastSeen: new Date().toISOString() };
+  const at = new Date(now).toISOString();
+  let printer: Printer = { ...before, name: printerName(printerId), snapshot, lastSeen: at };
+  const prev = before.snapshot;
+  const known = Boolean(prev && prev.state !== "UNKNOWN");
+  const wasOn = known && ON_PRINTER.includes(prev!.state);
+  const isOn = ON_PRINTER.includes(snapshot.state);
+  // The bridge missed the end of a print (it restarted, or never saw it running): the app compares with what it saw last.
+  if (known && !events.some((e) => e.kind === "finished" || e.kind === "failed")) {
+    events = [...events, ...detectEvents(prev, snapshot).filter((e) => e.kind === "finished" || e.kind === "failed")];
+  }
   // Any print that ends leaves something on the bed, whether or not it belonged to an order.
   // Also when we first see a printer already sitting in FINISH/FAILED: assume the part is still there.
-  const ended = events.some((e) => e.kind === "finished" || e.kind === "failed");
+  const ended = events.some((e) => e.kind === "finished" || e.kind === "failed") || (wasOn && !isOn);
+  const started = events.some((e) => e.kind === "started") || (known && !wasOn && isOn);
   const unseen = !before.snapshot || before.snapshot.state === "UNKNOWN";
   const firstSeenEnded = unseen && (snapshot.state === "FINISH" || snapshot.state === "FAILED");
   if ((ended || firstSeenEnded) && !printer.bedOccupiedBy) {
     printer.bedOccupiedBy = printer.currentOrderId ?? "a print without an order";
+  }
+  if (started) printer.lastPrintStartAt = at;
+  if (ended || firstSeenEnded) printer.lastPrintEndAt = at;
+  const check = printer.bedCheck;
+  // Nobody saw the printer for a while after the bed was confirmed (bridge, app or network down): a print may have run
+  // and ended unseen. A confirmation given while the printer was quiet counts from when it was given.
+  const seenUntil = Math.max(before.lastSeen ? Date.parse(before.lastSeen) : 0, check ? Date.parse(check.at) || 0 : 0);
+  const gap = Boolean(before.lastSeen) && now - seenUntil > ONLINE_MS;
+  if ((started || ended || firstSeenEnded || gap) && check && !check.usedAt && !check.voidedAt) {
+    printer.bedCheck = {
+      ...check, voidedAt: at,
+      voidReason: started ? "A print started on the printer" : ended || firstSeenEnded ? "A print ended on the printer" : "The printer did not report for a while",
+    };
   }
   store.savePrinter(printer);
 
@@ -326,7 +384,7 @@ export function ingestReport(
       `CHECK NOW: ${printer.name} started printing, but the print for ${printer.bedOccupiedBy} was not marked as collected.`, printer.id);
   }
 
-  syncJobWithPrinter(printerId, snapshot);
+  syncJobWithPrinter(printerId, snapshot, now);
   const orderId = printer.currentOrderId;
   const order = orderId ? store.getOrder(orderId) : undefined;
   if (!orderId || !order || !PRINTING_STATUSES.includes(order.status)) {
@@ -343,17 +401,28 @@ export function ingestReport(
   return { ok: true, printer: store.getPrinter(printerId)!, applied: events.length };
 }
 
-/** A person marks a task done. Collecting the part (or clearing a failed print) frees the bed. */
-export function completeTask(taskId: string, by: string): { ok: true; task: OperatorTask } | Fail {
+/**
+ * A person marks a task done. Collecting the part (or clearing a failed print) frees the bed, but only the printer's
+ * latest collect/reprint task is about the print on its bed now: closing an older one frees nothing. It never lets the
+ * agent print: only "Bed is empty" on My machines does (POST /api/printers/:id/bed, with its warning). bedCleared names
+ * the printer whose bed it freed.
+ */
+export function completeTask(taskId: string, by: string, now = Date.now()): { ok: true; task: OperatorTask; bedCleared?: string } | Fail {
   const t = store.getTask(taskId);
   if (!t) return fail(404, "Task not found");
   if (t.status === "done") return { ok: true, task: t };
   if (!by.trim()) return fail(400, "Who did it is required");
-  const task: OperatorTask = { ...t, status: "done", doneAt: new Date().toISOString(), doneBy: by.trim() };
+  const task: OperatorTask = { ...t, status: "done", doneAt: new Date(now).toISOString(), doneBy: by.trim() };
   store.saveTask(task);
-  if ((t.kind === "collect_and_qc" || t.kind === "reprint") && t.printerId) {
+  const bedTask = (x: OperatorTask) => (x.kind === "collect_and_qc" || x.kind === "reprint") && x.printerId === t.printerId;
+  if (bedTask(t) && t.printerId) {
     const p = store.getPrinter(t.printerId);
-    if (p && p.bedOccupiedBy === t.orderId) store.savePrinter({ ...p, bedOccupiedBy: undefined });
+    const latest = store.listAllTasks().filter(bedTask).at(-1);
+    if (p && p.bedOccupiedBy === t.orderId && latest?.id === t.id) {
+      if (isPersonName(by)) clearBed(t.printerId, by, { via: "task", grant: false }, now);
+      else store.savePrinter({ ...p, bedOccupiedBy: undefined });
+      return { ok: true, task, bedCleared: t.printerId };
+    }
   }
   return { ok: true, task };
 }

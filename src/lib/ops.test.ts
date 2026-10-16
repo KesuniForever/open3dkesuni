@@ -375,3 +375,28 @@ describe("loaders over the store", () => {
     expect(flow.simulated.held.count).toBe(1);
   });
 });
+
+describe("agent prints in the decision log", () => {
+  it("each new row has a short title and line, in English and Indonesian; studio rows are not 'removed' orders", async () => {
+    const { ID } = await import("../i18n/id");
+    const idT = makeT("id", ID);
+    const start = row({ tool: "auto_print", sec: 1, input: { printerId: "a1", file: "Benchy.gcode.3mf", bedConfirmedBy: "Khelda" }, output: { jobId: "PJ-1-x", printer: "A1 Combo #1" } });
+    expect(describeEntry(start)).toEqual({ title: "Agent started a print on A1 Combo #1", line: "Benchy.gcode.3mf · bed confirmed by Khelda" });
+    expect(describeEntry(start, idT)).toEqual({ title: "Agen memulai cetakan di A1 Combo #1", line: "Benchy.gcode.3mf · bed dikonfirmasi oleh Khelda" });
+    const wait = row({ tool: "auto_print_wait", sec: 2, input: { key: "No spool of {material} {name} loaded", vars: { material: "PETG", name: "White" } }, output: { text: "No spool of PETG White loaded" } });
+    expect(describeEntry(wait)).toEqual({ title: "Agent print waits", line: "No spool of PETG White loaded" });
+    expect(describeEntry(wait, idT).line).toBe("Tidak ada spool PETG Putih yang terpasang");
+    const nested = row({ tool: "auto_print_wait", sec: 3, input: { key: "{printer}: {reason}", vars: { printer: "A1 Combo #2", reason: "Linked to ORD-004" } } });
+    expect(describeEntry(nested, idT).line).toBe("A1 Combo #2: Terhubung ke ORD-004");
+    expect(describeEntry(row({ tool: "auto_print_switch", sec: 4, actor: "human", orderId: "studio", input: { on: true, by: "Khelda" } }), idT).title)
+      .toBe("Cetak oleh agen diaktifkan oleh Khelda");
+    expect(describeEntry(row({ tool: "clear_bed", sec: 5, actor: "human", orderId: "printer:a1", input: { by: "Aini" }, output: { printer: "A1 Combo #1" } })))
+      .toEqual({ title: "Bed confirmed empty by Aini", line: "A1 Combo #1" });
+    expect(describeEntry(row({ tool: "auto_print_runs", sec: 6, actor: "human", input: { runsNeeded: 2, by: "Khelda" } }))).toEqual({ title: "Runs set by Khelda", line: "2 runs" });
+    const feed = chiefFeed([row({ tool: "create_operator_task", sec: 7, orderId: "printer:a1", input: { kind: "change_filament", text: "Load PETG White" } })], [order("ORD-001", "real")]);
+    expect(feed[0].order).toEqual({ id: "printer:a1", tag: "studio" });
+    expect(matchesFilter("studio", "real")).toBe(false);
+    expect(matchesFilter("studio", "simulated")).toBe(false);
+    expect(matchesFilter("studio", "all")).toBe(true);
+  });
+});

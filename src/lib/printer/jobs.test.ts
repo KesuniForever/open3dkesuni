@@ -11,7 +11,7 @@ import {
 } from "./jobs";
 
 const mem = new Map<string, Uint8Array>();
-const files: FileStore = { async put(k, b) { mem.set(k, b); }, async get(k) { return mem.get(k)!; } };
+const files: FileStore = { async put(k, b) { mem.set(k, b); }, async get(k) { return mem.get(k)!; }, async remove(k) { mem.delete(k); } };
 const ORDER = "ORD-001";
 
 // Printer #1 as it reported on 15 Oct 2026: idle, SD card in, 0.4 mm nozzle, yellow + red PLA, slot 2 empty.

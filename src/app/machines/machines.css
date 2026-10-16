@@ -66,6 +66,9 @@
 .mach-card .kv-rows dd { min-width: 0; }
 .mach-card .kv-rows dd .one-line { max-width: 190px; }
 .mach-warn { color: var(--warn); }
+/* "Next agent print": the order and its colours, then why it waits (one short line each). */
+.mach-card .kv-rows dd.mach-agent { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.mach-agent small { font-size: 12px; font-weight: 400; line-height: 1.35; }
 
 .mach-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .mach-actions button { min-height: 34px; padding: 6px 12px; font-size: 13px; }

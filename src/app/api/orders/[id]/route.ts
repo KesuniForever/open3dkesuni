@@ -8,6 +8,7 @@ import { agentMode, agentModel } from "@/lib/agent/chief";
 import { ownerRuleReasons, ownerRules } from "@/lib/owner-rules";
 import { pricingConfig } from "@/lib/pricing";
 import { publicNetwork } from "@/lib/network";
+import { orderAutoPrint } from "@/lib/printer/dispatch";
 
 export async function GET(_req: Request, ctx: Ctx) {
   const { id } = await ctx.params;
@@ -36,5 +37,7 @@ export async function GET(_req: Request, ctx: Ctx) {
     attachments: store.listAttachments(id),
     messages: store.listMessages(id),
     printers: store.listPrinters(),
+    // Agent prints: whether they are on, and this order's line (runs, and what the dispatcher does next or why it waits).
+    autoPrint: orderAutoPrint(id),
   });
 }

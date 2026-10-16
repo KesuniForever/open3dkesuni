@@ -13,8 +13,13 @@ export const ACK_WAIT_MS = 10_000;
 export const DRY_RUN_TEXT = "Dry run: nothing was sent to the printer";
 
 /** Command-line flags. */
+/**
+ * --dry-run, --read-only; --slice-only: no printer at all (no MQTT, no FTPS, no print queue), only slices for the control
+ * app; --once (with --slice-only): take at most one slice, then exit.
+ */
 export function parseArgs(argv) {
-  return { dryRun: argv.includes("--dry-run"), readOnly: argv.includes("--read-only") };
+  const sliceOnly = argv.includes("--slice-only");
+  return { dryRun: argv.includes("--dry-run"), readOnly: argv.includes("--read-only"), sliceOnly, once: sliceOnly && argv.includes("--once") };
 }
 
 /** "a, b/" -> ["a", "b"]: app addresses without a trailing slash. */
@@ -173,12 +178,17 @@ export function startOutcome({ baseline, reply, snapshot, elapsedMs, waitMs = ST
  * live = { snapshot, lastSeen (ISO of the last status report), connected }.
  * The person's name, the bed confirmation and "I checked this" were given in the app; a warning the printer raised
  * after the job was queued was never seen by that person, so it blocks.
+ * An agent print (item.actor "agent", queued by the app's dispatcher after a person's "Bed is empty") is checked as the
+ * agent: the person who confirmed the bed (bedConfirmedBy) instead of a person at the printer, and never after a failed
+ * print (FAILED); its warnings are not ticked by anyone, so any warning blocks it.
  */
 export function startReasons(live, item, info, { now, jobInFlight = null }) {
   const printer = { lastSeen: live.lastSeen, snapshot: live.snapshot, currentOrderId: undefined };
+  const agent = item.actor === "agent";
   const verdict = canStartPrint(printer, {
-    info, plate: item.plate, amsMapping: item.amsMapping ?? [], options: item.options, bedEmptyConfirmed: true, personPresent: true,
-    by: item.by, orderId: item.orderId, jobInFlight, warningsChecked: true,
+    info, plate: item.plate, amsMapping: item.amsMapping ?? [], options: item.options, bedEmptyConfirmed: !agent, personPresent: !agent,
+    by: item.by, orderId: item.orderId, jobInFlight, warningsChecked: !agent,
+    ...(agent ? { actor: "agent", bedConfirmedBy: item.bedConfirmedBy } : {}),
   }, now);
   const reasons = [...verdict.reasons];
   if (!live.connected) reasons.unshift("The bridge is not connected to the printer");
@@ -191,7 +201,22 @@ export function startReasons(live, item, info, { now, jobInFlight = null }) {
       reasons.push(`New printer warning ${h.code} since the print was queued: check it and start again`);
     }
   }
+  // Nobody is at the printer to see a spool swapped during the upload: an agent print needs every mapped tray to hold
+  // exactly the spool the app queued it with (the app checks the same at "sent").
+  if (agent && agentSpoolsChanged(live.snapshot, item.expectedTrays)) reasons.push(AGENT_SPOOL_CHANGED_TEXT);
   return reasons;
+}
+
+/** Why the bridge sends no agent print whose spools changed (the same words as the app's). */
+export const AGENT_SPOOL_CHANGED_TEXT = "A spool changed after the agent queued the print: nothing was sent. A person confirms the colours again.";
+
+/** True when the app sent no expected spools, or a mapped tray now holds another material or colour (or none). */
+export function agentSpoolsChanged(snapshot, expected) {
+  if (!Array.isArray(expected) || expected.length === 0) return true;
+  return expected.some((e) => {
+    const t = snapshot?.ams?.trays?.find((x) => x.ams * 4 + x.slot === e?.tray);
+    return !t || t.empty || String(t.type ?? "").toUpperCase() !== e.type || String(t.color ?? "").toUpperCase() !== e.color;
+  });
 }
 
 /** The download link of a job's file, only on the app it came from (the bridge token is never sent anywhere else). */

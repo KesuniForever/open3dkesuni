@@ -3,7 +3,9 @@
 // wired to these later with no changes to the tools themselves.
 // Printers: the Chief may READ their status (state, stage, faults, loaded spools) and link an order to a ready printer.
 // It has no tool that starts, pauses, resumes or stops a print, changes the speed or the light: printer controls are
-// for people only (src/lib/printer/jobs.ts, never imported here; agent.test.ts checks it).
+// for people only (src/lib/printer/jobs.ts, never imported here; agent.test.ts checks it). Agent prints are code: the
+// dispatcher (src/lib/printer/dispatch.ts) queues a print itself when a person turned agent prints on and confirmed the
+// bed empty. The Chief can only ask it to look again (request_dispatch, orderId only): no gate, order or printer to pick.
 import * as store from "../store";
 import { checkPlan, microToUsdc } from "../policy";
 import { chooseQuote, createPaymentIntent } from "../actions";
@@ -16,6 +18,8 @@ import { activeIssues, HMS_SEVERITY, SPEED_LABEL } from "../printer/bambu";
 import { issueText } from "../printer/errors";
 import { colorsCheckedNow, nameOf } from "../colors";
 import { postCustomerMessage } from "../messages";
+import { safeDispatch, safePlan } from "../printer/dispatch";
+import { whyText } from "../printer/autoprint-rules";
 import type { AgentLogEntry, Order, OperatorTask, Printer } from "../types";
 
 type Json = Record<string, unknown>;
@@ -117,10 +121,12 @@ export function materialConcern(o: Pick<Order, "product" | "customerNote" | "spe
 }
 
 /** What the Chief may know about a printer: read-only status. It has no tool that controls a printer. */
-function printerForAgent(p: Printer) {
+function printerForAgent(p: Printer, agentWhy: string | null) {
   const s = p.snapshot;
   const why = notReadyReason(p);
   return {
+    // Why the dispatcher (code) would not queue an agent print here now; null when it could.
+    agentPrintWaits: agentWhy,
     id: p.id, name: p.name, ready: why === null, why, state: s?.state ?? null, percent: s?.percent ?? null,
     printingOrder: p.currentOrderId ?? null, remainingMin: s?.remainingMin ?? null,
     // What it is doing now, while a job is on it ("Heatbed preheating", "Paused (filament ran out)").
@@ -334,20 +340,31 @@ export const TOOLS: Tool[] = [
   {
     name: "get_production_status",
     description: "Has the customer paid into escrow; the printers (read-only): whether each can take a job, what it is doing now, " +
-      "faults it reports, the spools loaded in its AMS; this order's print jobs, which people run; the latest evidence; open " +
-      "operator tasks. You have no printer controls: people at the studio run the printers.",
+      "faults it reports, the spools loaded in its AMS; this order's print jobs (by a person, or by the code dispatcher); the " +
+      "latest evidence; open operator tasks; agentPrints: whether a person turned agent prints on, and why the dispatcher " +
+      "waits on this order. You have no printer controls: people at the studio run the printers.",
     inputSchema: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
     run: (i) => {
       const orderId = str(i.orderId);
       if (!store.getOrder(orderId)) return err("Order not found");
       const e = store.getEscrow(orderId);
+      const plan = safePlan();
+      const line = plan?.orders[orderId];
       return {
         ok: true,
         data: {
           escrow: e ? { state: e.state, amountUsdc: microToUsdc(e.amountMicro), txs: e.txs.map((t) => ({ kind: t.kind, state: t.state })) } : null,
-          printers: store.listPrinters().map(printerForAgent),
+          agentPrints: {
+            on: plan?.on ?? false, thisOrder: line ? whyText(line.why) : null,
+            runs: line ? { needed: line.runsNeeded, done: line.runsDone, onTheirWay: line.runsActive } : null,
+          },
+          printers: store.listPrinters().map((p) => {
+            const w = plan?.printers[p.id]?.why;
+            return printerForAgent(p, w ? whyText(w) : null);
+          }),
           printJobs: store.listPrintJobs({ orderId }).slice(-5).map((j) => ({
             id: j.id, printerId: j.printerId, state: j.state, plate: j.plate, by: j.by, at: j.updatedAt, error: j.error ?? null,
+            ...(j.actor === "agent" ? { byCode: true, bedConfirmedBy: j.bedConfirmedBy ?? null } : {}),
           })),
           evidence: store.listEvidence(orderId).slice(-10).map((x) => ({ kind: x.kind, note: x.note, label: x.label, at: x.at })),
           openTasks: store.listTasks(orderId).filter((t) => t.status === "open").map((t) => ({ kind: t.kind, text: t.text })),
@@ -368,6 +385,31 @@ export const TOOLS: Tool[] = [
       if (printFinished(orderId)) return err("This order is already printed: it waits for collection and QC, not a new printer");
       const r = choosePrinter(orderId);
       return r.ok ? { ok: true, data: { printer: r.printer.name, reasons: r.reasons } } : err(r.error, r.reasons);
+    },
+  },
+  {
+    name: "request_dispatch",
+    description: "Machines: ask the code dispatcher to look at the queue now instead of at its next round. It queues an agent " +
+      "print by itself only when a person turned agent prints on, a person confirmed that printer's bed empty since the last " +
+      "print (one print per confirmation), the printer, its spools and the sliced file are right and the order is paid; " +
+      "earliest deadline first. You cannot change any of that, nor which order or printer goes first. Returns whether " +
+      "anything was queued and why this order waits.",
+    inputSchema: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
+    run: (i) => {
+      const orderId = str(i.orderId);
+      if (!store.getOrder(orderId)) return err("Order not found");
+      // The Chief's order never jumps the queue: the dispatcher decides over all orders, as on any other trigger.
+      const r = safeDispatch("chief");
+      const line = (r.plan ?? safePlan())?.orders[orderId];
+      return {
+        ok: true,
+        data: {
+          agentPrintsOn: r.on, busy: r.busy ?? false,
+          queuedForThisOrder: r.started.filter((s) => s.orderId === orderId).map((s) => s.jobId),
+          slicingForThisOrder: r.sliced.filter((s) => s.orderId === orderId).map((s) => s.sliceId),
+          thisOrder: line ? whyText(line.why) : "Not in production (PLAN_CHOSEN or IN_PRODUCTION): the dispatcher does not look at it",
+        },
+      };
     },
   },
   {

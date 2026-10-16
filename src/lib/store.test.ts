@@ -107,3 +107,42 @@ describe("double-payment guard in the database", () => {
     expect(() => store.insertIntent({ ...intent, id: "PI-y" })).toThrow(/UNIQUE/);
   });
 });
+
+describe("write transactions (agent prints: check and write as one step)", () => {
+  it("a throw rolls everything back; a nested call is a savepoint that rolls back alone; fn must be synchronous", () => {
+    expect(() => store.transaction(() => { store.setMeta("x", 1); throw new Error("no"); })).toThrow("no");
+    expect(store.getMeta("x")).toBeUndefined();
+    store.transaction(() => {
+      store.setMeta("a", 1);
+      expect(() => store.transaction(() => { store.setMeta("b", 2); throw new Error("inner"); })).toThrow("inner");
+      store.setMeta("c", 3);
+    });
+    expect([store.getMeta("a"), store.getMeta("b"), store.getMeta("c")]).toEqual([1, undefined, 3]);
+    expect(() => store.transaction(() => Promise.resolve(1) as unknown as number)).toThrow(/synchronous/);
+    expect(store.getMeta("a")).toBe(1);
+  });
+
+  it("another process (connection) cannot write in between: BEGIN IMMEDIATE holds the write lock", async () => {
+    const { DatabaseSync } = await import("node:sqlite");
+    closeDb();
+    const dir = mkdtempSync(path.join(tmpdir(), "kesuni-tx-"));
+    const file = path.join(dir, "test.db");
+    process.env.KESUNI_DB_PATH = file;
+    try {
+      store.listOrders(); // open and create the schema
+      const other = new DatabaseSync(file);
+      other.exec("PRAGMA busy_timeout = 0");
+      store.transaction(() => {
+        store.setMeta("mine", 1);
+        expect(() => other.exec("INSERT INTO meta (key, data) VALUES ('theirs', '1')")).toThrow(/locked|busy/i);
+      });
+      other.exec("INSERT INTO meta (key, data) VALUES ('theirs', '1')");
+      expect(store.getMeta("theirs")).toBe(1);
+      other.close();
+    } finally {
+      closeDb();
+      process.env.KESUNI_DB_PATH = ":memory:";
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
+});

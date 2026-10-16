@@ -12,6 +12,8 @@
 //   printer, one every 30 s to the control app (the order's evidence). Never a stream nobody watches.
 // - Texts sent back to the app never hold a printer's LAN address (hideAddresses).
 // - --dry-run does everything except publish to the printer and upload to its SD card, and prints what it would send.
+// - Agent prints (queued by the app's dispatcher after a person's "Bed is empty") need a second key on this PC:
+//   agentPrints (BRIDGE_AGENT_PRINTS=on). Without it such a job is refused before anything is downloaded or sent.
 // All I/O comes in through createRunner's options, so scripts/bridge/runner.test.mjs runs it without printers.
 import { createHash } from "node:crypto";
 import { BUSY_STATES } from "../../src/lib/printer/bambu.ts";
@@ -31,6 +33,9 @@ const SEEN_KEEP_MS = 15 * 60_000;
 /** The app's defaults (src/lib/printer/jobs.ts), for a job that leaves some out. */
 const DEFAULT_OPTIONS = { bedLevelling: true, flowCali: true, timelapse: false, useAms: true };
 
+/** Why this bridge refuses an agent print without BRIDGE_AGENT_PRINTS=on. */
+export const AGENT_PRINTS_OFF_TEXT = "This bridge does not take agent prints (BRIDGE_AGENT_PRINTS is not on on the studio PC)";
+
 export const realClock = { now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
 
 /**
@@ -41,7 +46,7 @@ export const realClock = { now: () => Date.now(), sleep: (ms) => new Promise((r)
  */
 export function createRunner({
   apps, token, printers, dryRun = false, log = console.log, warn = console.error, fetch = globalThis.fetch, clock = realClock,
-  grabFrame, uploadToSd, parse = parse3mf,
+  grabFrame, uploadToSd, parse = parse3mf, agentPrints = false,
 }) {
   const quiet = quietLog(warn);
   const seen = new Map();          // "<app>|<id>" -> when we first saw it: every item is handled once
@@ -257,8 +262,9 @@ export function createRunner({
   async function startJob(app, queued, p, tag) {
     const item = { ...queued, amsMapping: queued.amsMapping ?? [], options: { ...DEFAULT_OPTIONS, ...queued.options } };
     if (!(await take(app, item, tag, "uploading"))) return;
-    log(`> ${tag} ${item.fileName} plate ${item.plate}, asked by ${item.by} (${app})`);
+    log(`> ${tag} ${item.fileName} plate ${item.plate}, asked by ${item.actor === "agent" ? `the agent (bed confirmed by ${item.bedConfirmedBy ?? "?"})` : item.by} (${app})`);
     const fail = (text) => finish(app, item, tag, "failed", text);
+    if (item.actor === "agent" && !agentPrints) return fail(AGENT_PRINTS_OFF_TEXT);
 
     // 1. The file, from the app the job came from.
     const url = jobFileUrl(app, item.fileUrl);

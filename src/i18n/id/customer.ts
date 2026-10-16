@@ -17,11 +17,11 @@ const id: Record<string, string> = {
   "Done. Thank you!": "Selesai. Terima kasih!",
   "Your payment has been released to Kesuni.": "Pembayaran Anda sudah dilepas ke Kesuni.",
   "Thank you!": "Terima kasih!",
-  "The agent is releasing your payment from escrow to Kesuni.": "Agen sedang melepas pembayaran Anda dari escrow ke Kesuni.",
+  "Releasing your payment from escrow to Kesuni.": "Pembayaran Anda sedang dilepas dari escrow ke Kesuni.",
   "Your money has been refunded": "Uang Anda sudah dikembalikan",
   "Kesuni will contact you about a fix.": "Kesuni akan menghubungi Anda soal perbaikannya.",
   "Your money is being refunded": "Uang Anda sedang dikembalikan",
-  "The agent is returning the escrow to your wallet.": "Agen sedang mengembalikan dana escrow ke wallet Anda.",
+  "Returning the escrow to your wallet.": "Dana escrow sedang dikembalikan ke wallet Anda.",
   "Kesuni is preparing your price": "Kesuni sedang menyiapkan harga Anda",
   "We check the design and the printers first. The price will appear on this page.":
     "Kami cek desain dan printer dulu. Harganya akan muncul di halaman ini.",

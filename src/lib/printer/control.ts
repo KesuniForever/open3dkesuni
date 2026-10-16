@@ -2,7 +2,8 @@
 // publishes (protocol spec §4, checked on our A1s). Pure and without runtime imports: scripts/printer-bridge.mjs
 // imports this file straight from Node and checks again against its own live snapshot right before it publishes.
 // The Chief (src/lib/agent) never imports this file or src/lib/printer/jobs.ts: it can read printer status, never
-// control a printer (a test checks it).
+// control a printer (a test checks it). One exception, in code and never Claude: when a person turned agent prints on,
+// the dispatcher may START a print after a person confirmed the bed empty (canStartPrint with actor "agent").
 // Never here, whatever a request asks: raw G-code, axis moves, homing, temperatures, fans, AMS moves, calibration
 // runs, firmware, or SD-card browsing.
 import type { PrinterSnapshot, PrinterState } from "./bambu";
@@ -114,6 +115,13 @@ export interface StartCheck {
   jobInFlight?: string | null;
   /** The person ticked "I checked this" for the warnings. */
   warningsChecked?: boolean;
+  /**
+   * "agent": the dispatcher's print (src/lib/printer/jobs.ts createAgentPrintJob). Nobody stands at the printer, so
+   * instead of the three person checks it needs the person who confirmed the bed empty (bedConfirmedBy), and the printer
+   * must be idle or finished: after a failed print a person starts the next one. Missing: a person's print.
+   */
+  actor?: "person" | "agent";
+  bedConfirmedBy?: string;
 }
 
 export interface StartVerdict { ok: boolean; reasons: string[]; warnings: string[] }
@@ -134,12 +142,18 @@ export function canStartPrint(p: Printer, job: StartCheck, now: number): StartVe
   const reasons: string[] = [];
   const warnings: string[] = [];
   const s = p.snapshot;
-  if (!isPersonName(job.by)) reasons.push("A person's name is required");
-  if (!job.personPresent) reasons.push("A person must be at the printer when it starts");
-  if (!job.bedEmptyConfirmed) reasons.push("A person must confirm the bed is empty and clean");
+  const agent = job.actor === "agent";
+  if (agent) {
+    if (!isPersonName(job.bedConfirmedBy)) reasons.push("The agent prints only after a person confirmed the bed is empty");
+  } else {
+    if (!isPersonName(job.by)) reasons.push("A person's name is required");
+    if (!job.personPresent) reasons.push("A person must be at the printer when it starts");
+    if (!job.bedEmptyConfirmed) reasons.push("A person must confirm the bed is empty and clean");
+  }
   if (!online(p, now, START_FRESH_MS)) reasons.push("The printer has not reported in the last minute (is the bridge running?)");
   const state = s?.state ?? "UNKNOWN";
-  if (!["IDLE", "FINISH", "FAILED"].includes(state)) reasons.push(`The printer is ${STATE_WORD[state] ?? STATE_WORD.UNKNOWN}: it must be idle or finished`);
+  if (agent && state === "FAILED") reasons.push("The last print failed: a person starts the next one");
+  else if (!["IDLE", "FINISH", "FAILED"].includes(state)) reasons.push(`The printer is ${STATE_WORD[state] ?? STATE_WORD.UNKNOWN}: it must be idle or finished`);
   if (p.currentOrderId && p.currentOrderId !== job.orderId) reasons.push(`The printer is linked to ${p.currentOrderId}`);
   if (job.jobInFlight) reasons.push(`Another print job (${job.jobInFlight}) on this printer has not started yet`);
   for (const h of s?.hms ?? []) {

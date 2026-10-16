@@ -14,6 +14,9 @@ import Info from "@/app/components/Info";
 import ColorSwatch from "@/app/components/ColorSwatch";
 import { ConfirmDialog } from "@/app/components/PrinterControls";
 import { amsSlots, bedTypeLabel, issueViews, mm, slotText, type IssueTexts } from "@/app/machines/printer-details";
+import { sliceSourceCheck } from "@/lib/slice-rules";
+import SlicePanel, { useSliceJobs } from "./SlicePanel";
+import AgentPrintRow, { type OrderAutoPrintView } from "./AgentPrintRow";
 import "./print.css";
 
 type Act = (url: string, body: unknown, success: string) => Promise<void>;
@@ -43,15 +46,17 @@ const shortName = (name: string) => /#\d+$/.exec(name)?.[0] ?? name;
  * Colours & print: the customer's colours and where they are loaded, the order's sliced Bambu Studio file (plates,
  * filaments, the slicer's time and grams, which can price the order), which printer can print it with which AMS slot
  * for each filament, and the person's start: bed empty, at the printer, name. The LAN bridge uploads the file and starts
- * the print. The Chief has no way to start a print.
+ * the print. The Chief (Claude) has no way to start a print; with agent prints on, code may (AgentPrintRow).
  */
-export default function PrintPanel({ order, attachments, printers, paid, issueTexts, busy, act, onChange }: {
+export default function PrintPanel({ order, attachments, printers, paid, issueTexts, autoPrint, busy, act, onChange }: {
   order: Order;
   attachments: Attachment[];
   printers: Printer[];
   /** The customer paid into escrow (a real order that is not paid is a warning, not a block). */
   paid: boolean;
   issueTexts: IssueTexts;
+  /** Agent prints for this order (GET /api/orders/:id autoPrint). */
+  autoPrint?: OrderAutoPrintView | null;
   busy: boolean;
   act: Act;
   onChange: () => void;
@@ -79,6 +84,9 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   const [msg, setMsg] = useState<Msg | null>(null);
   const [units, setUnits] = useState("");
   const [ftp, setFtp] = useState(false);
+  // Slicing on the studio PC (SlicePanel): a finished slice adds a sliced file to the order, so the order reloads.
+  const slices = useSliceJobs(order.id, onChange);
+  const canSlice = attachments.some((a) => a.kind === "design" && sliceSourceCheck(a).ok);
 
   const [jobsVersion, setJobsVersion] = useState(0);
   const loadJobs = useCallback(() => setJobsVersion((v) => v + 1), []);
@@ -106,13 +114,15 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   const count = info?.projectFilaments?.length;
   const key = (pid: string) => `${file?.id}:${plate?.index}:${pid}`;
   const inFlight = (pid: string) => jobs.find((j) => j.printerId === pid && ["queued", "uploading", "sent"].includes(j.state))?.id ?? null;
+  // A file the studio PC sliced prints from the spool that was picked for it, unless the person picks another slot.
+  const slicedFor = file ? slices.jobs.find((j) => j.state === "done" && j.resultAttachmentId === file.id) : undefined;
   const rows = plate ? printers.map((p) => {
     const match = matchJob(plate.filaments, p, count);
-    const mapping = edits[key(p.id)] ?? match.mapping;
+    const mapping = edits[key(p.id)] ?? (slicedFor?.printerId === p.id && count === 1 ? [slicedFor.tray] : match.mapping);
     const verdict = canStartPrint(p, { info, plate: plate.index, amsMapping: mapping, options: opts, orderId: order.id, jobInFlight: inFlight(p.id), ...AS_IF_CONFIRMED }, now);
     return { p, match, mapping, verdict, warnings: [...verdict.warnings, ...colourWarnings(plate, p, mapping, opts)] };
   }) : [];
-  const picked = rows.find((r) => r.p.id === printerId) ?? rows.find((r) => r.verdict.ok) ?? rows.find((r) => r.p.currentOrderId === order.id) ?? rows[0];
+  const picked = rows.find((r) => r.p.id === printerId) ?? rows.find((r) => r.p.id === slicedFor?.printerId && r.verdict.ok) ?? rows.find((r) => r.verdict.ok) ?? rows.find((r) => r.p.currentOrderId === order.id) ?? rows[0];
 
   function setSlot(filamentId: number, tray: number) {
     if (!picked) return;
@@ -199,15 +209,25 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   return (
     <section className="card pp" id="print">
       <h2><span className="step">C</span> {t("Colours & print")}{" "}
-        <Info>{t("Print the order's sliced Bambu Studio file on a studio printer. A person confirms the bed is empty and stands at the printer; the LAN bridge uploads the file and starts the print. The Chief can never start a print.")}</Info>
+        <Info>{t("Print the order's sliced Bambu Studio file on a studio printer. A person confirms the bed is empty and stands at the printer; the LAN bridge uploads the file and starts the print. The Chief (Claude) never starts a print; with agent prints on, code does, only after a person confirmed the bed empty.")}</Info>
       </h2>
 
+      <AgentPrintRow order={order} data={autoPrint} busy={busy} act={act} t={t} />
+
       <CustomerColours colors={order.preferredColors ?? []} printers={printers} t={t} />
+
+      <SlicePanel order={order} attachments={attachments} printers={printers} data={slices} t={t} locale={locale}
+        onPrint={(id, pid) => {
+          setFileId(id); setPlateNo(null); setPrinterId(pid);
+          document.getElementById("pp-printer")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }} />
 
       {files.length === 0 ? (
         <div className="pp-empty">
           <b>{t("No sliced file yet.")}</b>{" "}
-          <span className="muted">{t("In Bambu Studio: slice for the Bambu Lab A1 (0.4 mm), then File > Export > Export plate sliced file. Upload the .gcode.3mf under Files.")}</span>{" "}
+          <span className="muted">{canSlice
+            ? t("Slice it above, or upload a .gcode.3mf from Bambu Studio under Files.")
+            : t("In Bambu Studio: slice for the Bambu Lab A1 (0.4 mm), then File > Export > Export plate sliced file. Upload the .gcode.3mf under Files.")}</span>{" "}
           <a href="#files">{t("Go to Files")}</a>
         </div>
       ) : (
@@ -254,7 +274,7 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
                 </div>
               )}
 
-              <h3 className="pp-h">{t("Printer")}</h3>
+              <h3 className="pp-h" id="pp-printer">{t("Printer")}</h3>
               <ul className="pp-printers" role="radiogroup" aria-label={t("Printer")}>
                 {rows.map((r) => {
                   const status = !r.verdict.ok ? "bad" : r.warnings.length ? "warn" : "ok";
@@ -507,7 +527,7 @@ function JobList({ jobs, printers, busy, onCancel, onFtp, ftp, t, locale }: {
             <li key={j.id}>
               <div className="pp-job-head">
                 <b className="mono">{j.id}</b>
-                <span className="muted">{p?.name ?? j.printerId} · {t("Plate {n}", { n: j.plate })} · {t("by {name}", { name: j.by })} · {time(j.createdAt)}</span>
+                <span className="muted">{p?.name ?? j.printerId} · {t("Plate {n}", { n: j.plate })} · {j.actor === "agent" ? t("by the agent (bed: {name})", { name: j.bedConfirmedBy ?? "?" }) : t("by {name}", { name: j.by })} · {time(j.createdAt)}</span>
               </div>
               <ol className="pp-steps">
                 {ended ? <li className="bad">{t(STEP_LABEL[j.state])}</li>

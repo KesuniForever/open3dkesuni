@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { OperatorTask, Printer } from "@/lib/types";
+import type { DispatchPlan, PrinterLine } from "@/lib/printer/dispatch";
+import { bedButtonUseful } from "@/lib/printer/autoprint-rules";
+import { whyLine } from "@/lib/printer/why-text";
 import { machineStats, machineView, type MachineView } from "@/lib/machines";
 import { colorsCheckedNow, nameOf, studioPalette } from "@/lib/colors";
 import { tLib } from "@/lib/lib-text";
@@ -27,8 +30,10 @@ const POLL_MS = 10_000;
 const AFTER_CONTROL_MS = 3_000;
 
 /** Stat strip, the studio's colours and one card per printer. Re-reads GET /api/printers every 10 s while the tab is visible. */
-export default function MachinesBoard({ initial, serverNow, orders, tasks, issueTexts }: {
+export default function MachinesBoard({ initial, initialPlan = null, serverNow, orders, tasks, issueTexts }: {
   initial: Printer[];
+  /** The agent dispatcher's read-only plan when the page was made: agent prints on or off, each printer's next print. */
+  initialPlan?: DispatchPlan | null;
   serverNow: number;
   orders: Record<string, OrderInfo>;
   /** Open printer tasks (check printer, change filament). */
@@ -39,6 +44,7 @@ export default function MachinesBoard({ initial, serverNow, orders, tasks, issue
   const router = useRouter();
   const t = useT();
   const [printers, setPrinters] = useState(initial);
+  const [plan, setPlan] = useState<DispatchPlan | null>(initialPlan);
   const [now, setNow] = useState(serverNow);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -49,8 +55,9 @@ export default function MachinesBoard({ initial, serverNow, orders, tasks, issue
     try {
       const r = await fetch("/api/printers", { cache: "no-store" });
       if (!r.ok) throw new Error(String(r.status));
-      const j = (await r.json()) as { printers: Printer[] };
+      const j = (await r.json()) as { printers: Printer[]; autoPrint?: DispatchPlan | null };
       setPrinters(j.printers);
+      if (j.autoPrint !== undefined) setPlan(j.autoPrint);
       setFailed(false);
     } catch {
       setFailed(true);
@@ -66,17 +73,22 @@ export default function MachinesBoard({ initial, serverNow, orders, tasks, issue
     return () => { clearInterval(timer); document.removeEventListener("visibilitychange", tick); };
   }, [load]);
 
-  async function act(id: string, body: Record<string, string>, done: string) {
+  /** path "" (link, unlink, colours) or "/bed" (the "Bed is empty" that allows one agent print). */
+  async function act(id: string, body: Record<string, string | boolean>, done: string, path = "") {
     setBusy(id);
     setNote(null);
     try {
-      const r = await fetch(`/api/printers/${id}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-      const j = (await r.json().catch(() => ({}))) as { printer?: Printer; error?: string };
+      const r = await fetch(`/api/printers/${id}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const raw = await r.text().catch(() => "");
+      let j: { printer?: Printer; error?: string } = {};
+      try { j = JSON.parse(raw) as typeof j; } catch { /* the proxy answers in plain text (password needed) */ }
+      const error = j.error ?? (!r.ok && raw.trim() && raw.length < 200 ? raw.trim() : null);
       // A fixed server message is translated by the dictionary; anything else stays as the server wrote it.
-      if (!r.ok || !j.printer) throw new Error(j.error ? tLib(t, j.error) : t("Request failed ({status})", { status: r.status }));
+      if (!r.ok || !j.printer) throw new Error(error ? tLib(t, error) : t("Request failed ({status})", { status: r.status }));
       setPrinters((ps) => ps.map((p) => (p.id === id ? j.printer! : p)));
       setNote({ id, ok: true, text: done });
       router.refresh();
+      void load(); // the agent's next print may have changed (or started)
     } catch (e) {
       setNote({ id, ok: false, text: e instanceof Error ? e.message : t("Request failed") });
     } finally {
@@ -101,7 +113,10 @@ export default function MachinesBoard({ initial, serverNow, orders, tasks, issue
       <StudioColours printers={printers} now={now} />
 
       <div className="mach-head">
-        <span>{s.total === 1 ? t("1 printer in the studio") : t("{n} printers in the studio", { n: s.total })}</span>
+        <span>
+          {s.total === 1 ? t("1 printer in the studio") : t("{n} printers in the studio", { n: s.total })}
+          {plan && <> · <Link href="/chief" className={`badge${plan.on ? " ok" : ""}`} title={t("Set on the Chief page")}>{plan.on ? t("Agent prints on") : t("Agent prints off")}</Link></>}
+        </span>
         <span className={`mach-live${failed ? " off" : ""}`}>
           <span className={`live-dot${failed ? " off" : ""}`} />
           {failed ? t("Could not refresh, retrying") : t("Live · refreshes every 10 s")}
@@ -117,9 +132,12 @@ export default function MachinesBoard({ initial, serverNow, orders, tasks, issue
         <div className="mach-grid">
           {printers.map((p) => (
             <MachineCard key={p.id} p={p} v={machineView(p, now, t)} now={now} orders={orders} tasks={tasks} texts={issueTexts}
+              agent={plan?.printers[p.id] ?? null} agentOn={plan?.on ?? false}
               busy={busy !== null} note={note?.id === p.id ? note : null}
               onUnlink={() => act(p.id, { action: "unlink" }, t("Order unlinked."))}
-              onClearBed={(by) => act(p.id, { action: "clear_bed", by }, t("Bed marked empty."))}
+              onClearBed={(by) => (plan?.on
+                ? act(p.id, { by, confirm: true }, t("Bed marked empty."), "/bed") // allows the agent one print here
+                : act(p.id, { action: "clear_bed", by }, t("Bed marked empty.")))}
               onConfirmColors={(by) => act(p.id, { action: "confirm_colors", by }, t("Colours confirmed."))}
               onSent={() => setTimeout(() => void load(), AFTER_CONTROL_MS)} />
           ))}
@@ -213,13 +231,16 @@ function Target({ value }: { value: number }) {
 }
 const heating = (v: number | null | undefined) => (v && v > 0 ? <Target value={v} /> : null);
 
-export function MachineCard({ p, v, now, orders, tasks, texts, busy, note, onUnlink, onClearBed, onConfirmColors, onSent }: {
+export function MachineCard({ p, v, now, orders, tasks, texts, agent = null, agentOn = false, busy, note, onUnlink, onClearBed, onConfirmColors, onSent }: {
   p: Printer;
   v: MachineView;
   now: number;
   orders: Record<string, OrderInfo>;
   tasks: OperatorTask[];
   texts: IssueTexts;
+  /** This printer's line in the agent dispatcher's plan: the next agent print, or why it waits. */
+  agent?: PrinterLine | null;
+  agentOn?: boolean;
   busy: boolean;
   note: Note | null;
   onUnlink: () => void;
@@ -231,7 +252,6 @@ export function MachineCard({ p, v, now, orders, tasks, texts, busy, note, onUnl
   const locale = useLocale();
   const [asking, setAsking] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [by, setBy] = useState("");
   const s = p.snapshot;
   const prog = v.progress;
   const issues = issueViews(s, texts);
@@ -246,6 +266,8 @@ export function MachineCard({ p, v, now, orders, tasks, texts, busy, note, onUnl
   const fw = s?.firmware ? [s.firmware.ota, s.firmware.ams && `AMS ${s.firmware.ams}`].filter(Boolean).join(" · ") : null;
   const info = infoMessages(s);
   const taskFor = (code: string) => tasks.find((x) => x.printerId === p.id && x.errorCode === code);
+  // "Bed is empty": after a print (the bed holds it); with agent prints on, also while the agent has no confirmation to use.
+  const offerBed = Boolean(v.bedHolds || (agentOn && v.online && agent && !agent.bed && !agent.jobOnItsWay && bedButtonUseful(p)));
 
   return (
     <article id={`printer-${v.id}`} className={`mach-card${v.online ? "" : " offline"}${issues.some((i) => i.tone === "bad") ? " fault" : ""}`}>
@@ -341,25 +363,31 @@ export function MachineCard({ p, v, now, orders, tasks, texts, busy, note, onUnl
         <div>
           <dt>{t("Bed")}</dt>
           <dd>
-            {!v.bedHolds ? <span className="muted">{t("Empty")}</span>
+            {!v.bedHolds ? (agentOn && agent?.bed
+              ? <span title={t("Confirmed by {name}", { name: agent.bed.by })}>{t("Empty · agent may print once")}</span>
+              : <span className="muted">{t("Empty")}</span>)
               : v.bedHolds.orderId ? <span className="mach-warn">{t("Holds part of")} <OrderRef id={v.bedHolds.orderId} orders={orders} /></span>
               : <span className="mach-warn">{t("Holds a print, no order")}</span>}
           </dd>
         </div>
+        {agentOn && agent && (
+          <div>
+            <dt>{t("Next agent print")}</dt>
+            <dd className="mach-agent">
+              {agent.next
+                ? <span className="one-line" title={agent.next.what}><Link href={`/orders/${agent.next.orderId}`}>{agent.next.orderId}</Link> · {agent.next.colours.map((c) => `${c.material} ${t(c.name)}`).join(" + ")}</span>
+                : <span className="muted">{t("None")}</span>}
+              {agent.why && <small className="muted">{whyLine(t, agent.why)}</small>}
+            </dd>
+          </div>
+        )}
       </dl>
 
-      {(v.orderId || v.bedHolds) && !asking && (
+      {(v.orderId || offerBed) && (
         <div className="mach-actions">
-          {v.bedHolds && <button className="primary" disabled={busy} onClick={() => setAsking(true)}>{t("Bed is empty")}</button>}
+          {offerBed && <button className="primary" disabled={busy} onClick={() => setAsking(true)}>{t("Bed is empty")}</button>}
           {v.orderId && <button disabled={busy} onClick={onUnlink} title={t("This printer no longer prints this order")}>{t("Unlink order")}</button>}
         </div>
-      )}
-      {asking && (
-        <form className="mach-ask" onSubmit={(e) => { e.preventDefault(); if (by.trim()) { onClearBed(by.trim()); setAsking(false); } }}>
-          <input value={by} onChange={(e) => setBy(e.target.value)} placeholder={t("Your name")} aria-label={t("Your name")} autoFocus disabled={busy} />
-          <button type="submit" className="primary" disabled={busy || !by.trim()}>{t("Confirm")}</button>
-          <button type="button" onClick={() => setAsking(false)} disabled={busy}>{t("Cancel")}</button>
-        </form>
       )}
       {note && <p className={`mach-note ${note.ok ? "ok" : "bad"}`} role="status">{note.text}</p>}
 
@@ -388,6 +416,12 @@ export function MachineCard({ p, v, now, orders, tasks, texts, busy, note, onUnl
           ))}
         </dl>
       </details>
+
+      <ConfirmDialog open={asking} title={t("Is the bed empty?")} confirmLabel={t("Bed is empty")} busy={busy}
+        onConfirm={(name) => { setAsking(false); onClearBed(name); }} onClose={() => setAsking(false)}>
+        <p style={{ margin: 0 }}>{t("Take the print off {printer}. The plate is on the bed, clean and empty.", { printer: v.name })}</p>
+        {agentOn && <p className="muted" style={{ margin: 0 }}>{t("Agent prints are on: the agent may then start one print here by itself, within 2 h.")}</p>}
+      </ConfirmDialog>
 
       <ConfirmDialog open={checking} title={t("Are the colours right?")} confirmLabel={t("Colours are right")} busy={busy}
         onConfirm={(name) => { setChecking(false); onConfirmColors(name); }} onClose={() => setChecking(false)}>

@@ -161,6 +161,7 @@ describe("admin routes", () => {
   const fake: FileStore = {
     async put(k, b) { mem.set(k, b); },
     async get(k) { const b = mem.get(k); if (!b) throw new Error("ENOENT"); return b; },
+    async remove(k) { mem.delete(k); },
   };
 
   beforeEach(() => { process.env.OPERATOR_PASSWORD = PASSWORD; mem.clear(); setFileStore(fake); });

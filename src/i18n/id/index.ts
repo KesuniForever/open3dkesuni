@@ -10,8 +10,12 @@ import lib from "./lib";
 import printing from "./printing";
 import customerColors from "./customer-colors";
 import budgetMaterial from "./budget-material";
+import slicing from "./slicing";
+import live from "./live";
+import landing from "./landing";
 
+// landing first: its few common words ("Printer", "Demo") give way to the translation the rest of the app already uses.
 export const ID: Readonly<Record<string, string>> = {
-  ...lib, ...shell, ...order, ...customer, ...machinesCapacity, ...financeQuality, ...chiefOps, ...demoTokenArc,
-  ...printing, ...customerColors, ...budgetMaterial,
+  ...landing, ...lib, ...shell, ...order, ...customer, ...machinesCapacity, ...financeQuality, ...chiefOps, ...demoTokenArc,
+  ...printing, ...customerColors, ...budgetMaterial, ...slicing, ...live,
 };

@@ -56,10 +56,10 @@ export default function AuditPanel({ events, total, now, more, empty, t, locale 
                   {e.line && <LineMore className="ops-line" line={e.line}>{e.text && <p>{e.text}</p>}</LineMore>}
                   <div className="ops-event-meta">
                     <span>{t(KIND[e.kind].label)}</span>
-                    {e.order.tag === "removed"
+                    {e.order.tag === "studio" ? <Link href="/machines">{t("Studio")}</Link> : e.order.tag === "removed"
                       ? <span>{e.order.id || t("No order")}</span>
                       : <Link href={`/orders/${e.order.id}`}>{e.order.id}</Link>}
-                    {e.order.tag !== "real" && <span className={`badge ${e.order.tag === "simulated" ? "simulated" : ""}`}>{t(e.order.tag === "removed" ? "order removed" : "simulated")}</span>}
+                    {e.order.tag !== "real" && e.order.tag !== "studio" && <span className={`badge ${e.order.tag === "simulated" ? "simulated" : ""}`}>{t(e.order.tag === "removed" ? "order removed" : "simulated")}</span>}
                     {e.href && <a href={e.href} target="_blank" rel="noreferrer">{t("View on explorer")}</a>}
                   </div>
                 </div>

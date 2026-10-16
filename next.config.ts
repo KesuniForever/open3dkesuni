@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // KESUNI_DIST_DIR lets the studio PC build a new version next to the one it is serving, then switch with seconds
+  // of downtime (build and start with the same value). Default .next, as Next.js expects.
+  distDir: process.env.KESUNI_DIST_DIR || ".next",
   // `npm run dev` only serves its JavaScript to localhost by default, so pages opened through a
   // Cloudflare quick tunnel or from a phone on the home Wi-Fi rendered but no button worked.
   allowedDevOrigins: ["*.trycloudflare.com", "192.168.100.*"],

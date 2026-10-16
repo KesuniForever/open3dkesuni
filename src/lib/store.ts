@@ -6,7 +6,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   Acceptance, AgentLogEntry, Attachment, CustomerMessage, DailyReview, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, Printer,
-  PrinterCommand, PrintJob, Quote, Vendor,
+  PrinterCommand, PrintJob, Quote, SliceJob, Vendor,
 } from "./types";
 import { usdcToMicro } from "./policy";
 
@@ -29,8 +29,20 @@ CREATE TABLE IF NOT EXISTS messages    (id TEXT PRIMARY KEY, order_id TEXT NOT N
 CREATE TABLE IF NOT EXISTS daily_reviews (day TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS print_jobs  (id TEXT PRIMARY KEY, order_id TEXT, printer_id TEXT NOT NULL, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS printer_commands (id TEXT PRIMARY KEY, printer_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS slice_jobs  (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, data TEXT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS slice_jobs_one_active_per_key ON slice_jobs (json_extract(data, '$.key'))
+  WHERE json_extract(data, '$.state') IN ('queued', 'slicing');
+-- Agent prints (src/lib/printer/jobs.ts createAgentPrintJob), second guard behind the code: one print per "Bed is empty"
+-- a person gave, and never two agent prints on their way to one printer. Rows without these fields are not indexed.
+CREATE UNIQUE INDEX IF NOT EXISTS print_jobs_one_per_bed_check ON print_jobs (json_extract(data, '$.bedCheckId'))
+  WHERE json_extract(data, '$.bedCheckId') IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS print_jobs_one_agent_job_in_flight ON print_jobs (printer_id)
+  WHERE json_extract(data, '$.actor') = 'agent' AND json_extract(data, '$.state') IN ('queued', 'uploading', 'sent');
+PRAGMA busy_timeout = 5000;
 `;
-const ORDER_TABLES = ["quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks", "attachments", "messages", "print_jobs"] as const;
+const ORDER_TABLES = [
+  "quotes", "decisions", "evidence", "acceptances", "intents", "agent_log", "escrows", "tasks", "attachments", "messages", "print_jobs", "slice_jobs",
+] as const;
 
 function open(): DatabaseSync {
   const file = process.env.KESUNI_DB_PATH || path.join(process.cwd(), "data", "local", "kesuni.db");
@@ -66,6 +78,45 @@ function conn(): DatabaseSync {
   }
   return c;
 }
+
+let savepoints = 0;
+/**
+ * Run fn in one write transaction: BEGIN IMMEDIATE, so another process waits (busy_timeout) instead of interleaving its
+ * check-then-write with ours. Inside a caller's transaction it runs as a SAVEPOINT (rolled back alone on a throw).
+ * fn must be synchronous: a Promise would let other requests in between the checks and the writes.
+ */
+export function transaction<T>(fn: () => T): T {
+  const c = conn();
+  const sync = (r: T): T => {
+    if (r && typeof (r as { then?: unknown }).then === "function") throw new Error("store.transaction: fn must be synchronous");
+    return r;
+  };
+  if (c.isTransaction) {
+    const name = `sp_${++savepoints}`;
+    c.exec(`SAVEPOINT ${name}`);
+    try {
+      const r = sync(fn());
+      c.exec(`RELEASE ${name}`);
+      return r;
+    } catch (e) {
+      c.exec(`ROLLBACK TO ${name}`);
+      c.exec(`RELEASE ${name}`);
+      throw e;
+    }
+  }
+  c.exec("BEGIN IMMEDIATE");
+  try {
+    const r = sync(fn());
+    c.exec("COMMIT");
+    return r;
+  } catch (e) {
+    if (c.isTransaction) c.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+/** A UNIQUE index refused the row (SQLite constraint error). */
+export const isUniqueViolation = (e: unknown): boolean => /UNIQUE constraint failed|constraint failed/i.test(e instanceof Error ? e.message : String(e));
 
 const parse = <T>(rows: unknown[]): T[] => rows.map((r) => JSON.parse((r as { data: string }).data) as T);
 const one = <T>(row: unknown): T | undefined => (row ? (JSON.parse((row as { data: string }).data) as T) : undefined);
@@ -197,6 +248,26 @@ export function saveAttachment(a: Attachment): void {
 export function updateAttachment(a: Attachment): void {
   conn().prepare("UPDATE attachments SET data = ? WHERE id = ?").run(JSON.stringify(a), a.id);
 }
+/**
+ * Delete an attachment's metadata and the evidence rows made from it (a QC photo's photo evidence), and write the log
+ * row that says who removed it, in one transaction: a removal is never recorded without its log, nor the other way
+ * round. The bytes in the file store are not touched. Write through src/lib/files.ts (removeAttachment): it checks who
+ * asks and when.
+ */
+export function deleteAttachment(id: string, evidenceIds: string[], log: Omit<AgentLogEntry, "id">): AgentLogEntry {
+  const c = conn();
+  c.exec("BEGIN");
+  try {
+    for (const e of evidenceIds) c.prepare("DELETE FROM evidence WHERE id = ?").run(e);
+    c.prepare("DELETE FROM attachments WHERE id = ?").run(id);
+    const entry = addLog(log);
+    c.exec("COMMIT");
+    return entry;
+  } catch (e) {
+    c.exec("ROLLBACK");
+    throw e;
+  }
+}
 
 // ---------- print jobs and printer commands (a person asks on the website; the LAN bridge carries them out) ----------
 // Write through src/lib/printer/jobs.ts: it checks who asks, the printer's state and the expiry of stale commands.
@@ -225,6 +296,22 @@ export function savePrinterCommand(c: PrinterCommand): void {
     .run(c.id, c.printerId, JSON.stringify(c));
 }
 
+// ---------- slice jobs (a person or the agent asks; the LAN bridge slices on the studio PC) ----------
+// Write through src/lib/slicing.ts: it checks the source, the spool, who asks, and expires stale slices.
+export const listSliceJobs = (filter: { orderId?: string } = {}): SliceJob[] =>
+  filter.orderId !== undefined
+    ? parse(conn().prepare("SELECT data FROM slice_jobs WHERE order_id = ? ORDER BY rowid").all(filter.orderId))
+    : parse(conn().prepare("SELECT data FROM slice_jobs ORDER BY rowid").all());
+export const getSliceJob = (id: string): SliceJob | undefined => one(conn().prepare("SELECT data FROM slice_jobs WHERE id = ?").get(id));
+export const nextSliceJobId = (): string => `SJ-${count("slice_jobs") + 1}-${Date.now().toString(36)}`;
+/** Insert only. Throws when another queued or slicing job has the same key (UNIQUE index): never two of one slice. */
+export function insertSliceJob(j: SliceJob): void {
+  conn().prepare("INSERT INTO slice_jobs (id, order_id, data) VALUES (?, ?, ?)").run(j.id, j.orderId, JSON.stringify(j));
+}
+export function updateSliceJob(j: SliceJob): void {
+  conn().prepare("UPDATE slice_jobs SET data = ? WHERE id = ?").run(JSON.stringify(j), j.id);
+}
+
 // ---------- customer messages (shown on the customer's page; write through src/lib/messages.ts) ----------
 export const listMessages = (orderId: string): CustomerMessage[] =>
   parse(conn().prepare("SELECT data FROM messages WHERE order_id = ? ORDER BY rowid").all(orderId));
@@ -247,6 +334,11 @@ export const listLog = (orderId: string): AgentLogEntry[] =>
 export const listLogBetween = (fromIso: string, toIso: string): AgentLogEntry[] =>
   parse(conn().prepare("SELECT data FROM agent_log WHERE json_extract(data, '$.at') >= ? AND json_extract(data, '$.at') < ? ORDER BY id")
     .all(fromIso, toIso));
+/** The newest log rows of these tools, across orders, newest first. */
+export const listLogByTools = (tools: string[], limit = 20): AgentLogEntry[] =>
+  tools.length === 0 ? [] : parse(conn().prepare(
+    `SELECT data FROM agent_log WHERE json_extract(data, '$.tool') IN (${tools.map(() => "?").join(", ")}) ORDER BY id DESC LIMIT ?`,
+  ).all(...tools, Math.max(1, Math.min(200, Math.trunc(limit)))));
 export function addLog(entry: Omit<AgentLogEntry, "id">): AgentLogEntry {
   const c = conn();
   const { lastInsertRowid } = c.prepare("INSERT INTO agent_log (order_id, data) VALUES (?, '{}')").run(entry.orderId);

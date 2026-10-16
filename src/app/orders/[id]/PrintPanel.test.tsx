@@ -95,3 +95,24 @@ describe("order page: printers panel", () => {
     expect(html).toMatch(/HMS_0510_0400_0001_0044/);
   });
 });
+
+describe("order page: the Agent line", () => {
+  const withAgent = (autoPrint: Parameters<typeof PrintPanel>[0]["autoPrint"], locale: Locale = "en") => text(renderToStaticMarkup(
+    <LocaleProvider locale={locale}>
+      <PrintPanel order={order({ status: "PLAN_CHOSEN", label: "real" })} attachments={[file("kesuni-benchy.gcode.3mf", benchy)]} printers={printers}
+        paid issueTexts={{}} autoPrint={autoPrint} busy={false} act={async () => {}} onChange={() => {}} />
+    </LocaleProvider>,
+  ));
+  const line = {
+    orderId: "ORD-9", why: { key: "Waiting for a person to confirm the bed on {printer}", vars: { printer: "A1 Combo #1" } }, action: "wait" as const,
+    printerId: "a1", runsDone: 0, runsNeeded: 1, runsActive: 0,
+  };
+
+  it("on or off, the runs and why the agent waits, in one short line", () => {
+    expect(withAgent({ on: true, line, runsSet: false })).toMatch(/Agent On Runs 0 of 1 Edit .* Waiting for a person to confirm the bed on A1 Combo #1/);
+    expect(withAgent({ on: false, line: { ...line, why: { key: "Agent prints are off: a person starts it" } }, runsSet: false })).toMatch(/Agent Off Runs 0 of 1/);
+    expect(withAgent({ on: true, line, runsSet: false }, "id")).toMatch(/Agen Menyala Cetakan 0 dari 1 Ubah .* Menunggu orang memastikan bed A1 Combo #1 kosong/);
+    // The (i) no longer says the Chief can never start a print: it says who can.
+    expect(withAgent(null)).toMatch(/The Chief \(Claude\) never starts a print; with agent prints on, code does/);
+  });
+});

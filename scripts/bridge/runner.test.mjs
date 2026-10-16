@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createRunner } from "./runner.mjs";
+import { AGENT_PRINTS_OFF_TEXT, createRunner } from "./runner.mjs";
 import { DRY_RUN_TEXT } from "./logic.mjs";
 import { benchy, fakeApp, fakeClock, fakePrinter, idleSnapshot, md5, queuedCommand, queuedJob, replyTo, withReport } from "./fakes.test-helper.mjs";
 
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 0xff, 0xd9]);
 
 /** One app, one printer (#1, "a1"), a clock that moves only when the runner waits. timeline: what happened, in order. */
-function setup({ commands = [], jobs = [], files = {}, printer = {}, dryRun = false, upload, grab, apps, parse } = {}) {
+function setup({ commands = [], jobs = [], files = {}, printer = {}, dryRun = false, upload, grab, apps, parse, agentPrints } = {}) {
   const clock = fakeClock();
   const app = fakeApp("http://app.test", { commands, jobs, files });
   const p = fakePrinter(clock, printer);
@@ -24,7 +24,7 @@ function setup({ commands = [], jobs = [], files = {}, printer = {}, dryRun = fa
       const target = all.find((a) => url.startsWith(a.base));
       return target ? target.fetch(url, init) : Promise.reject(new Error(`unexpected host: ${url}`));
     },
-    log: (t) => logs.push(t), warn: (t) => logs.push(t), ...(parse ? { parse } : {}),
+    log: (t) => logs.push(t), warn: (t) => logs.push(t), ...(parse ? { parse } : {}), ...(agentPrints !== undefined ? { agentPrints } : {}),
     grabFrame: async (ip, code) => { grabs.push({ ip, code }); return grab ? grab() : JPEG; },
     uploadToSd: async (o) => {
       timeline.push("upload");
@@ -177,6 +177,29 @@ describe("starting a print", () => {
     expect(s.logs.some((l) => l.startsWith("ok #1 PJ-1-test print: the printer is PREPARE"))).toBe(true);
     await s.run();
     expect(s.printer.published).toHaveLength(1);
+  });
+
+  it("an agent print needs BRIDGE_AGENT_PRINTS=on on this PC: refused before anything is downloaded or sent", async () => {
+    const item = { ...queuedJob(bytes), by: "agent", actor: "agent", bedConfirmedBy: "Khelda" };
+    const s = setup({ jobs: [item], files: { [item.id]: { bytes } }, printer: { react: prepares } });
+    await s.run();
+    expect(s.timeline).toEqual(["report:uploading", "report:failed"]);
+    expect(last(s.app, item.id)).toEqual({ state: "failed", error: AGENT_PRINTS_OFF_TEXT });
+    expect(s.uploaded).toEqual([]);
+    expect(s.printer.published).toEqual([]);
+  });
+
+  it("with BRIDGE_AGENT_PRINTS=on an agent print goes like a person's, checked against the person who confirmed the bed", async () => {
+    const item = { ...queuedJob(bytes), by: "agent", actor: "agent", bedConfirmedBy: "Khelda", expectedTrays: [{ tray: 0, type: "PLA", color: "#FEC600" }] };
+    const s = setup({ jobs: [item], files: { [item.id]: { bytes } }, printer: { react: prepares }, agentPrints: true });
+    await s.run();
+    expect(s.timeline).toEqual(["report:uploading", "upload", "report:sent", "publish:project_file"]);
+    expect(s.logs.some((l) => l.includes("asked by the agent (bed confirmed by Khelda)"))).toBe(true);
+    const noBed = { ...queuedJob(bytes), by: "agent", actor: "agent" };
+    const s2 = setup({ jobs: [noBed], files: { [noBed.id]: { bytes } }, agentPrints: true });
+    await s2.run();
+    expect(last(s2.app, noBed.id).error).toContain("The agent prints only after a person confirmed the bed is empty");
+    expect(s2.printer.published).toEqual([]);
   });
 
   it("refuses a file whose checksum does not match: nothing is uploaded", async () => {

@@ -84,6 +84,7 @@ export const ENV_VARS: EnvVar[] = [
   { name: "KESUNI_AGENT_MODE", need: "optional", what: "claude or rules" },
   { name: "KESUNI_AGENT_MODEL", need: "optional", what: "Claude model id" },
   { name: "KESUNI_MAX_WAKES_PER_HOUR", need: "optional", what: "Cap on Chief runs per hour" },
+  { name: "KESUNI_AUTO_PRINT", need: "optional", what: "off = the agent never starts or slices a print, whatever the switch on the Chief page says" },
   { name: "IDR_PER_USDC", need: "optional", what: "Rupiah per USDC; default 16500" },
   { name: "KESUNI_PRICE_PER_GRAM_IDR", need: "optional", what: "Price per gram" },
   { name: "KESUNI_COST_PER_GRAM_IDR", need: "optional", what: "Cost per gram" },

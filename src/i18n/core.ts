@@ -4,8 +4,11 @@
 export type Locale = "en" | "id";
 export const LOCALES: Locale[] = ["en", "id"];
 export const DEFAULT_LOCALE: Locale = "en";
-/** Cookie that remembers the visitor's choice. Without it the site is English. */
-export const LOCALE_COOKIE = "lang";
+/**
+ * Cookie that remembers the visitor's choice for the browser session. Without it the site is English. Renamed from
+ * "lang" (kept for a year) on 16 Oct 2026, so an old Indonesian choice no longer opens the site in Indonesian.
+ */
+export const LOCALE_COOKIE = "site_lang";
 
 export const toLocale = (v: unknown): Locale => (v === "id" ? "id" : DEFAULT_LOCALE);
 

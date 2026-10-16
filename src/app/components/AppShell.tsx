@@ -13,7 +13,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: "Workspace",
     items: [
-      { href: "/", label: "Overview", icon: "overview", active: (p) => p === "/" },
+      { href: "/dashboard", label: "Overview", icon: "overview", active: (p) => p === "/dashboard" },
       { href: "/demo", label: "Demo center", icon: "play", active: (p) => p.startsWith("/demo") },
       { href: "/quality", label: "Value & quality", icon: "gauge", active: (p) => p.startsWith("/quality") },
       { href: "/machines", label: "My machines", icon: "printer", active: (p) => p.startsWith("/machines") },
@@ -35,13 +35,15 @@ const NAV: { group: string; items: NavItem[] }[] = [
   },
 ];
 
-/** Customer pages (opened from WhatsApp) never get the operator shell, not even the 404 for a cut-off link (/c, /request). */
+/** Customer pages (opened from WhatsApp), the public Live studio and the landing page ("/", /welcome) never get the
+ *  operator shell (its links only ask for the password), not even the 404 for a cut-off link (/c, /request, /live, /welcome). */
 export const isCustomerPage = (path: string) =>
-  path === "/c" || path.startsWith("/c/") || path === "/request" || path.startsWith("/request/");
+  path === "/" || path === "/c" || path.startsWith("/c/") || path === "/request" || path.startsWith("/request/") || path === "/live" || path.startsWith("/live/") ||
+  path === "/welcome" || path.startsWith("/welcome/");
 
 function crumb(path: string): string[] {
   if (path.startsWith("/orders/")) return ["Orders", decodeURIComponent(path.split("/")[2] ?? "")];
-  // Longest match first, so "/" (Overview) never wins over a deeper page.
+  // The first item whose rule matches; each rule names its own section.
   for (const g of NAV) for (const i of g.items) if (i.active(path)) return [i.label];
   return [];
 }
@@ -50,7 +52,10 @@ function crumb(path: string): string[] {
  * The operator layout: a left sidebar (brand + grouped nav) and a top bar with a breadcrumb. On phone width the
  * sidebar becomes a top bar with a menu button. Pages render their own content inside.
  */
-export default function AppShell({ network, children }: { network: { name: string; isTestnet: boolean }; children: React.ReactNode }) {
+export default function AppShell({ network, children }: {
+  network: { name: string; isTestnet: boolean };
+  children: React.ReactNode;
+}) {
   const path = usePathname() ?? "/";
   const [open, setOpen] = useState(false);
   const t = useT();
@@ -99,7 +104,7 @@ export default function AppShell({ network, children }: { network: { name: strin
       <div className="shell-main">
         <header className="shell-top">
           <nav className="crumbs" aria-label={t("Breadcrumb")}>
-            <Link href="/">Open3DKesuni</Link>
+            <Link href="/dashboard">Open3DKesuni</Link>
             {trail.map((c, i) => (
               <span key={`${c}-${i}`} className="crumb">
                 <Icon name="chevron" size={14} />

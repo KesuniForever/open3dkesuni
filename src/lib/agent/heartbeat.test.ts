@@ -5,8 +5,12 @@ import { chooseQuote } from "../actions";
 import { customerAgree } from "../agreement";
 import { customerPay } from "../customer";
 import { DEMO, fakeCircle } from "../fake-circle.test-helper";
-import { completeTask, ingestReport, linkPrinter } from "../printer/actions";
-import type { PrinterSnapshot } from "../printer/bambu";
+import { clearBed, completeTask, confirmColors, ingestReport, linkPrinter } from "../printer/actions";
+import { mergeReport, type PrinterSnapshot } from "../printer/bambu";
+import { setAutoPrint } from "../printer/dispatch";
+import { addAttachment, setFileStore, type FileStore } from "../files";
+import { fake3mf } from "../threemf.test-helper";
+import { SLICER_NAME } from "../slice-rules";
 import { setLlmGateway, type LlmResponse } from "./chief";
 import { checkHeartbeat, heartbeatStatus, runHeartbeat, startHeartbeatScheduler } from "./heartbeat";
 import { register } from "@/instrumentation";
@@ -301,5 +305,65 @@ describe("scheduler and API", () => {
     const j = await (await POST()).json();
     expect(j.last).toMatchObject({ trigger: "button", woke: [{ orderId: ORDER }] });
     expect(j.nextRunAt).toEqual(expect.any(String));
+  });
+});
+
+describe("agent prints on the heartbeat (code, no Claude)", () => {
+  const mem = new Map<string, Uint8Array>();
+  const files: FileStore = { async put(k, b) { mem.set(k, b); }, async get(k) { return mem.get(k)!; }, async remove(k) { mem.delete(k); } };
+  const IDLE = {
+    gcode_state: "IDLE", sdcard: true, hms: [], nozzle_diameter: "0.4",
+    ams: { ams: [{ id: "0", info: "1002", tray: [{ id: "0", tray_type: "PLA", tray_color: "FEC600FF", tray_sub_brands: "" }] }] },
+  };
+  async function paidOrderWithFile() {
+    chooseQuote(ORDER, "Q-own", "agent", "within budget");
+    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real" });
+    store.saveEscrow({
+      orderId: ORDER, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state: "FUNDED", txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: new Date().toISOString(),
+    });
+    setFileStore(files);
+    const bytes = fake3mf({ projectColours: ["#FCE300"], plates: [{ index: 1, filaments: [{ id: 1, type: "PLA", color: "#FCE300", usedG: 9 }] }] });
+    // As the studio PC slices it (the agent prints only those): the STL, the sliced file, and the done slice linking them.
+    const src = await addAttachment(ORDER, { kind: "design", filename: "Benchy.stl", bytes: new TextEncoder().encode("solid b endsolid b"), uploadedBy: "Khelda" });
+    const up = await addAttachment(ORDER, { kind: "design", filename: "Benchy.gcode.3mf", bytes, uploadedBy: SLICER_NAME });
+    if (!up.ok || !src.ok) throw new Error("upload failed");
+    const at = new Date().toISOString();
+    store.insertSliceJob({
+      id: store.nextSliceJobId(), orderId: ORDER, attachmentId: src.attachment.id, sourceName: "Benchy.stl", mode: "mesh", printerId: "a1", tray: 0,
+      material: "PLA", color: "#FCE300", quality: "standard", infillPct: 20, supports: "auto", key: "test", state: "done", actor: "person", by: "Khelda",
+      createdAt: at, updatedAt: at, resultAttachmentId: up.attachment.id,
+    });
+    ingestReport("a1", mergeReport(undefined, { print: IDLE }, new Date().toISOString())!, []);
+    confirmColors("a1", "Khelda");
+  }
+  afterEach(() => setFileStore(undefined));
+
+  it("with agent prints on, a paid order waiting for a printer does not wake Claude: the dispatcher says why it waits", async () => {
+    await paidOrderWithFile();
+    expect(setAutoPrint({ on: true, by: "Khelda", confirm: true }).ok).toBe(true);
+    const s = await beat();
+    const f = s.findings.find((x) => x.kind === "start_production")!;
+    expect(f).toMatchObject({ wake: false, text: expect.stringContaining("Waiting for a person to confirm the bed on A1 Combo #1") });
+    expect(fromHeartbeat()).toEqual([]);
+  });
+
+  it("the beat runs the dispatcher before any wake: after a person's 'Bed is empty' it queues the print", async () => {
+    await paidOrderWithFile();
+    expect(setAutoPrint({ on: true, by: "Khelda", confirm: true }).ok).toBe(true);
+    expect(clearBed("a1", "Khelda").ok).toBe(true);
+    // (the switch-on and bed routes run the dispatcher too; here only the beat does)
+    const s = await beat(new Date(Date.now() + 1000));
+    expect(s.actions.some((a) => /^Agent print PJ-\S+ for ORD-001 queued on a1$/.test(a))).toBe(true);
+    expect(store.listPrintJobs()).toEqual([expect.objectContaining({ actor: "agent", bedConfirmedBy: "Khelda" })]);
+    expect(fromHeartbeat()).toEqual([]);
+  });
+
+  it("with agent prints off the beat wakes the Chief as before and the dispatcher does nothing", async () => {
+    await paidOrderWithFile();
+    expect(clearBed("a1", "Khelda").ok).toBe(true);
+    const s = await beat();
+    expect(s.findings.find((x) => x.kind === "start_production")).toMatchObject({ wake: true });
+    expect(store.listPrintJobs()).toEqual([]);
   });
 });

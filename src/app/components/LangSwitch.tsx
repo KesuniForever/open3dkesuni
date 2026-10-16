@@ -5,12 +5,15 @@ import { useTransition } from "react";
 import { LOCALE_COOKIE, LOCALES, type Locale } from "@/i18n/core";
 import { useLocale, useT } from "@/i18n/client";
 
-/** Remembers the choice in this browser for a year (outside the component, so React's lint sees no render-time mutation). */
+/**
+ * Remembers the choice until the browser is closed (a session cookie), so every new visit opens in English, as the
+ * judges should see it. Outside the component, so React's lint sees no render-time mutation.
+ */
 function saveLocale(l: Locale) {
-  document.cookie = `${LOCALE_COOKIE}=${l}; path=/; max-age=31536000; samesite=lax`;
+  document.cookie = `${LOCALE_COOKIE}=${l}; path=/; samesite=lax`;
 }
 
-/** EN | ID switch, top right. English stays the default; the choice is remembered in this browser for a year. */
+/** EN | ID switch, top right. English stays the default; the choice lasts until the browser is closed. */
 export default function LangSwitch() {
   const router = useRouter();
   const current = useLocale();

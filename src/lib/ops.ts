@@ -9,6 +9,8 @@ import { explorerTxBase, isTestnetChain } from "./network";
 import { quoteIdr } from "./owner-rules";
 import { agreementHash } from "./agreement";
 import { skillOf, type Skill } from "./agent/skills";
+import { nameOf } from "./colors";
+import { whyLine as whyInPage } from "./printer/why-text";
 import type { AgentLogEntry, ChainTx, Decision, Escrow, OperatorTask, Order, Quote } from "./types";
 import { dateLocale, makeT, type Locale, type T } from "../i18n/core";
 
@@ -63,14 +65,18 @@ export const wibDay = (iso: string): string => new Date(Date.parse(iso) + WIB_MS
 
 // ---------- orders: real, simulated or removed ----------
 
-export type OrderTag = "real" | "simulated" | "removed";
+/** "studio": a row about the whole studio or one printer (the agent-prints switch, a printer with no order), not an order. */
+export type OrderTag = "real" | "simulated" | "removed" | "studio";
 export interface OrderRef { id: string; tag: OrderTag; product?: string }
+
+/** Log rows filed under "studio" (src/lib/printer/dispatch.ts) or "printer:<id>" (src/lib/printer/actions.ts). */
+const isStudioRow = (id: string) => id === "studio" || id.startsWith("printer:");
 
 export function orderTagger(orders: Order[]): (id: string) => OrderRef {
   const byId = new Map(orders.map((o) => [o.id, o]));
   return (id) => {
     const o = byId.get(id);
-    if (!o) return { id, tag: "removed" };
+    if (!o) return { id, tag: isStudioRow(id) ? "studio" : "removed" };
     return { id, tag: o.label === "real" ? "real" : "simulated", product: o.product };
   };
 }
@@ -80,8 +86,9 @@ export const pickFilter = (v: string | string[] | undefined): TagFilter => {
   const w = Array.isArray(v) ? v[0] : v;
   return w === "real" || w === "simulated" ? w : "all";
 };
-/** "simulated" also holds rows of removed orders: neither is real business. */
-export const matchesFilter = (tag: OrderTag, f: TagFilter): boolean => f === "all" || (f === "real" ? tag === "real" : tag !== "real");
+/** "simulated" also holds rows of removed orders: neither is real business. Studio rows show under "all" only. */
+export const matchesFilter = (tag: OrderTag, f: TagFilter): boolean =>
+  f === "all" || (f === "real" ? tag === "real" : tag === "simulated" || tag === "removed");
 
 // ---------- one line per log row ----------
 
@@ -160,12 +167,44 @@ export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
     case "printer_command": return { title: t("Printer control by {name}", { name: str(i.by) }), line: str(i.kind) || undefined };
     case "print_job":
       return e.ok ? { title: t("Print sent to the printer"), line: str(o.printer) || undefined } : { title: t("Print did not start"), line: oneLine(str(o.error)) || undefined };
+    // A person removed a file from the order (the Chief has no tool for it). A failed row: its stored copy stayed.
+    case "remove_file":
+      return e.ok
+        ? { title: t("File removed by {name}", { name: str(i.by) }), line: str(i.filename) || undefined }
+        : { title: t("Stored copy not deleted"), line: [str(i.filename), str(o.storageKey)].filter(Boolean).join(" · ") || undefined };
+    // Slicing on the studio PC (src/lib/slicing.ts): asked by a person, or by the agent through the dispatcher.
+    case "slice_request":
+      return {
+        title: e.actor === "agent" ? t("Agent asked for a slice") : t("Slice asked by {name}", { name: str(i.by) }),
+        line: [str(i.file), [str(i.material), str(i.color) ? t(nameOf(str(i.color))) : ""].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || undefined,
+      };
+    case "slice_result":
+      return e.ok
+        ? { title: t("Sliced on the studio PC"), line: [str(o.file), o.weightG ? `${str(o.weightG)} g` : "", o.minutes ? t("{m} min", { m: str(o.minutes) }) : ""].filter(Boolean).join(" · ") || undefined }
+        : { title: t("Slice failed"), line: oneLine(str(o.error)) || undefined };
+    case "slice_cancel": return { title: t("Slice cancelled by {name}", { name: str(i.by) }), line: str(i.file) || undefined };
+    // Agent prints (src/lib/printer/dispatch.ts): code, never Claude, only after a person's "Bed is empty".
+    case "auto_print":
+      return { title: t("Agent started a print on {printer}", { printer: str(o.printer) || str(i.printerId) }),
+        line: [str(i.file), i.bedConfirmedBy ? t("bed confirmed by {name}", { name: str(i.bedConfirmedBy) }) : ""].filter(Boolean).join(" · ") || undefined };
+    case "auto_print_wait": return { title: t("Agent print waits"), line: whyLine(i, o, t) };
+    case "auto_print_switch": return { title: t(i.on ? "Agent prints turned on by {name}" : "Agent prints turned off by {name}", { name: str(i.by) }) };
+    case "auto_print_runs": return { title: t("Runs set by {name}", { name: str(i.by) }), line: t("{n} runs", { n: str(i.runsNeeded) }) };
+    case "clear_bed": return { title: t("Bed confirmed empty by {name}", { name: str(i.by) }), line: str(o.printer) || undefined };
+    case "request_dispatch": return { title: t("Asked the dispatcher to look"), line: oneLine(str(o.thisOrder)) || undefined };
     case "agent_start": return { title: triggerTitle(str(i.trigger), t), ...detail(str(i.trigger)) };
     case "agent_thought": case "agent_summary": return { title: t("Chief summary"), ...detail(str(o.text)) };
     case "llm_unavailable": return { title: t("Claude unavailable"), line: oneLine(str(o.error), 140) };
     case "agent_wake_skipped": return { title: t("Wake-up skipped"), ...detail(str(o.reason)) };
     default: return { title: e.tool.replace(/_/g, " ") };
   }
+}
+
+/** The dispatcher's stored reason (input.key + input.vars) in the page's language, else the English text it logged. */
+function whyLine(i: Record<string, unknown>, o: Record<string, unknown>, t: T): string | undefined {
+  const key = str(i.key);
+  const vars = obj(i.vars) as Record<string, string | number>;
+  return (key ? whyInPage(t, { key, vars }) : str(o.text)) || undefined;
 }
 
 const KIND_LABEL: Record<string, string> = {

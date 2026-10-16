@@ -12,7 +12,7 @@ import { reputation, type Reputation } from "../reputation";
 import { agentMode, agentModel, llmGateway, type LlmRequest } from "./chief";
 import { hideName, redactNote } from "./tools";
 import { countableRows } from "./skills";
-import type { ChainTx, DailyReview, Order, OperatorTask } from "../types";
+import type { AgentLogEntry, ChainTx, DailyReview, Order, OperatorTask } from "../types";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -82,8 +82,16 @@ export interface DailyFacts {
 }
 
 // Bookkeeping entries in the log, not actions of the Chief.
-const META = ["agent_start", "agent_thought", "agent_summary", "llm_unavailable", "heartbeat", "agent_wake_skipped"];
+const META = ["agent_start", "agent_thought", "agent_summary", "llm_unavailable", "heartbeat", "agent_wake_skipped", "auto_print_wait"];
 const DECIDING = ["choose_plan", "price_by_weight", "choose_printer", "create_operator_task"];
+
+/** The Chief's own steps among log rows: agent rows without the bookkeeping, one row per action (see countableRows).
+ *  The daily review, the Chief page and the public /live overview count decisions and questions to people from these. */
+export const chiefSteps = <R extends AgentLogEntry>(log: R[]): R[] => countableRows(log.filter((e) => e.actor === "agent" && !META.includes(e.tool)));
+/** A plan, price, printer or task the Chief decided itself. */
+export const isDecision = (e: Pick<AgentLogEntry, "ok" | "tool">): boolean => e.ok && DECIDING.includes(e.tool);
+/** A question the Chief handed to a person instead of guessing. */
+export const isEscalation = (e: Pick<AgentLogEntry, "tool">): boolean => e.tool === "request_human_decision";
 const UNFINISHED: Order["status"][] = ["CREATED", "PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"];
 const ACTIVE: Order["status"][] = [...UNFINISHED, "ACCEPTED"];
 const EVENT: Partial<Record<ChainTx["kind"], MoneyLine["event"]>> = { deposit: "funded", release: "released", refund: "refunded" };
@@ -157,7 +165,7 @@ export function dailyFacts(day: string, now: Date = new Date()): DailyFacts {
 
   // the Chief's activity, from the decision log
   const log = store.listLogBetween(new Date(from).toISOString(), new Date(to).toISOString()).filter((e) => e.actor === "agent");
-  const tools = countableRows(log.filter((e) => !META.includes(e.tool))); // one row per action, see countableRows
+  const tools = chiefSteps(log); // one row per action, see countableRows
   const starts = log.filter((e) => e.tool === "agent_start");
   const refusals = tools.filter((e) => !e.ok);
   const reasons = [...new Set(refusals.map((e) => {
@@ -204,8 +212,8 @@ export function dailyFacts(day: string, now: Date = new Date()): DailyFacts {
       heartbeatWakeups: starts.filter((e) => String(obj(e.input).trigger ?? "").startsWith("Heartbeat check")).length,
       heartbeatFindings: log.filter((e) => e.tool === "heartbeat").length,
       toolCalls: tools.length,
-      decisions: tools.filter((e) => e.ok && DECIDING.includes(e.tool)).length,
-      escalations: tools.filter((e) => e.tool === "request_human_decision").length,
+      decisions: tools.filter(isDecision).length,
+      escalations: tools.filter(isEscalation).length,
       refusals: refusals.length,
       refusalReasons: reasons,
       messagesToCustomers: messages.filter((m) => m.by === "agent").length,

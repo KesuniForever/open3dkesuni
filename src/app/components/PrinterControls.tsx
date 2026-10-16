@@ -68,7 +68,8 @@ export function ConfirmDialog({ open, title, children, confirmLabel, danger = fa
   }, [open]);
   const by = name.trim();
   return (
-    <dialog ref={ref} className="pc-dialog" style={DIALOG} onClose={onClose} aria-label={title}>
+    // Escape cannot close the dialog while its action runs (like its Cancel button).
+    <dialog ref={ref} className="pc-dialog" style={DIALOG} onClose={onClose} onCancel={(e) => { if (busy) e.preventDefault(); }} aria-label={title}>
       {open && (
         <form onSubmit={(e) => { e.preventDefault(); if (ready && by && !busy) onConfirm(by); }}>
           <h2 style={{ fontSize: 17, margin: "0 0 10px", letterSpacing: "-0.3px" }}>{title}</h2>

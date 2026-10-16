@@ -210,8 +210,8 @@ function HeartbeatTab({ now, t }: { now: Date; t: T }) {
                   </div>
                   <LineMore className="ops-line" line={b.line}>{b.text && <p>{b.text}</p>}</LineMore>
                   <div className="ops-event-meta">
-                    {b.order.tag === "removed" ? <span>{b.order.id}</span> : <Link href={`/orders/${b.order.id}`}>{b.order.id}</Link>}
-                    {b.order.tag !== "real" && <span className={`badge ${b.order.tag === "simulated" ? "simulated" : ""}`}>{t(b.order.tag === "removed" ? "order removed" : "simulated")}</span>}
+                    {b.order.tag === "studio" ? <Link href="/machines">{t("Studio")}</Link> : b.order.tag === "removed" ? <span>{b.order.id}</span> : <Link href={`/orders/${b.order.id}`}>{b.order.id}</Link>}
+                    {b.order.tag !== "real" && b.order.tag !== "studio" && <span className={`badge ${b.order.tag === "simulated" ? "simulated" : ""}`}>{t(b.order.tag === "removed" ? "order removed" : "simulated")}</span>}
                   </div>
                 </li>
               ))}

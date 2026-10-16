@@ -1,6 +1,7 @@
 import { listOpenTasks, listOrders, listPrinters } from "@/lib/store";
 import { ago, isOnline, isPrinterTask, lastBridgeReport, ONLINE_MS } from "@/lib/machines";
 import { cameraFrame } from "@/lib/printer/jobs";
+import { safePlan } from "@/lib/printer/dispatch";
 import type { Printer } from "@/lib/types";
 import type { T } from "@/i18n/core";
 import { getLocale, getT } from "@/i18n/server";
@@ -40,7 +41,7 @@ export default async function MachinesPage({ searchParams }: { searchParams: Pro
 
       {tab === "printers" ? (
         <>
-          <MachinesBoard initial={printers} serverNow={now} orders={orders} tasks={tasks} issueTexts={texts} />
+          <MachinesBoard initial={printers} initialPlan={safePlan(now)} serverNow={now} orders={orders} tasks={tasks} issueTexts={texts} />
           {tasks.length > 0 && <PrinterTasks tasks={tasks} printers={printers} orders={orders} texts={texts} />}
         </>
       ) : (
@@ -67,14 +68,14 @@ function Connection({ printers, now, t }: { printers: Printer[]; now: number; t:
     { icon: "box", title: "Bed check", on: false, note: t("Printers cannot see the bed. A person confirms it is empty.") },
     { icon: "play", title: "Camera", on: frames, note: frames ? t("One frame at a time, through the LAN bridge.") : t("No frame in the last 5 min.") },
     { icon: "shield", title: "Remote control", on: true, yes: "People only",
-      note: t("Start, pause, resume, stop, speed and light, each with a person's name. Never the Chief; never heat, move or G-code.") },
+      note: t("Each control with a person's name. Agent prints (code, when on) start only after a person confirmed the bed empty. Never the Chief; never heat, move or G-code.") },
     { icon: "chain", title: "Cloud", on: false, note: t("No Bambu cloud. The bridge reads the printers on the studio network.") },
   ];
 
   return (
     <>
       <Callout icon="shield" title={t("People control, the Chief only reads")}>
-        {t("A person starts, pauses or stops a print with their name. The app never moves an axis, heats or sends G-code.")}
+        {t("A person pauses or stops a print with their name. A print starts by a person, or by code after a person confirmed the bed empty when agent prints are on. The app never moves an axis, heats or sends G-code.")}
       </Callout>
 
       <section className="card mach-card-flush">

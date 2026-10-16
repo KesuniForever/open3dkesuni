@@ -1,9 +1,12 @@
 // Printing from the website: a PERSON asks for a control or a print here; the LAN bridge (the only thing that can
 // reach the printers) picks it up from /api/printers/queue, does it, and reports back. The app checks first
 // (control.ts), the bridge checks again against its live snapshot. Nothing here is reachable from the Chief:
-// src/lib/agent never imports this file (a test checks it), and every request needs a person's name.
+// src/lib/agent never imports this file (a test checks it), and every control needs a person's name.
+// One exception, in code: createAgentPrintJob, the only way the agent dispatcher (src/lib/printer/dispatch.ts, no
+// Claude) starts a print. It re-checks every gate itself (src/lib/printer/autoprint.ts) inside one transaction: the
+// switch a person turned on, a person's unused "Bed is empty", the printer, the order and the file.
 // Stale requests never fire later: a command the bridge has not picked up in 60 s expires, a print in 5 min fails, and a
-// print is never sent more than 10 min after the person confirmed the bed (START_CONFIRM_MS).
+// print is never sent more than 10 min after the bed was confirmed or the agent queued it (START_CONFIRM_MS).
 import { createHash } from "node:crypto";
 import * as store from "../store";
 import type { Fail } from "../actions";
@@ -12,7 +15,9 @@ import {
   canStartPrint, COMMAND_EXPIRY_MS, COMMAND_GAP_MS, COMMAND_KINDS, commandReasons, CONFIRM_KINDS, CONTROL_KINDS, isPersonName,
   JOB_PICKUP_MS, sdFileName, SENT_TIMEOUT_MS, START_CONFIRM_MS, START_GAP_MS, subtaskName, UPLOAD_TIMEOUT_MS,
 } from "./control";
-import { clearBed, linkPrinter, printerName } from "./actions";
+import { clearBed, createTask, linkPrinter, printerName, printerRef } from "./actions";
+import { AGENT_OPTIONS, agentFileProblem, agentSpoolProblem, autoPrintOn, expectedTrays, orderGate, pairing, printerGate } from "./autoprint";
+import { bedState, whyText } from "./autoprint-rules";
 import type { Attachment, PrintJob, PrintJobState, PrinterCommand, PrinterCommandKind, PrinterCommandState, PrintOptions } from "../types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
@@ -20,6 +25,22 @@ const ID = /^[a-z0-9-]{1,32}$/;
 /** A command the bridge took but never answered is marked failed after this. */
 const COMMAND_SENT_TIMEOUT_MS = 5 * 60_000;
 const iso = (now: number) => new Date(now).toISOString();
+const logActor = (j: Pick<PrintJob, "actor">): "agent" | "human" => (j.actor === "agent" ? "agent" : "human");
+
+/**
+ * An agent print that did not start (refused, expired, the bridge could not send it): ONE task for a person. The bed
+ * confirmation it used stays used, so the agent never tries that printer again by itself, and the order waits until a
+ * person closes the task (autoprint.ts orderGate).
+ */
+function agentJobFailed(j: PrintJob, error: string): void {
+  if (j.actor !== "agent") return;
+  const key = `autoprint:failed:${j.id}`;
+  if (store.listAllTasks().some((t) => t.key === key)) return;
+  const why = error.trim().replace(/[.:;,]?$/, ".");
+  createTask(j.orderId ?? printerRef(j.printerId), "check_printer",
+    `Agent print ${j.id} did not start on ${printerName(j.printerId)}: ${why} Check the printer, then mark this task done and press Bed is empty.`,
+    j.printerId, undefined, key);
+}
 
 // ---------- expiry ----------
 
@@ -41,9 +62,10 @@ export function expireStale(now = Date.now()): void {
     const stale = (error: string) => {
       store.savePrintJob({ ...j, state: "failed", updatedAt: iso(now), error });
       if (j.orderId) {
-        store.addLog({ orderId: j.orderId, actor: "human", tool: "print_job", input: { jobId: j.id, state: "failed" }, ok: false,
+        store.addLog({ orderId: j.orderId, actor: logActor(j), tool: "print_job", input: { jobId: j.id, state: "failed" }, ok: false,
           output: { printer: printerName(j.printerId), error }, at: iso(now) });
       }
+      agentJobFailed(j, error);
     };
     if (j.state === "queued" && now - Date.parse(j.createdAt) > JOB_PICKUP_MS) {
       stale("The bridge did not pick it up within 5 min. Check the bed again and start again.");
@@ -172,8 +194,10 @@ export function createPrintJob(input: PrintJobInput, now = Date.now()):
   }
   if (reasons.length) return { ...fail(409, "The print cannot start", reasons), warnings, match };
 
-  // The person at the printer confirmed the bed is empty: clear the flag the last print left.
-  if (printer.bedOccupiedBy) clearBed(printerId, by);
+  // A person's "Bed is empty" nobody used yet: this print uses it (the agent never gets a second print from it).
+  const bed = bedState(printer, now);
+  // The person at the printer confirmed the bed is empty: clear the flag the last print left (no grant: the person uses it).
+  if (printer.bedOccupiedBy) clearBed(printerId, by, { grant: false, quiet: true }, now);
   const linked = linkPrinter(printerId, orderId, "human");
   if (!linked.ok) warnings.push(`Not linked to ${orderId}: ${linked.error}`);
   const at = iso(now);
@@ -181,11 +205,105 @@ export function createPrintJob(input: PrintJobInput, now = Date.now()):
     id: store.nextPrintJobId(), orderId, printerId, attachmentId: attachment.id, plate,
     fileName: sdFileName(orderId, plate, Math.floor(now / 1000)), amsMapping: options.useAms ? amsMapping : [], options,
     state: "queued", by, createdAt: at, updatedAt: at, subtaskName: subtaskName(orderId, order.product), ...(urlForm ? { urlForm } : {}),
+    ...(bed.ok ? { bedCheckId: bed.check.id } : {}),
   };
-  store.savePrintJob(job);
+  try {
+    store.savePrintJob(job);
+  } catch (e) {
+    // The agent used that bed confirmation a moment ago (another process): the person's own confirmation stands.
+    if (!bed.ok || !store.isUniqueViolation(e)) throw e;
+    delete job.bedCheckId;
+    store.savePrintJob(job);
+  }
+  if (job.bedCheckId && bed.ok) {
+    const p = store.getPrinter(printerId)!;
+    store.savePrinter({ ...p, bedCheck: { ...bed.check, usedBy: job.id, usedAt: at } });
+  }
   store.addLog({ orderId, actor: "human", tool: "start_print", input: { printerId, attachmentId: attachment.id, plate, amsMapping: job.amsMapping, options, by, ...(urlForm ? { urlForm } : {}) },
     ok: true, output: { jobId: job.id, printer: printerName(printerId), warnings }, at });
   return { ok: true, job, warnings, match };
+}
+
+export interface AgentPrintInput {
+  printerId: string;
+  orderId: string;
+  attachmentId: string;
+  /** The dispatcher's reasons, stored on the job and in the log. */
+  why?: string[];
+  /** What made the dispatcher run ("bed_cleared", "heartbeat", ...). */
+  trigger?: string;
+}
+
+/**
+ * Every reason the agent may not start this print now, from the gates in src/lib/printer/autoprint.ts: the switch, the
+ * printer, a person's unused bed confirmation, the order, the file and the pairing. Empty: it may.
+ */
+export function agentStartReasons(input: Pick<AgentPrintInput, "printerId" | "orderId" | "attachmentId">, now = Date.now()): string[] {
+  if (!autoPrintOn()) return ["Agent prints are off"];
+  const p = store.getPrinter(input.printerId);
+  const o = store.getOrder(input.orderId);
+  const a = store.getAttachment(input.attachmentId);
+  if (!p) return ["Printer not found"];
+  if (!o) return ["Order not found"];
+  if (!a) return ["File not found"];
+  const reasons: string[] = [];
+  const og = orderGate(o);
+  if (og.why) reasons.push(whyText(og.why));
+  const file = agentFileProblem(o, a);
+  if (file) return [...reasons, whyText(file)];
+  const pg = printerGate(p, now, o.id);
+  if (!pg.ok) reasons.push(whyText(pg.why!));
+  const info = a.parsed3mf!;
+  const pair = pairing(p, { attachment: a, info, plate: info.plates[0] }, o.id, now, pg.bed?.by ?? "");
+  for (const r of pair.reasons) if (!reasons.includes(r)) reasons.push(r);
+  return reasons;
+}
+
+/**
+ * The agent dispatcher starts a print (src/lib/printer/dispatch.ts; never Claude, never a route). In one transaction:
+ * re-check every gate (agentStartReasons), then queue the job for the bridge with the AMS mapping matchJob found, link
+ * the printer to the order, use up the person's bed confirmation and log it ("auto_print", actor agent). Two
+ * dispatchers at once (another request, another process) never make two prints: the second sees the bed confirmation
+ * used, and the UNIQUE indexes on print_jobs (one job per bed confirmation, one agent job on its way per printer)
+ * refuse the row if it got that far.
+ */
+export function createAgentPrintJob(input: AgentPrintInput, now = Date.now()): { ok: true; job: PrintJob; match: JobMatch } | Fail {
+  try {
+    return store.transaction(() => {
+      expireStale(now);
+      const reasons = agentStartReasons(input, now);
+      if (reasons.length) return fail(409, "The agent cannot start this print", reasons);
+      const p = store.getPrinter(input.printerId)!;
+      const o = store.getOrder(input.orderId)!;
+      const a = store.getAttachment(input.attachmentId)!;
+      const plate = a.parsed3mf!.plates[0];
+      const bed = printerGate(p, now, o.id).bed!;
+      const match = matchJob(plate.filaments, p, a.parsed3mf!.projectFilaments?.length);
+      const at = iso(now);
+      const why = (input.why ?? []).map(String).slice(0, 10);
+      const job: PrintJob = {
+        id: store.nextPrintJobId(), orderId: o.id, printerId: p.id, attachmentId: a.id, plate: plate.index,
+        fileName: sdFileName(o.id, plate.index, Math.floor(now / 1000)), amsMapping: match.mapping, options: AGENT_OPTIONS,
+        state: "queued", by: "agent", createdAt: at, updatedAt: at, subtaskName: subtaskName(o.id, o.product),
+        actor: "agent", bedCheckId: bed.id, bedConfirmedBy: bed.by, ...(why.length ? { why } : {}),
+        expectedTrays: expectedTrays(p, match.mapping),
+      };
+      store.savePrintJob(job); // the UNIQUE indexes refuse a second job for this bed confirmation or printer
+      const linked = linkPrinter(p.id, o.id, "agent");
+      if (!linked.ok) throw new Error(linked.error);
+      store.savePrinter({ ...store.getPrinter(p.id)!, bedCheck: { ...bed, usedBy: job.id, usedAt: at } });
+      store.addLog({
+        orderId: o.id, actor: "agent", tool: "auto_print", ok: true, at,
+        input: { printerId: p.id, attachmentId: a.id, file: a.filename, plate: plate.index, amsMapping: job.amsMapping, bedCheckId: bed.id,
+          bedConfirmedBy: bed.by, why, trigger: input.trigger ?? null },
+        output: { jobId: job.id, printer: printerName(p.id) },
+      });
+      return { ok: true as const, job, match };
+    });
+  } catch (e) {
+    if (store.isUniqueViolation(e)) return fail(409, "Another print already used this bed confirmation or printer");
+    throw e;
+  }
 }
 
 /**
@@ -217,6 +335,12 @@ export interface QueueItemJob {
   urlForm: "sdcard" | "ftp";
   /** Send the print no later than this (START_CONFIRM_MS after the person confirmed the bed). */
   sendBy: string;
+  /** "agent": the dispatcher's print; the bridge checks bedConfirmedBy instead of the person at the printer. */
+  actor: "person" | "agent";
+  /** The person whose "Bed is empty" the agent print uses. */
+  bedConfirmedBy?: string;
+  /** Agent prints: the spool each mapped tray held when queued; the bridge sends nothing once one differs. */
+  expectedTrays?: { tray: number; type: string; color: string }[];
 }
 
 /** What the bridge should do now: queued commands and jobs, oldest first. Expired ones are never returned. */
@@ -235,6 +359,8 @@ export function bridgeQueue(printerIds: string[] | null, now = Date.now()): { co
       expiresAt: iso(Date.parse(j.createdAt) + JOB_PICKUP_MS), size: a?.size ?? 0, md5: j.md5 ?? null,
       fileUrl: `/api/print-jobs/${encodeURIComponent(j.id)}/file`, urlForm: j.urlForm ?? "sdcard",
       sendBy: iso(Date.parse(j.createdAt) + START_CONFIRM_MS),
+      actor: j.actor === "agent" ? "agent" : "person", ...(j.bedConfirmedBy ? { bedConfirmedBy: j.bedConfirmedBy } : {}),
+      ...(j.actor === "agent" ? { expectedTrays: j.expectedTrays ?? [] } : {}),
     };
   });
   return { commands, jobs };
@@ -271,14 +397,24 @@ export function updateQueueItem(id: string, input: { state: unknown; error?: unk
     const j = store.getPrintJob(id);
     if (!j) return fail(404, "Print job not found");
     if (!JOB_NEXT[j.state].includes(state as PrintJobState)) return fail(409, `The job is ${j.state}; it cannot become ${state || "that"}`);
-    // "sent" is the last gate before the printer starts: the person's bed confirmation must still hold.
+    // "sent" is the last gate before the printer starts: the person's bed confirmation must still hold. An agent print
+    // also needs the switch still on, the bed confirmation it used still its own (not voided by another print) and the
+    // spools it was queued with (nobody is at the printer to see a swapped spool).
     if (state === "sent") {
       const late = now - Date.parse(j.createdAt) > START_CONFIRM_MS;
-      const bed = store.getPrinter(j.printerId)?.bedOccupiedBy;
-      if (late || bed) {
+      const printer = store.getPrinter(j.printerId);
+      const bed = printer?.bedOccupiedBy;
+      const check = printer?.bedCheck;
+      const agentStop = j.actor !== "agent" ? null
+        : !autoPrintOn() ? "Agent prints were turned off: nothing was sent."
+          : !j.bedCheckId || check?.id !== j.bedCheckId || check.usedBy !== j.id || check.voidedAt
+            ? "The bed confirmation this agent print used is no longer valid: nothing was sent. A person confirms the bed again."
+            : agentSpoolProblem(j, printer);
+      if (late || bed || agentStop) {
         const error = late
           ? "The bed was confirmed more than 10 min ago: nothing was sent. Check the bed again and start again."
-          : "A print ended on this printer after the bed was confirmed: nothing was sent. Clear the bed and start again.";
+          : bed ? "A print ended on this printer after the bed was confirmed: nothing was sent. Clear the bed and start again."
+            : agentStop!;
         updateQueueItem(id, { state: "failed", error }, now);
         return fail(409, error);
       }
@@ -287,9 +423,10 @@ export function updateQueueItem(id: string, input: { state: unknown; error?: unk
     const job: PrintJob = { ...j, state: state as PrintJobState, updatedAt: iso(now), md5, ...(note(input.error) ? { error: note(input.error) } : {}) };
     store.savePrintJob(job);
     if (job.orderId && (state === "failed" || state === "sent")) {
-      store.addLog({ orderId: job.orderId, actor: "human", tool: "print_job", input: { jobId: job.id, state }, ok: state !== "failed",
+      store.addLog({ orderId: job.orderId, actor: logActor(job), tool: "print_job", input: { jobId: job.id, state }, ok: state !== "failed",
         output: { printer: printerName(job.printerId), error: job.error ?? null }, at: job.updatedAt });
     }
+    if (state === "failed") agentJobFailed(job, job.error ?? "The bridge reported it failed");
     return { ok: true, job };
   }
   return fail(404, "Unknown queue item");

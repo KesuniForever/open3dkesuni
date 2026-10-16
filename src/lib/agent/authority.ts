@@ -9,6 +9,7 @@ import { LLM_TOOLS } from "./tools";
 import { maxWakesPerHour } from "./chief";
 import { ARC_CHECKS_PER_BEAT, heartbeatIntervalSeconds } from "./heartbeat";
 import { dailyFacts, jakartaDay } from "./daily-review";
+import { autoPrintSetting } from "../printer/autoprint";
 import { ACTION_TOOLS, countableRows, SKILLS, skillOf, type Skill } from "./skills";
 
 export interface AuthorityItem { id: string; text: string; by: "Chief (Claude)" | "code"; skill: Skill }
@@ -44,6 +45,8 @@ export function chiefAuthority(now: Date = new Date()): ChiefAuthority {
   const net = network();
   const beat = heartbeatIntervalSeconds();
   const mainnetUnlocked = process.env.KESUNI_ALLOW_MAINNET === "1";
+  // Agent prints: the switch a person sets on the Chief page (src/lib/printer/dispatch.ts). Read-only here.
+  const agentPrints = autoPrintSetting().on;
 
   // PLA and PETG (owner, 15 Oct 2026); one price when PETG costs the customer the same as PLA, else both.
   const pla = pricingFor(pc, "PLA").pricePerGramIdr;
@@ -53,6 +56,7 @@ export function chiefAuthority(now: Date = new Date()): ChiefAuthority {
     ["price_by_weight", `Price PLA and PETG by weight from the slicer grams a person entered: ${perGram}, unit price rounded up to ${rp(pc.roundIdr)}`],
     ["choose_plan", "Choose the production plan within the customer's budget and the owner's rules"],
     ["choose_printer", "Choose a ready printer once the customer has paid into escrow"],
+    ["request_dispatch", "Ask the code dispatcher to look at the print queue now (it cannot skip a gate)"],
     ["create_operator_task", "Ask the operator for filament changes and printer checks"],
     ["message_customer", "Message the customer on their order page"],
     ["request_human_decision", "Ask a person only when a number is missing or a rule needs the owner"],
@@ -69,6 +73,9 @@ export function chiefAuthority(now: Date = new Date()): ChiefAuthority {
         : "Heartbeat checks are off (KESUNI_HEARTBEAT_SECONDS=0)",
     },
     { id: "arc_verify", by: "code", skill: "Finance", text: `Checks up to ${ARC_CHECKS_PER_BEAT} escrow transfers on Arc per heartbeat; a mismatch becomes a question for a person` },
+    ...(agentPrints
+      ? [{ id: "auto_print", by: "code" as const, skill: "Machines" as const, text: "Starts prints only when a person confirmed the bed empty and the switch is on" }]
+      : []),
     { id: "release", by: "code", skill: "Finance", text: "Release escrow to Kesuni after the customer accepts, if the policy allows" },
     { id: "refund", by: "code", skill: "Finance", text: "Refund the customer after a rejection" },
   ];
@@ -95,13 +102,17 @@ export function chiefAuthority(now: Date = new Date()): ChiefAuthority {
         : `Runs on ${net.name} (real USDC); mainnet is ${mainnetUnlocked ? "unlocked by KESUNI_ALLOW_MAINNET=1" : "locked: KESUNI_ALLOW_MAINNET is not 1"}`,
     },
     { id: "wakes", text: `At most ${maxWakesPerHour()} background wake-ups per hour (all orders together)` },
+    { id: "bed_gate", text: "One agent print per 'Bed is empty' a person pressed after the last print ended (valid 2 h)" },
   ];
 
   const handedToPerson: HandOff[] = [
     { id: "qc", text: "Whether a print passes QC, and whether to reprint it", enforcedBy: "code", how: "no QC tool, and the Chief's task tool refuses reprints: a person records QC and the customer accepts or rejects" },
-    { id: "printability", text: "Whether a design can be printed (size, supports, strength)", enforcedBy: "code", how: "no slicer or file access: grams per unit come only from a person" },
+    { id: "printability", text: "Whether a design can be printed (size, supports, strength)", enforcedBy: "code", how: "no slicer or file access for the Chief: grams per unit come only from a person; the dispatcher (code) slices only an STL or OBJ in the order's one colour with the studio's presets, and prints only files it sliced that way" },
     { id: "material", text: "Materials other than PLA and PETG", enforcedBy: "code", how: "price_by_weight refuses when the spec is not PLA or PETG or the order text names another material (a keyword list, so a person double-checks)" },
-    { id: "printers", text: "Starting, pausing or stopping a print", enforcedBy: "code", how: "no printer control tool: people start and control prints on the website, each with their name" },
+    agentPrints
+      ? { id: "printers", text: "Pausing or stopping a print, and emptying the bed", enforcedBy: "code", how: "no printer control tool; the dispatcher (code, no Claude) queues a print only after a person confirmed the bed empty, once per confirmation, with the switch on" }
+      : { id: "printers", text: "Starting, pausing or stopping a print", enforcedBy: "code", how: "agent prints are off: people start and control prints on the website, each with their name" },
+    { id: "auto_switch", text: "Turning agent prints on or off", enforcedBy: "code", how: "no tool for the switch: a person's name and confirmation on the Chief page" },
     { id: "machines", text: "Machines Kesuni does not run", enforcedBy: "code", how: "the Chief only picks among the studio's printers and the quotes people entered; partners only within the owner's rules" },
     { id: "price_change", text: "A price change after the plan is chosen, discounts, exceptions to the owner's rules", enforcedBy: "code", how: "quotes close once a plan is chosen; the policy refuses exceptions until the owner approves" },
     { id: "money", text: "Moving money", enforcedBy: "code", how: "no payment tool: release and refund run in code after the customer decides" },

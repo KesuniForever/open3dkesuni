@@ -1,0 +1,162 @@
+/* Live studio (/live): public and read-only. Reuses the customer top bar (customer.css), the machine cards
+   (machines.css), the Chief's feed rows (chief.css) and the navy money panel; only the frame and a few rows are new. */
+.live { max-width: 1240px; margin: 0 auto; padding: 14px 16px 48px; min-width: 0; }
+@media (min-width: 900px) {
+  .live { padding: 18px 32px 64px; }
+  .live > .cust-top { margin: 0 0 20px; padding: 4px 0 14px; }
+}
+
+/* ---------- header: the studio in one line ---------- */
+.live-hero { display: grid; gap: 18px; align-items: center; }
+.live-hero-text { display: grid; gap: 10px; justify-items: start; min-width: 0; }
+.live-hero h1 { margin: 2px 0 0; }
+
+/* ---------- numbers at a glance (the overview's tiles) ---------- */
+.live-glance { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.live-glance > div { padding: 11px 13px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-soft); min-width: 0; }
+.live-glance dt { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.live-glance dd {
+  margin: 4px 0 0; font-size: 24px; font-weight: 650; letter-spacing: -0.6px; line-height: 1.15; color: var(--text);
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.live-glance dd small { font-size: 14px; font-weight: 500; color: var(--faint); letter-spacing: 0; }
+/* A time ("1 min ago") instead of a number: smaller, so it fits a phone's third of the row. */
+.live-glance dd.live-glance-text { font-size: 17px; letter-spacing: -0.2px; line-height: 1.25; padding-top: 4px; }
+.live-glance-sub { display: block; margin-top: 3px; font-size: 12px; font-weight: 500; letter-spacing: 0; line-height: 1.35; color: var(--muted); }
+@media (min-width: 900px) {
+  .live-hero { padding: 26px 28px; }
+  .live-glance > div { padding: 14px 16px; }
+  .live-glance dd { font-size: 28px; }
+  .live-glance dd.live-glance-text { font-size: 20px; padding-top: 5px; }
+}
+.live-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.live-badges .badge { padding: 2px 9px; white-space: normal; }
+.live-badges .live-dot { margin-right: 2px; width: 7px; height: 7px; }
+.live-lead { margin: 0; font-size: 16px; line-height: 1.55; color: var(--text-2); max-width: 62ch; text-wrap: pretty; }
+.live-safe {
+  display: inline-flex; align-items: center; gap: 8px; margin: 2px 0 0; padding: 8px 12px; border-radius: 9px;
+  background: var(--ok-bg); color: var(--ok); font-size: 13.5px; font-weight: 500; line-height: 1.4;
+}
+
+/* The newest Arc transfer, linked to the explorer: proof on the first screen of a phone. */
+.live-arc { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.4; }
+.live-arc svg { color: var(--faint); }
+.live-arc a { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; overflow-wrap: anywhere; }
+
+/* ---------- the menu: tabs, and when the page last read the studio ---------- */
+.live-tabs {
+  display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 16px;
+  margin: 18px 0 16px; scroll-margin-top: 12px;
+}
+.live-tabs .tabs { margin: 0; }
+.live-tabs .mach-live { font-size: 12.5px; color: var(--muted); }
+.live-tabs .mach-live.off { color: var(--bad); }
+
+/* ---------- overview: four cards, each with a link to its tab ---------- */
+.live-ov { display: grid; gap: 16px; }
+.live-ov .card { margin: 0; }
+.live-ov-card { display: flex; flex-direction: column; gap: 14px; }
+.live-ov-head { display: flex; justify-content: space-between; align-items: center; gap: 6px 12px; flex-wrap: wrap; }
+.live-ov-head h2 { margin: 0; }
+.live-ov-more { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.live-ov-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+@media (max-width: 1100px) { .live-ov-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .live-ov-grid { grid-template-columns: minmax(0, 1fr); } }
+.live-ov-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.live-ov-stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.live-ov-stats.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 720px) { .live-ov-stats.four { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.live-ov-none { display: flex; align-items: center; gap: 8px; margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 14px; }
+.live-ov-none svg { color: var(--faint); flex: none; }
+.live-ov-note { margin: auto 0 0; font-size: 12.5px; line-height: 1.5; }
+.live-ov-split { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0; font-size: 14px; }
+.live-ov-split > span { display: inline-flex; align-items: center; gap: 6px; }
+.live-ov-split b { font-variant-numeric: tabular-nums; }
+/* Label above its value: a narrow card keeps "3 transfers · 0.3 test USDC · 3 verified" on one line. */
+.live-ov-rows > div { flex-direction: column; gap: 3px; }
+.live-ov-rows dt { font-size: 12px; }
+.live-ov-rows dd { text-align: left; }
+.live-due { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.live-due small { color: var(--muted); font-weight: 400; }
+.card.money .live-ov-rows > div { border-color: var(--navy-line); }
+.card.money .live-ov-rows dt { color: var(--navy-muted); }
+.card.money .live-ov-rows dd { color: var(--navy-text); font-weight: 500; }
+
+/* Running now: one block per printer that is printing or paused (the machine card's progress block). */
+.live-run { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.live-run-row { margin: 0; min-width: 0; }
+.live-run-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; font-size: 14.5px; }
+.live-run-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; font-size: 13px; color: var(--muted); }
+.live-run-meta b { color: var(--text); font-weight: 600; }
+.live-collect { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.live-collect li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13.5px; }
+
+/* ---------- sections ---------- */
+.live-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 12px; }
+.live-head h2, .live h2 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.live-head h2 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; margin: 0; }
+.live-head h2 > svg, .live .card h2 > svg { color: var(--faint); }
+.live-order { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.live-order .mono { font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+
+/* ---------- printers (machine cards without controls) ---------- */
+.live-printer .mach-id h3 { font-size: 19px; font-weight: 650; letter-spacing: -0.4px; margin: 0; }
+.live-printer .mach-id p { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.live-printer .mach-id p b { font-weight: 600; color: var(--text-2); }
+.live-printer.offline .mach-id p b { color: var(--bad); }
+.live-printer .kv-rows { margin-top: auto; padding-top: 4px; }
+.live-printer .kv-rows dt { white-space: nowrap; }
+.live-printer .kv-rows dd { display: flex; justify-content: flex-end; }
+.live-bed { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; }
+
+/* ---------- the agent at work ---------- */
+.live-switch {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 6px; padding: 0 0 14px;
+  border-bottom: 1px solid var(--border-soft); font-size: 13px;
+}
+.live-agent .chief-item:first-child { padding-top: 12px; }
+.live-agent .chief-meta { gap: 6px 10px; }
+.live-asked svg { margin-right: 1px; }
+.live-by { font-size: 10px; padding: 0 6px; }
+.live-by.claude { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+
+/* ---------- money on Arc (navy panel) ---------- */
+.live-usage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 12px; }
+.live-usage > div { padding: 11px 13px; border-radius: 10px; background: var(--navy-2); border: 1px solid var(--navy-line); min-width: 0; }
+.live-usage dt { font-size: 12px; color: var(--navy-muted); }
+.live-usage dd { margin: 2px 0 0; font-size: 26px; font-weight: 650; letter-spacing: -0.6px; line-height: 1.2; color: #fff; font-variant-numeric: tabular-nums; }
+.live-usage dd small { font-size: 14px; font-weight: 500; color: var(--navy-muted); letter-spacing: 0; }
+.live-usage > .wide { grid-column: 1 / -1; }
+.live-usage dd.live-usage-text { font-size: 20px; letter-spacing: -0.3px; overflow-wrap: anywhere; }
+.live-money .live-usage { margin: 0; }
+@media (min-width: 900px) { .live-money-tab .live-usage { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.live-money-tab .live-usage { margin-bottom: 12px; }
+.live-excluded { font-size: 12.5px; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
+.live-sub { font-size: 12px !important; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--navy-muted); margin: 18px 0 2px; }
+.live-note { margin: 0 0 4px; font-size: 12.5px; line-height: 1.45; color: var(--navy-muted); }
+.live-txs { list-style: none; margin: 0; padding: 0; }
+.live-tx { display: grid; gap: 5px; padding: 11px 0; border-top: 1px solid var(--navy-line); min-width: 0; }
+.live-tx:last-child { padding-bottom: 0; }
+.live-tx-top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px 12px; flex-wrap: wrap; font-size: 14px; }
+.live-amt { font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+.live-tx-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; font-size: 12.5px; color: var(--navy-muted); min-width: 0; }
+.live-tx-meta a { display: inline-flex; align-items: center; gap: 3px; }
+.live-money .live-order .mono { color: var(--navy-text); }
+.card.money .badge.real { background: rgba(189, 223, 142, 0.16); color: var(--lime); border-color: transparent; }
+.card.money .badge.simulated { background: rgba(242, 201, 138, 0.15); color: #f2c98a; border-color: transparent; }
+.card.money .info { color: var(--navy-muted); }
+.card.money .info:hover, .card.money .info:focus { color: #fff; }
+.live-money .info-pop { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.live-money .info-pop b { color: var(--text); }
+
+/* ---------- footer ---------- */
+.live-foot { display: grid; gap: 8px; color: var(--muted); margin-top: 28px; }
+.live-foot p { display: flex; align-items: flex-start; gap: 9px; margin: 0; }
+.live-foot svg { color: var(--faint); margin-top: 2px; }
+
+@media (max-width: 600px) {
+  .live-hero { padding: 18px 16px; }
+  .live-hero h1 { font-size: 24px; }
+  .live-lead { font-size: 15px; }
+  .live-usage dd { font-size: 22px; }
+}

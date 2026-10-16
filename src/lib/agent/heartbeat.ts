@@ -5,6 +5,8 @@
 // in the meta table until the problem goes away (then it may fire again later). Last, once per Jakarta day after
 // KESUNI_DAILY_REVIEW_HOUR, it writes the Chief's daily review for the owner (daily-review.ts). Never throws.
 // Also a free code action each beat: up to 5 COMPLETE escrow transfers are checked on Arc (arc-verify.ts, read-only).
+// And the agent dispatcher (src/lib/printer/dispatch.ts, code, no Claude) runs on each beat before any wake: when a
+// person turned agent prints on, a paid order waiting for a printer is the dispatcher's job, not a reason to wake Claude.
 import * as store from "../store";
 import { deadlineEnd } from "../owner-rules";
 import { refreshPayment } from "../customer";
@@ -14,6 +16,8 @@ import { maybeRunDailyReview } from "./daily-review";
 import { agentText } from "./tools";
 import { openArcMismatchTask, verifyBatch } from "../arc-verify";
 import { microToUsdc } from "../policy";
+import { planDispatch, safeDispatch } from "../printer/dispatch";
+import { whyText } from "../printer/autoprint-rules";
 import type { ChainTx, OperatorTask, Order } from "../types";
 
 export type FindingKind =
@@ -71,6 +75,10 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
   const printers = store.listPrinters();
   const open = store.listOpenTasks();
   const hasOpen = (orderId: string, kind: OperatorTask["kind"]) => open.some((x) => x.orderId === orderId && x.kind === kind);
+  // Agent prints on: the dispatcher (code) handles paid orders that wait for a printer. Read-only here; if the plan
+  // cannot be made, the beat goes on as with agent prints off.
+  let plan: ReturnType<typeof planDispatch> | null = null;
+  try { plan = planDispatch(t); } catch { plan = null; }
 
   for (const o of store.listOrders()) {
     // Finding texts go to Claude: no customer name, phone or address from the product text.
@@ -95,8 +103,12 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
     // A finished print that was collected waits for QC, not for a new production run.
     if (escrow?.state === "FUNDED" && (o.status === "PLAN_CHOSEN" || o.status === "IN_PRODUCTION")
       && !onPrinter && !hasOpen(o.id, "check_printer") && !printFinished(o.id)) {
-      findings.push({ key: `start_production:${o.id}`, orderId: o.id, kind: "start_production", wake: true,
-        text: `${label} is paid into escrow but has no printer yet. Start production.` });
+      const line = plan?.on ? plan.orders[o.id] : undefined;
+      findings.push(plan?.on
+        ? { key: `start_production:${o.id}`, orderId: o.id, kind: "start_production", wake: false,
+            text: `${label} is paid into escrow but has no printer yet. Agent prints are on; the dispatcher: ${line ? whyText(line.why) : "not in production"}.` }
+        : { key: `start_production:${o.id}`, orderId: o.id, kind: "start_production", wake: true,
+            text: `${label} is paid into escrow but has no printer yet. Start production.` });
     }
 
     const end = deadlineEnd(o);
@@ -185,6 +197,12 @@ export async function runHeartbeat(opts: { now?: Date; trigger: "timer" | "butto
         errors.push(`Payment sync ${f.orderId}: ${errText(e)}`);
       }
     }
+
+    // The agent dispatcher (code, free): may queue a print or ask for a slice when agent prints are on. Never throws.
+    const d = safeDispatch("heartbeat", now.getTime());
+    for (const s of d.started) actions.push(`Agent print ${s.jobId} for ${s.orderId} queued on ${s.printerId}`);
+    for (const s of d.sliced) actions.push(`Agent asked the studio PC to slice for ${s.orderId} (${s.sliceId})`);
+    if (d.error) errors.push(`Agent dispatcher: ${d.error}`);
 
     // Wake the Chief, one order at a time, only for problems not handled yet.
     const toWake = new Map<string, Finding[]>();

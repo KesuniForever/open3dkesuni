@@ -7,6 +7,7 @@ import { clearCameraFrames } from "@/lib/printer/jobs";
 import { mergeReport } from "@/lib/printer/bambu";
 import { fake3mf } from "@/lib/threemf.test-helper";
 import { POST as upload } from "./orders/[id]/files/route";
+import { DELETE as removeFile } from "./orders/[id]/files/[fileId]/route";
 import { GET as listCommands, POST as command } from "./printers/[id]/command/route";
 import { GET as getCamera, POST as postCamera } from "./printers/[id]/camera/route";
 import { POST as printerAction } from "./printers/[id]/route";
@@ -18,7 +19,7 @@ import { GET as jobFile } from "./print-jobs/[id]/file/route";
 import { GET as colors } from "./studio/colors/route";
 
 const mem = new Map<string, Uint8Array>();
-const files: FileStore = { async put(k, b) { mem.set(k, b); }, async get(k) { return mem.get(k)!; } };
+const files: FileStore = { async put(k, b) { mem.set(k, b); }, async get(k) { return mem.get(k)!; }, async remove(k) { mem.delete(k); } };
 const TOKEN = "bridge-token-123";
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 const json = (url: string, body: unknown, headers: Record<string, string> = {}) =>
@@ -105,6 +106,25 @@ describe("a person starts a print; the bridge carries it out", () => {
     expect((await jobAction(json(`/api/print-jobs/${job.id}`, { action: "cancel", by: "Khelda" }), ctx(job.id))).status).toBe(200);
     expect(store.getPrintJob(job.id)!.state).toBe("cancelled");
     expect((await jobAction(json(`/api/print-jobs/${job.id}`, { action: "explode" }), ctx(job.id))).status).toBe(400);
+  });
+
+  it("the file of a queued print cannot be removed until the job is cancelled", async () => {
+    const attachmentId = await uploadSliced();
+    const { job } = await (await startJob(json("/api/print-jobs", {
+      printerId: "a1", attachmentId, plate: 1, amsMapping: [0], by: "Khelda", personPresent: true, bedEmptyConfirmed: true,
+    }))).json();
+    const del = () => removeFile(new Request(`http://x/api/orders/ORD-001/files/${attachmentId}`, {
+      method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ by: "Khelda" }),
+    }), { params: Promise.resolve({ id: "ORD-001", fileId: attachmentId }) });
+    const refused = await del();
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).reasons).toEqual([`Print job ${job.id} is still using this file: cancel or stop the print first`]);
+    // The bridge can still download it.
+    expect((await jobFile(get(`/api/print-jobs/${job.id}/file`, bridge), ctx(job.id))).status).toBe(200);
+    await jobAction(json(`/api/print-jobs/${job.id}`, { action: "cancel", by: "Khelda" }), ctx(job.id));
+    expect((await del()).status).toBe(200);
+    expect(store.getAttachment(attachmentId)).toBeUndefined();
+    expect(mem.size).toBe(0);
   });
 });
 

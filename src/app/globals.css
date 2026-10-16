@@ -217,6 +217,9 @@ button.accent:hover:not(:disabled), button.primary.accent:hover:not(:disabled) {
 button.danger { background: var(--bad-bg); color: var(--bad); border-color: var(--bad); }
 button.danger:hover:not(:disabled) { background: #f6dde2; }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
+/* A quiet text button beside a list row (Remove on an order file): no box until it is hovered. */
+button.quiet { flex: none; min-height: 32px; padding: 4px 8px; font-size: 13px; background: transparent; border-color: transparent; color: var(--muted); }
+button.quiet:hover:not(:disabled) { background: var(--bad-bg); color: var(--bad); }
 button[aria-checked="true"].primary:disabled { opacity: 1; }
 
 input, select, textarea {

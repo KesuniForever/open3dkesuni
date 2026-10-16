@@ -38,10 +38,10 @@ function headline(v: View, t: T): { title: string; sub: string } {
   const s = v.order.status;
   const funded = v.escrow && v.escrow.state !== "AWAITING_DEPOSIT";
   if (s === "PAID") return { title: t("Done. Thank you!"), sub: t("Your payment has been released to Kesuni.") };
-  if (s === "ACCEPTED") return { title: t("Thank you!"), sub: t("The agent is releasing your payment from escrow to Kesuni.") };
+  if (s === "ACCEPTED") return { title: t("Thank you!"), sub: t("Releasing your payment from escrow to Kesuni.") };
   if (s === "REJECTED") return v.escrow?.state === "REFUNDED"
     ? { title: t("Your money has been refunded"), sub: t("Kesuni will contact you about a fix.") }
-    : { title: t("Your money is being refunded"), sub: t("The agent is returning the escrow to your wallet.") };
+    : { title: t("Your money is being refunded"), sub: t("Returning the escrow to your wallet.") };
   if (s === "CREATED") return { title: t("Kesuni is preparing your price"), sub: t("We check the design and the printers first. The price will appear on this page.") };
   if (!funded) return v.paying
     ? { title: t("Processing your payment…"), sub: t("Usually under a minute. This page updates by itself.") }

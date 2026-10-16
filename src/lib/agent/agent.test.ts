@@ -72,7 +72,7 @@ describe("agent tools use the same policy as the human API", () => {
     expect(TOOLS.map((t) => t.name).sort()).toEqual([
       "check_vendor_policy", "choose_plan", "choose_printer", "create_operator_task", "estimate_cost", "get_available_budget",
       "get_order", "get_production_status", "get_quotes", "message_customer", "price_by_weight", "price_with_calculator",
-      "propose_payment", "request_human_decision",
+      "propose_payment", "request_dispatch", "request_human_decision",
     ]);
     for (const t of TOOLS) expect(t.inputSchema.type).toBe("object");
     const llm = LLM_TOOLS.map((t) => t.name);
@@ -245,7 +245,25 @@ describe("printers: the Chief reads their status, only people control them", () 
       const src = readFileSync(path.join(dir, file), "utf8");
       expect(src, file).not.toMatch(/printer\/(jobs|control)["']/);
       expect(src, file).not.toMatch(/createPrinterCommand|createPrintJob|buildMqttPayload|updateQueueItem/);
+      // Agent prints: only the dispatcher's read (planDispatch/safePlan) and its "look now" (safeDispatch) are reachable;
+      // never the enforcer, the switch, a bed confirmation, an order's runs or a slice request.
+      expect(src, file).not.toMatch(/createAgentPrintJob|agentStartReasons|setAutoPrint|setOrderRuns|clearBed|completeTask|confirmColors|requestSlice|runDispatch/);
+      for (const m of src.matchAll(/from "\.\.\/printer\/([\w-]+)"/g)) expect(["actions", "bambu", "errors", "dispatch", "autoprint", "autoprint-rules"], file).toContain(m[1]);
     }
+  });
+
+  it("request_dispatch takes only the order, cannot pass a gate, and does nothing while agent prints are off", () => {
+    const tool = TOOLS.find((t) => t.name === "request_dispatch")!;
+    expect(tool.inputSchema).toEqual({ type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] });
+    expect(LLM_TOOLS.map((t) => t.name)).toContain("request_dispatch");
+    chooseQuote("ORD-001", "Q-own", "agent", "within budget");
+    store.saveOrder({ ...store.getOrder("ORD-001")!, label: "real", autoPrint: { runsNeeded: 5, by: "Khelda", at: new Date().toISOString() } });
+    // Extra fields the model might send (a printer, "skip the bed", the switch) are ignored.
+    const r = callTool("request_dispatch", { orderId: "ORD-001", printerId: "a1", bedEmptyConfirmed: true, on: true, force: true });
+    expect(r).toMatchObject({ ok: true, data: { agentPrintsOn: false, queuedForThisOrder: [] } });
+    expect(store.getMeta("autoPrint")).toBeUndefined();
+    expect(store.listPrintJobs()).toEqual([]);
+    expect(store.listLog("ORD-001").at(-1)).toMatchObject({ actor: "agent", tool: "request_dispatch" });
   });
 
   it("get_production_status shows what each printer is doing, its faults and its spools (read-only)", () => {

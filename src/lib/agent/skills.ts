@@ -21,10 +21,14 @@ const BY_TOOL: Record<string, Skill> = {
   // Operations
   get_order: "Operations", get_quotes: "Operations", choose_plan: "Operations", request_human_decision: "Operations",
   heartbeat: "Operations", slicer_grams: "Operations", agent_start: "Operations", agent_thought: "Operations",
-  agent_summary: "Operations", llm_unavailable: "Operations", agent_wake_skipped: "Operations",
+  agent_summary: "Operations", llm_unavailable: "Operations", agent_wake_skipped: "Operations", remove_file: "Operations",
   // Machines
   get_production_status: "Machines", choose_printer: "Machines", link_printer: "Machines", suggest_reroute: "Machines",
   start_print: "Machines", printer_command: "Machines", print_job: "Machines",
+  slice_request: "Machines", slice_result: "Machines", slice_cancel: "Machines",
+  // Agent prints (src/lib/printer/dispatch.ts): the dispatcher's starts and reasons, the Chief's request, a person's switch and bed.
+  auto_print: "Machines", auto_print_wait: "Machines", request_dispatch: "Machines", auto_print_switch: "Machines", auto_print_runs: "Machines",
+  clear_bed: "Machines",
   // Customer
   message_customer: "Customer", customer_agreement: "Customer", customer_review: "Customer", customer_decision: "Customer",
   customer_colors: "Customer",
@@ -69,5 +73,5 @@ export function countableRows<T extends LogRow>(rows: T[]): T[] {
 /** Steps that change something (not reads, not the run's own bookkeeping): what "actions per skill" counts. */
 export const ACTION_TOOLS = [
   "price_by_weight", "choose_plan", "request_human_decision", "choose_printer", "create_operator_task", "suggest_reroute",
-  "message_customer", "release_escrow", "refund_escrow", "arc_verify",
+  "message_customer", "release_escrow", "refund_escrow", "arc_verify", "auto_print", "slice_request",
 ];

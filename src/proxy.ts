@@ -1,6 +1,8 @@
 // Guards the operator side when the app is reachable from the internet (e.g. a Cloudflare tunnel).
 // Customer links (/c/<token>), the invite order form (/request/<code>), the studio's colour list for customers and the
-// printer bridge endpoints (each checks its own bearer token) stay open; everything else needs OPERATOR_PASSWORD.
+// printer bridge endpoints (each checks its own bearer token) stay open; so does reading the public Live studio page
+// (/live, GET and HEAD only: it has no write and no API of its own), and the landing page ("/" and /welcome, the same
+// way; the operator overview is at /dashboard). Everything else needs OPERATOR_PASSWORD.
 // Requests from this computer or the home network skip the password, so local work is unchanged. Except printer
 // controls, print starts and the camera picture: they move real machines and show the studio, so only this computer
 // skips the password for them; a phone or laptop on the studio Wi-Fi gives the operator password too.
@@ -13,16 +15,31 @@ const OPEN = [
   /^\/c\/[^/]+$/, /^\/api\/c(\/.*)?$/, /^\/request\/[^/]+$/, /^\/api\/studio\/colors$/,
   // LAN bridge (bearer PRINTER_BRIDGE_TOKEN, checked by each route)
   /^\/api\/printers\/report$/, /^\/api\/printers\/queue(\/[^/]+)?$/, /^\/api\/print-jobs\/[^/]+\/file$/,
+  // the studio PC's slicer (same bearer): its queue, the model to slice, the sliced file back
+  /^\/api\/slicer\/queue(\/[^/]+)?$/, /^\/api\/slicer\/jobs\/[^/]+\/(source|result)$/,
 ];
-/** Open for these methods only: the bridge POSTs camera frames; reading them (GET) is for operators. */
-const OPEN_FOR: [RegExp, string[]][] = [[/^\/api\/printers\/[^/]+\/camera$/, ["POST"]]];
+/** Open for these methods only: the bridge POSTs camera frames (reading them, GET, is for operators); anyone reads /live and the landing page. */
+const OPEN_FOR: [RegExp, string[]][] = [
+  [/^\/api\/printers\/[^/]+\/camera$/, ["POST"]],
+  [/^\/live$/, ["GET", "HEAD"]],
+  [/^\/$/, ["GET", "HEAD"]],
+  [/^\/welcome$/, ["GET", "HEAD"]],
+];
 const LOCAL_HOST = /^(localhost|127\.0\.0\.1|\[::1\]|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/;
 const THIS_COMPUTER = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
-/** Printer controls, print starts and cancels, the camera picture: the password from any other device too. */
+/**
+ * Printer controls, print starts and cancels, the camera picture: the password from any other device too. Also what
+ * lets the agent print: the "Bed is empty" that allows one agent print (POST /api/printers/:id/bed), the agent-prints
+ * switch and an order's runs. Marking a task done, the colour check and the order page's "Bed is empty" (no agent
+ * print from it) stay open on the studio network, as before.
+ */
 const PRINTER_CONTROL: [RegExp, string[]][] = [
   [/^\/api\/printers\/[^/]+\/command$/, ["POST"]],
   [/^\/api\/print-jobs(\/[^/]+)?$/, ["POST"]],
   [/^\/api\/printers\/[^/]+\/camera$/, ["GET", "HEAD"]],
+  [/^\/api\/printers\/[^/]+\/bed$/, ["POST"]],
+  [/^\/api\/auto-print$/, ["POST"]],
+  [/^\/api\/orders\/[^/]+\/auto-print$/, ["POST"]],
 ];
 const READ_ONLY = new Set(["GET", "HEAD", "OPTIONS"]);
 

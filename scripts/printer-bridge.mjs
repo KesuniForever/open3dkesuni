@@ -3,11 +3,16 @@
 //   node scripts/printer-bridge.mjs --dry-run    does everything except publish to the printers and upload to their
 //                                                SD cards, and prints what it would send (never the access code)
 //   node scripts/printer-bridge.mjs --read-only  status only, takes no commands (same as BRIDGE_CONTROL=off)
+//   node scripts/printer-bridge.mjs --slice-only [--once]
+//                                                slicing only: contacts no printer (no MQTT, no FTPS, no print queue,
+//                                                no commands); with --once it takes at most one slice, then exits
 // Status: subscribes to each printer's reports, asks for a full status ("pushall") and the firmware versions
 // ("get_version", once per connection), and sends the snapshot to every app.
 // Commands: carries out what a PERSON asked for on the website (scripts/bridge/runner.mjs): pause, resume, stop,
 // print speed, light, starting a print (upload to the SD card, then project_file) and camera frames, each checked
 // again against the live printer first. Never G-code, moves, homing, temperatures or SD-card browsing.
+// Slicing: turns an order's STL/OBJ into an A1 .gcode.3mf with this PC's Bambu Studio command line, one at a time, and
+// uploads it to the app (scripts/bridge/slice-runner.mjs, slicer.mjs). Never sends anything to a printer.
 //
 // Settings: .env.bridge (optional, wins) then .env.local, both next to package.json:
 //   Printer #1 (id "a1"):   PRINTER_IP, PRINTER_SERIAL, PRINTER_ACCESS_CODE
@@ -20,6 +25,11 @@
 //                         on this computer or the studio network (the studio app). A public app (Railway) controls the
 //                         printers ONLY when it is named here.
 //   BRIDGE_CONTROL=off    optional: status only, take no commands
+//   BAMBU_STUDIO_PATH     optional: Bambu Studio for slicing, default C:\Program Files\Bambu Studio\bambu-studio.exe
+//   BAMBU_PROFILES_DIR    optional: its system profiles, default <its folder>\resources\profiles\BBL
+//   BRIDGE_SLICER=off     optional: take no slices (also off when Bambu Studio is not found)
+//   BRIDGE_AGENT_PRINTS=on optional: also carry out agent prints (the app's dispatcher, after a person's "Bed is empty").
+//                         Off by default: such a job is refused before anything is downloaded or sent.
 // Log: logs/printer-bridge.log (rolled over at about 5 MB).
 import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,6 +41,8 @@ import { grabFrame } from "./bridge/camera.mjs";
 import { uploadToSd } from "./bridge/ftps.mjs";
 import { appList, controlApps, parseArgs, quietLog, safeApps, sendKey } from "./bridge/logic.mjs";
 import { createRunner } from "./bridge/runner.mjs";
+import { createSliceRunner } from "./bridge/slice-runner.mjs";
+import { cleanWorkRoot, sliceModel, slicerConfig } from "./bridge/slicer.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const env = { ...process.env };
@@ -48,7 +60,7 @@ const args = parseArgs(process.argv.slice(2));
 // Everything printed also goes to a log file, so a bridge started at logon can be checked later. A dry run writes
 // its own file, so it never mixes with the real bridge's log.
 const LOG_DIR = join(ROOT, "logs");
-const LOG = join(LOG_DIR, args.dryRun ? "printer-bridge-dry-run.log" : "printer-bridge.log");
+const LOG = join(LOG_DIR, args.dryRun ? "printer-bridge-dry-run.log" : args.sliceOnly ? "printer-bridge-slice-only.log" : "printer-bridge.log");
 function toFile(line) {
   try {
     mkdirSync(LOG_DIR, { recursive: true });
@@ -72,6 +84,33 @@ const APPS = apps.ok;
 const control = controlApps({ apps: APPS, controlUrl: env.CONTROL_APP_URL, readOnly: args.readOnly, bridgeControl: env.BRIDGE_CONTROL });
 for (const n of control.notes) (n.loud ? console.error : console.log)(n.text);
 const CONTROL = control.control;
+
+// --slice-only: this PC's Bambu Studio for the control app, nothing else. No printer is contacted (no MQTT, no FTPS),
+// and no print job or command is taken. --once: at most one slice, then exit.
+if (args.sliceOnly) {
+  const slicer = slicerConfig(env);
+  if (!CONTROL.length) {
+    console.error("x --slice-only: no control app to take slices from (APP_URL or CONTROL_APP_URL, and not BRIDGE_CONTROL=off)");
+    process.exit(1);
+  }
+  if (!slicer.on) {
+    console.error(`x --slice-only: ${slicer.note}`);
+    process.exit(1);
+  }
+  cleanWorkRoot(slicer.workRoot);
+  const only = createSliceRunner({
+    apps: CONTROL, token: env.PRINTER_BRIDGE_TOKEN,
+    slice: (req) => sliceModel({ ...req, exe: slicer.exe, profilesDir: slicer.profilesDir, workRoot: slicer.workRoot }),
+  });
+  console.log(`slice only: no printer is contacted; taking slices from ${CONTROL.join(", ")}; ${slicer.note}${args.once ? "; one slice, then exit" : ""}`);
+  if (args.once) {
+    const id = await only.pollOnce();
+    console.log(id ? `slice ${id} done or failed: see its order page` : "no slice taken (none waiting, or the app was not reached: see above)");
+    process.exit(0);
+  }
+  only.start();
+  await new Promise(() => {}); // runs until Ctrl+C; nothing below (the printers) runs in this mode
+}
 
 const printers = [];
 for (let n = 1; n <= 9; n++) {
@@ -200,13 +239,31 @@ function watch(p) {
 }
 
 const clients = printers.map(watch);
+// Second key for agent prints, on this PC only: the app's switch alone never makes this bridge start an agent print.
+const agentPrints = (env.BRIDGE_AGENT_PRINTS ?? "").trim().toLowerCase() === "on";
 const runner = CONTROL.length
-  ? createRunner({ apps: CONTROL, token: env.PRINTER_BRIDGE_TOKEN, printers: new Map(printers.map((p) => [p.id, p])), dryRun: args.dryRun, grabFrame, uploadToSd })
+  ? createRunner({
+    apps: CONTROL, token: env.PRINTER_BRIDGE_TOKEN, printers: new Map(printers.map((p) => [p.id, p])), dryRun: args.dryRun, grabFrame, uploadToSd,
+    agentPrints,
+  })
   : null;
 const stopRunner = runner?.start();
+// Slicing for the control app(s) with this PC's Bambu Studio (scripts/bridge/slicer.mjs). Never touches a printer, so
+// a dry run slices too; --read-only and BRIDGE_CONTROL=off take no slices either.
+const slicer = slicerConfig(env);
+if (slicer.on) cleanWorkRoot(slicer.workRoot);
+const sliceRunner = CONTROL.length && slicer.on
+  ? createSliceRunner({
+    apps: CONTROL, token: env.PRINTER_BRIDGE_TOKEN,
+    slice: (req) => sliceModel({ ...req, exe: slicer.exe, profilesDir: slicer.profilesDir, workRoot: slicer.workRoot }),
+  })
+  : null;
+const stopSlicer = sliceRunner?.start();
 console.log(`watching ${printers.length} printer(s): ${printers.map((p) => `${p.label} ${p.ip}`).join(", ")}; reporting to ${APPS.join(", ")}; `
   + (CONTROL.length ? `taking commands from ${CONTROL.join(", ")}` : "taking no commands (read-only)")
+  + (CONTROL.length ? `; ${slicer.note}` : "")
+  + (CONTROL.length ? (agentPrints ? "; agent prints ON (BRIDGE_AGENT_PRINTS=on)" : "; agent prints off") : "")
   + (args.dryRun ? "; DRY RUN: nothing is published to the printers or uploaded to their SD cards" : ""));
-const stop = () => { stopRunner?.(); for (const c of clients) c.end(); process.exit(0); };
+const stop = () => { stopRunner?.(); stopSlicer?.(); for (const c of clients) c.end(); process.exit(0); };
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);

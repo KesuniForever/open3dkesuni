@@ -75,6 +75,16 @@ export interface Order {
   material?: Material;
   /** Colours the customer picked from the spools loaded in the studio (GET /api/studio/colors). */
   preferredColors?: ColorChoice[];
+  /** Agent prints for this order, set by a person (src/lib/printer/dispatch.ts setOrderRuns). Missing: 1 run on a real,
+   *  paid order; an order that is not real is never printed by the agent until a person sets this. 0 = never. */
+  autoPrint?: OrderAutoPrint;
+}
+
+export interface OrderAutoPrint {
+  /** How many finished prints of this order are needed (each finished print job of the order counts one). */
+  runsNeeded: number;
+  by: string;
+  at: string;
 }
 
 export interface GramPricing {
@@ -268,6 +278,29 @@ export interface Printer {
   colorsChecked?: { by: string; at: string; key: string };
   /** Faults the printer reports now (code -> first seen, ISO). A task is raised once per appearance. */
   faultsSeen?: Record<string, string>;
+  /** The latest time a person confirmed the bed is empty. The agent may start ONE print on it (src/lib/printer/bed.ts). */
+  bedCheck?: BedCheck;
+  /** When a print last started and ended on this printer (server clock, from the reports; src/lib/printer/actions.ts). */
+  lastPrintStartAt?: string;
+  lastPrintEndAt?: string;
+}
+
+/**
+ * A person's "Bed is empty" on one printer. Good for one print: the agent's next print uses it up (usedBy), and so does a
+ * person's own print. A print that starts or ends on the printer before it is used voids it. Never set by the agent.
+ */
+export interface BedCheck {
+  id: string;              // "BC-<printer>-<time>"
+  by: string;              // the person
+  at: string;
+  /** "button": "Bed is empty" on My machines (POST /api/printers/:id/bed). "task": older rows only (a task marked done
+   *  no longer gives a confirmation). */
+  via: "button" | "task";
+  /** The print job that used it up. */
+  usedBy?: string;
+  usedAt?: string;
+  voidedAt?: string;
+  voidReason?: string;
 }
 
 /** Work only a person can do (change filament, collect the print, QC). Created by the agent or a person. */
@@ -285,6 +318,9 @@ export interface OperatorTask {
   /** The printer fault this task is about ("HMS_0510_0400_0001_0044" or "0700-8011"): one open task per printer and
    *  code, closed by itself when the printer stops reporting it. */
   errorCode?: string;
+  /** Code-raised tasks of the agent dispatcher ("autoprint:load:PLA:#FFFFFF", "autoprint:failed:PJ-…"): one open task
+   *  per key, closed by code when the cause is gone. */
+  key?: string;
 }
 
 // ---------- materials, colours, sliced files, printing from the website (Bambu LAN, through the bridge) ----------
@@ -342,7 +378,10 @@ export interface PrintOptions {
 
 export type PrintJobState = "queued" | "uploading" | "sent" | "printing" | "done" | "failed" | "cancelled";
 
-/** A real print started from the website by a person. The bridge uploads the file and starts it (never the Chief). */
+/**
+ * A real print started from the website: by a person, or by the agent dispatcher (code, never Claude) after a person
+ * confirmed the bed empty (src/lib/printer/jobs.ts createAgentPrintJob). The bridge uploads the file and starts it.
+ */
 export interface PrintJob {
   id: string;                // "PJ-<n>-<time>"
   orderId?: string;
@@ -361,6 +400,16 @@ export interface PrintJob {
   subtaskName?: string;      // name shown on the printer screen
   /** "ftp": start with url ftp:///<name>, a person's retry when an A1 did not start with file:///sdcard/<name>. */
   urlForm?: "sdcard" | "ftp";
+  /** Who started it: missing or "person" = a person (by), "agent" = the dispatcher (by is "agent"). */
+  actor?: "person" | "agent";
+  /** The bed check (Printer.bedCheck.id) this print used up, and the person who gave it. One print per bed check. */
+  bedCheckId?: string;
+  bedConfirmedBy?: string;
+  /** The dispatcher's reasons for this print (agent prints only). */
+  why?: string[];
+  /** Agent prints: the spool in each mapped AMS tray when it was queued ("PLA", "#FEC600"). The app ("sent") and the
+   *  bridge refuse to send it once a tray holds anything else. */
+  expectedTrays?: { tray: number; type: string; color: string }[];
 }
 
 export type PrinterCommandKind = "pause" | "resume" | "stop" | "speed" | "light" | "get_version" | "camera_snapshot";
@@ -377,6 +426,51 @@ export interface PrinterCommand {
   createdAt: string;
   doneAt?: string;
   result?: string;           // the printer's answer, or why it failed or expired
+}
+
+// ---------- slicing on the website (Bambu Studio's command line on the studio PC, through the LAN bridge) ----------
+
+export type SliceQuality = "draft" | "standard" | "fine";
+export type SliceJobState = "queued" | "slicing" | "done" | "failed" | "cancelled";
+
+/**
+ * One slice: the studio PC turns an order's STL/OBJ (or an unsliced A1 3MF) into a printable .gcode.3mf for the A1,
+ * in ONE colour: the material and colour of the AMS spool that was picked. The result becomes a design file on the
+ * order; "Colours & print" prints it like any sliced file. Write through src/lib/slicing.ts. Never prints anything.
+ */
+export interface SliceJob {
+  id: string;                // "SJ-<n>-<time>"
+  orderId: string;
+  attachmentId: string;      // the source file on the order
+  sourceName: string;        // its file name, for display (the bridge passes only a cleaned copy to the slicer)
+  /** "mesh": STL/OBJ with the A1 presets below. "project": an unsliced A1 0.4 3MF with one filament keeps its own
+   *  settings (quality, infill and supports are then the designer's) and gets the spool's filament and colour. */
+  mode: "mesh" | "project";
+  printerId: string;         // the printer whose spool was picked: Colours & print presets the AMS mapping to it
+  tray: number;              // that spool's global AMS tray (ams*4 + slot), as in amsMapping
+  material: Material;
+  color: string;             // "#RRGGBB" of the spool when the slice was asked for
+  quality: SliceQuality;
+  infillPct: number;         // 0..100
+  supports: "auto" | "off";  // auto = tree supports where needed
+  /** Same source and settings = same key (src/lib/slice-rules.ts sliceKey): one active slice per key. */
+  key: string;
+  state: SliceJobState;
+  actor: "person" | "agent";
+  by: string;                // the person, or "agent"
+  /** The dispatcher's reasons, when the agent asked. */
+  why?: string[];
+  createdAt: string;
+  updatedAt: string;
+  error?: string;
+  /** Why it failed or was cancelled. "model": the model or its output (the slicer refused it, a wrong or too large
+   *  output, a timeout): the agent never asks for it again. "studio": the studio PC (not taken, went quiet, could not
+   *  download or upload, no Bambu Studio). "person": a person cancelled it. "switch": agent prints were turned off. */
+  failKind?: "model" | "studio" | "person" | "switch";
+  /** The sliced .gcode.3mf stored on the order. */
+  resultAttachmentId?: string;
+  /** From the sliced file: the slicer's time (incl. preparation), grams, the price by weight, how long slicing took. */
+  result?: { predictionSec: number | null; weightG: number | null; priceIdr: number | null; sliceMs?: number };
 }
 
 /** A short update on the customer's order page (/c/<token>), by the Chief (AI) or a person at Kesuni. */

@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { parse3mf } from "../../src/lib/threemf.ts";
 import {
-  appList, commandOutcome, controlApps, downloadProblem, hideAddresses, isLocalUrl, jobFileUrl, parseArgs, quietLog, replyMatches, safeApps,
+  AGENT_SPOOL_CHANGED_TEXT, appList, commandOutcome, controlApps, downloadProblem, hideAddresses, isLocalUrl, jobFileUrl, parseArgs, quietLog, replyMatches, safeApps,
   sendKey, startOutcome, startReasons,
 } from "./logic.mjs";
 import { benchy, idleSnapshot, md5, queuedJob, T0, withReport } from "./fakes.test-helper.mjs";
 
 describe("settings", () => {
   it("reads the flags and the app list", () => {
-    expect(parseArgs(["--dry-run"])).toEqual({ dryRun: true, readOnly: false });
-    expect(parseArgs(["--read-only"])).toEqual({ dryRun: false, readOnly: true });
+    expect(parseArgs(["--dry-run"])).toEqual({ dryRun: true, readOnly: false, sliceOnly: false, once: false });
+    expect(parseArgs(["--read-only"])).toEqual({ dryRun: false, readOnly: true, sliceOnly: false, once: false });
+    expect(parseArgs(["--slice-only", "--once"])).toEqual({ dryRun: false, readOnly: false, sliceOnly: true, once: true });
+    expect(parseArgs(["--once"])).toMatchObject({ sliceOnly: false, once: false }); // --once only with --slice-only
     expect(appList(" http://localhost:3000/, https://x.up.railway.app ,")).toEqual(["http://localhost:3000", "https://x.up.railway.app"]);
     expect(appList(undefined)).toEqual([]);
   });
@@ -167,6 +169,24 @@ describe("startReasons: checked again by the bridge right before a print starts"
     expect(startReasons(live(idleSnapshot()), old, info, { now: T0 })).toContain(late);
     expect(startReasons(live(idleSnapshot()), { ...item, sendBy: new Date(T0 - 1).toISOString() }, info, { now: T0 })).toContain(late);
     expect(startReasons(live(idleSnapshot()), item, info, { now: T0 })).not.toContain(late);
+  });
+
+  it("an agent print: the person who confirmed the bed instead of a person at the printer; any warning or a failed print blocks it", () => {
+    const agent = { ...item, by: "agent", actor: "agent", bedConfirmedBy: "Khelda", expectedTrays: [{ tray: 0, type: "PLA", color: "#FEC600" }] };
+    expect(startReasons(live(idleSnapshot()), agent, info, { now: T0 })).toEqual([]);
+    // Nobody at the printer sees a spool swapped during the upload: another colour, no spool, or no expected spools at all.
+    const swapped = idleSnapshot({ ams: { ams: [{ id: "0", info: "1002", tray: [{ id: "0", tray_type: "PLA", tray_color: "000000FF", tray_sub_brands: "" }] }] } });
+    expect(startReasons(live(swapped), agent, info, { now: T0 })).toContain(AGENT_SPOOL_CHANGED_TEXT);
+    expect(startReasons(live(idleSnapshot()), { ...agent, expectedTrays: undefined }, info, { now: T0 })).toContain(AGENT_SPOOL_CHANGED_TEXT);
+    expect(startReasons(live(idleSnapshot()), { ...agent, expectedTrays: [{ tray: 1, type: "PLA", color: "#FEC600" }] }, info, { now: T0 })).toContain(AGENT_SPOOL_CHANGED_TEXT);
+    expect(startReasons(live(idleSnapshot()), item, info, { now: T0 })).not.toContain(AGENT_SPOOL_CHANGED_TEXT); // a person's print: they look
+    expect(startReasons(live(idleSnapshot()), { ...agent, bedConfirmedBy: undefined }, info, { now: T0 }))
+      .toEqual(["The agent prints only after a person confirmed the bed is empty"]);
+    expect(startReasons(live(idleSnapshot({ gcode_state: "FAILED" })), agent, info, { now: T0 })).toContain("The last print failed: a person starts the next one");
+    const oldWarning = idleSnapshot({ hms: [{ attr: 0x07000300, code: 0x00030001, timestamp: Math.floor((T0 - 60_000) / 1000) }] });
+    expect(startReasons(live(oldWarning), agent, info, { now: T0 })).toContain("Check the warnings and tick \"I checked this\"");
+    // A person's job named "agent" is still refused as before.
+    expect(startReasons(live(idleSnapshot()), { ...item, by: "agent" }, info, { now: T0 })).toContain("A person's name is required");
   });
 
   it("refuses a file that is not sliced", () => {

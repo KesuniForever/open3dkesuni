@@ -1,0 +1,38 @@
+/* Order page, "Colours & print": Slice here (SlicePanel.tsx). Phone first: every field wraps, nothing is wider than 390 px. */
+.sp { display: grid; gap: 10px; margin: 0 0 14px; padding: 0 0 14px; border-bottom: 1px solid var(--border-soft); }
+.sp > .pp-h { margin: 4px 0 0; }
+.sp > .alert { margin: 0; }
+.sp-pick { gap: 10px 12px; }
+.sp-pick > label { min-width: 0; }
+.sp-file { flex: 1 1 100%; }
+.sp-printer { flex: 0 1 96px; }
+.sp-spool { flex: 1 1 200px; }
+.sp-quality { flex: 1 1 150px; }
+.sp-infill { flex: 0 1 96px; }
+.sp-supports { flex: 0 1 110px; }
+.sp-pick select, .sp-pick input { width: 100%; min-width: 0; }
+.sp-spool-pick { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.sp-spool-pick select { margin-top: 0; flex: 1; }
+.sp-note { margin: 0; font-size: 12.5px; }
+.sp-go { gap: 10px 14px; }
+.sp-pc { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.sp-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.sp-pc.ok .sp-dot { background: var(--ok); }
+.sp-warn { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--warn-bg); color: var(--warn); font-size: 13px; }
+.sp-confirm-spool { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* the slices of this order */
+.sp-jobs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sp-job { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 6px; min-width: 0; }
+.sp-job.done { border-color: var(--ok); }
+.sp-job-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.sp-job-head > .badge { flex: none; margin-left: auto; }
+.sp-job-what { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; }
+.sp-job-what b { overflow-wrap: anywhere; }
+.sp-job-what small { font-size: 12px; overflow-wrap: anywhere; }
+.sp-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 14px; font-variant-numeric: tabular-nums; }
+.sp-result button { margin-left: auto; }
+.sp-error { margin: 0; font-size: 13px; color: var(--bad); overflow-wrap: anywhere; }
+.sp-older > summary { font-size: 13px; }
+.sp-older .sp-jobs { margin-top: 8px; }
+#pp-printer { scroll-margin-top: 80px; }

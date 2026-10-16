@@ -437,8 +437,11 @@ export function detectEvents(prev: PrinterSnapshot | undefined, next: PrinterSna
     if (!wasActive && isActive) out.push(ev("started"));
     if (prev.state === "PAUSE" && isActive) out.push(ev("resumed"));
     if (next.state === "PAUSE" && prev.state !== "PAUSE") out.push(ev("needs_operator", { errorCode: next.errorCode }));
-    if (next.state === "FINISH" && prev.state !== "FINISH" && wasActive) out.push(ev("finished", { percent: 100 }));
-    if (next.state === "FAILED" && prev.state !== "FAILED") out.push(ev("failed", { errorCode: next.errorCode }));
+    // A print the reports never showed running still ended (bridge or app down, MQTT link lost): IDLE -> FINISH, or a
+    // finished/failed printer that now names another job. The part is on the bed all the same.
+    const otherJob = Boolean(prev.jobName && next.jobName && prev.jobName !== next.jobName);
+    if (next.state === "FINISH" && (prev.state !== "FINISH" || otherJob)) out.push(ev("finished", { percent: 100 }));
+    if (next.state === "FAILED" && (prev.state !== "FAILED" || otherJob)) out.push(ev("failed", { errorCode: next.errorCode }));
     if (next.state === "RUNNING") {
       for (const m of MILESTONES) if (prev.percent < m && next.percent >= m) out.push(ev("progress", { percent: m }));
     }

@@ -6,7 +6,7 @@ import { ID } from "./id";
 
 const LocaleContext = createContext<Locale>(DEFAULT_LOCALE);
 
-/** Set once in the root layout from the "lang" cookie, so client components render the same language as the server. */
+/** Set once in the root layout from the language cookie, so client components render the same language as the server. */
 export function LocaleProvider({ locale, children }: { locale: Locale; children: ReactNode }) {
   return <LocaleContext.Provider value={locale}>{children}</LocaleContext.Provider>;
 }

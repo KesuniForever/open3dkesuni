@@ -6,6 +6,8 @@
 // (tLib in src/lib/lib-text.ts reverse-matches any value) and filled with today's config or every status word, so a
 // plain t(value) finds them too. Data from the database (task texts, notes, the Chief's own words) is never here.
 
+import autoprint from "./autoprint";
+
 type Dict = Record<string, string>;
 type Vars = Record<string, string | number>;
 const fill = (s: string, v: Vars) => s.replace(/\{(\w+)\}/g, (m, k: string) => (k in v ? String(v[k]) : m));
@@ -354,6 +356,11 @@ const id: Dict = {
   "File is too large": "File terlalu besar",
   "Expected multipart form data with a file": "Kirim form multipart berisi file",
   "Expected a file field": "Field file tidak ada",
+  "The file cannot be removed now": "File belum bisa dihapus",
+  "Print job {id} is still using this file: cancel or stop the print first": "Job cetak {id} masih memakai file ini: batalkan atau hentikan cetakannya dulu",
+  "Order is {status}; a QC photo stays once evidence is submitted": "Pesanan berstatus {status}; foto QC tetap disimpan setelah bukti dikirim",
+  "Expected { by }": "Kirim { by }",
+  "The stored copy could not be deleted": "Salinan tersimpan tidak bisa dihapus",
 
   // ---------- messages to the customer (src/lib/messages.ts) ----------
   "Message is empty": "Pesan kosong",
@@ -696,7 +703,96 @@ const id: Dict = {
   "This printer reports no camera": "Printer ini tidak melaporkan kamera",
   "No camera frame: {error}": "Tidak ada gambar kamera: {error}",
   "Dry run: nothing was sent to the printer": "Uji coba (dry run): tidak ada yang dikirim ke printer",
+
+  // ---------- slicing on the website (src/lib/slicing.ts, slice-rules.ts; the studio PC: scripts/bridge/slicer.mjs) ----------
+  "Agent prints are off: only a person can ask for a slice": "Cetak oleh agen mati: hanya orang yang bisa meminta slice",
+  "Order is {status}; nothing to slice now": "Pesanan berstatus {status}; tidak ada yang perlu di-slice sekarang",
+  "This file cannot be sliced here": "File ini tidak bisa di-slice di sini",
+  "Pick an AMS spool (tray 0 to 15)": "Pilih spool AMS (tray 0 sampai 15)",
+  "The spool cannot be used": "Spool ini tidak bisa dipakai",
+  "{printer} slot {n} is empty": "{printer} slot {n} kosong",
+  "{printer} slot {n} holds {type}: only PLA and PETG are sliced here": "{printer} slot {n} berisi {type}: hanya PLA dan PETG yang di-slice di sini",
+  "{printer} slot {n} reports no colour": "{printer} slot {n} tidak melaporkan warna",
+  "Quality must be standard, fine or draft": "Kualitas harus standar, halus, atau draf",
+  "Infill must be a whole number from 0 to 100": "Infill harus bilangan bulat dari 0 sampai 100",
+  "Supports must be auto or off": "Support harus otomatis atau mati",
+  "The agent cannot ask for this slice": "Agen tidak bisa meminta slice ini",
+  "Nobody confirmed the colours on {printer}": "Belum ada yang mengonfirmasi warna di {printer}",
+  "{printer} has not reported in the last 2 min": "{printer} belum melapor dalam 2 mnt terakhir",
+  "Nobody confirmed the colours on {printer}: check the spool is really {name}": "Belum ada yang mengonfirmasi warna di {printer}: cek apakah spool benar-benar {name}",
+  "{printer} has not reported in the last 2 min: its spools may have changed": "{printer} belum melapor dalam 2 mnt terakhir: spool-nya mungkin sudah berganti",
+  "At most {n} slices can wait per order": "Paling banyak {n} slice boleh menunggu per pesanan",
+  "At most {n} slices can wait on the studio PC": "Paling banyak {n} slice boleh menunggu di PC studio",
+  "The same slice is already waiting": "Slice yang sama sudah menunggu",
+  "Slice not found": "Slice tidak ditemukan",
+  "The slice is {sliceState}": "Slice ini {sliceState}",
+  "The slice is {sliceState}; the sliced file was kept on the order": "Slice ini {sliceState}; file hasil slice tetap disimpan di pesanan",
+  "The slice is {sliceState}; it cannot become {next}": "Slice ini {sliceState}; tidak bisa menjadi {next}",
+  "The studio PC did not take the slice within 15 min: is the bridge running with Bambu Studio?":
+    "PC studio tidak mengambil slice dalam 15 mnt: apakah bridge berjalan dengan Bambu Studio?",
+  "The studio PC stopped answering while slicing": "PC studio berhenti menjawab saat slicing",
+  "The studio PC could not slice it": "PC studio tidak bisa men-slice-nya",
+  "Slice {id} is still using this file: cancel the slice first": "Slice {id} masih memakai file ini: batalkan slice-nya dulu",
+  // what can be sliced, and what the sliced file must hold
+  "Only design files can be sliced": "Hanya file desain yang bisa di-slice",
+  "STEP files cannot be sliced here: export an STL from the CAD program": "File STEP tidak bisa di-slice di sini: ekspor STL dari program CAD",
+  "Only STL, OBJ or an unsliced Bambu Studio 3MF can be sliced here": "Hanya STL, OBJ, atau 3MF Bambu Studio yang belum di-slice yang bisa di-slice di sini",
+  "This 3MF is already sliced": "3MF ini sudah di-slice",
+  "This 3MF is not set up for the Bambu Lab A1 0.4 mm: slice it in Bambu Studio": "3MF ini tidak diatur untuk Bambu Lab A1 0,4 mm: slice di Bambu Studio",
+  "This 3MF uses several filaments: slice it in Bambu Studio": "3MF ini memakai beberapa filamen: slice di Bambu Studio",
+  "The slicer output has no printable plate": "Hasil slicer tidak punya plate yang bisa dicetak",
+  "The slicer output has more than one plate": "Hasil slicer punya lebih dari satu plate",
+  "The slicer output is not for the Bambu Lab A1": "Hasil slicer bukan untuk Bambu Lab A1",
+  "The slicer output uses more than one filament": "Hasil slicer memakai lebih dari satu filamen",
+  "The slicer output is not for the 0.4 mm nozzle": "Hasil slicer bukan untuk nozzle 0,4 mm",
+  "The slicer output is not for the textured PEI plate": "Hasil slicer bukan untuk plate Textured PEI",
+  "The slicer output has no weight or time": "Hasil slicer tidak punya berat atau waktu",
+  "The slicer output has the wrong filament or colour": "Hasil slicer punya filamen atau warna yang salah",
+  "The slicer output has no readable settings": "Pengaturan di hasil slicer tidak bisa dibaca",
+  "The slicer output used another filament profile": "Hasil slicer memakai profil filamen lain",
+  "The slicer output used other profiles": "Hasil slicer memakai profil lain",
+  "The slicer output has other settings than asked": "Pengaturan hasil slicer berbeda dari yang diminta",
+  "The sliced file is larger than 50 MB": "File hasil slice lebih besar dari 50 MB",
+  "The sliced file is empty": "File hasil slice kosong",
+  "The sliced file changed on the way (checksum mismatch)": "File hasil slice berubah di perjalanan (checksum tidak cocok)",
+  "Expected model/3mf": "Harus model/3mf",
+  // the studio PC: Bambu Studio's answers and the bridge's own checks
+  "The slicer could not start": "Slicer tidak bisa mulai",
+  "The slicer did not accept its settings": "Slicer tidak menerima pengaturannya",
+  "A file the slicer needs was not found": "File yang dibutuhkan slicer tidak ditemukan",
+  "A slicer profile could not be read": "Profil slicer tidak bisa dibaca",
+  "The model file could not be read (broken, empty or not a supported 3D file)": "File model tidak bisa dibaca (rusak, kosong, atau bukan file 3D yang didukung)",
+  "The quality preset does not fit the Bambu Lab A1": "Preset kualitas tidak cocok untuk Bambu Lab A1",
+  "The model does not fit on the A1 bed (256 x 256 x 256 mm) or is empty": "Model tidak muat di bed A1 (256 x 256 x 256 mm) atau kosong",
+  "The slicer rejected the settings": "Slicer menolak pengaturannya",
+  "Slicing failed": "Slicing gagal",
+  "Slicing failed (code {code})": "Slicing gagal (kode {code})",
+  "Slicing took longer than {n} min and was stopped": "Slicing lebih lama dari {n} mnt dan dihentikan",
+  "Bambu Studio was not found on the studio PC": "Bambu Studio tidak ditemukan di PC studio",
+  "Bambu Studio could not be started": "Bambu Studio tidak bisa dijalankan",
+  "The Bambu Studio profiles were not found on the studio PC": "Profil Bambu Studio tidak ditemukan di PC studio",
+  "The slicer wrote no file": "Slicer tidak menulis file",
+  "The sliced file could not be read": "File hasil slice tidak bisa dibaca",
+  "The model file is empty or larger than 50 MB": "File model kosong atau lebih besar dari 50 MB",
+  "The model file is larger than 50 MB": "File model lebih besar dari 50 MB",
+  "Only STL and OBJ files can be sliced here": "Hanya file STL dan OBJ yang bisa di-slice di sini",
+  "Only a Bambu Studio 3MF can be sliced with its own settings": "Hanya 3MF Bambu Studio yang bisa di-slice dengan pengaturannya sendiri",
+  "Only PLA and PETG can be sliced here": "Hanya PLA dan PETG yang bisa di-slice di sini",
+  "The colour must be #RRGGBB": "Warna harus #RRGGBB",
+  "Unknown quality": "Kualitas tidak dikenal",
+  "Infill must be 0-100 %": "Infill harus 0-100 %",
+  "The slice has no download link from this app": "Slice ini tidak punya tautan unduh dari aplikasi ini",
+  "Could not download the model": "Model tidak bisa diunduh",
+  "Could not download the model (the app answered {http})": "Model tidak bisa diunduh (aplikasi menjawab {http})",
+  "The model changed on the way (checksum mismatch)": "Model berubah di perjalanan (checksum tidak cocok)",
+  "The model is not the file the slice was asked for": "Model ini bukan file yang diminta untuk di-slice",
+  "The slicer hit an error on the studio PC": "Slicer mengalami error di PC studio",
+  "Could not upload the sliced file to the app": "File hasil slice tidak bisa diunggah ke aplikasi",
+  "The app did not take the sliced file (it answered {http})": "Aplikasi tidak menerima file hasil slice (menjawab {http})",
 };
+
+/** Slice state (src/lib/slicing.ts), lower case. */
+const SLICE_STATE: Dict = { queued: "dalam antrean", slicing: "sedang di-slice", done: "selesai", failed: "gagal", cancelled: "dibatalkan" };
 
 // ---------- the same texts filled in, so a plain t(value) finds them ----------
 
@@ -718,7 +814,7 @@ filled("Orders under {amount} need the owner's approval", [[{ amount: "Rp100.000
 filled("Orders above {amount} need the owner's approval", [[{ amount: "Rp1.000.000" }]]);
 filled("Partners only for orders of {amount} or more", [[{ amount: "Rp300.000" }]]);
 filled("Never prices under a {pct}% margin on its own", [[{ pct: 15 }]]);
-filled("No payment tool: {n} tools, none moves money; release and refund run in code through the policy", [[{ n: 12 }]]);
+filled("No payment tool: {n} tools, none moves money; release and refund run in code through the policy", [[{ n: 12 }], [{ n: 13 }]]);
 filled("Runs on {network} (test USDC); mainnet is locked unless KESUNI_ALLOW_MAINNET=1", [[{ network: "Arc Testnet" }]]);
 filled("Runs on {network} (real USDC); mainnet is unlocked by KESUNI_ALLOW_MAINNET=1", [[{ network: "Arc" }]]);
 filled("Runs on {network} (real USDC); mainnet is locked: KESUNI_ALLOW_MAINNET is not 1", [[{ network: "Arc" }]]);
@@ -734,8 +830,14 @@ for (const en of [
   "Order is {status}; too late to open an escrow", "Order is {status}; the spec is closed", "Order is {status}; quotes are closed",
   "Order is {status}; plan already chosen", "Order is {status}; evidence is closed", "Order is {status}; approval is for choosing a plan",
   "Order is {status}; QC evidence required first", "Order is {status}; choose a plan before printing",
-  "Order is {status}; QC photos belong to an order in production",
+  "Order is {status}; QC photos belong to an order in production", "Order is {status}; a QC photo stays once evidence is submitted",
 ]) filled(en, each(ORDER_STATUS, "status"));
+filled("Order is {status}; nothing to slice now", each(ORDER_STATUS, "status"));
+filled("The slice is {sliceState}", each(SLICE_STATE, "sliceState"));
+filled("The slice is {sliceState}; the sliced file was kept on the order", each(SLICE_STATE, "sliceState"));
+filled("At most {n} slices can wait per order", [[{ n: 3 }]]);
+filled("At most {n} slices can wait on the studio PC", [[{ n: 10 }]]);
+filled("Slicing took longer than {n} min and was stopped", [[{ n: 10 }]]);
 filled("Escrow is {state}, not FUNDED", each(ESCROW_STATE, "state"));
 filled("Escrow is {state}", each(ESCROW_STATE, "state"));
 filled("printer state is {state}", each({ ...PRINTER_STATE, FAILED: "GAGAL", UNKNOWN: "TIDAK DIKETAHUI" }, "state"));
@@ -748,5 +850,8 @@ filled("Expected a {kind}, got \"{ext}\"", [
   [{ kind: "reference image (JPG, PNG, WEBP)", ext: "no extension" }, { kind: "gambar referensi (JPG, PNG, WEBP)", ext: "tanpa ekstensi" }],
   [{ kind: "QC photo (JPG, PNG, WEBP)", ext: "no extension" }, { kind: "foto QC (JPG, PNG, WEBP)", ext: "tanpa ekstensi" }],
 ]);
+
+// Agent prints (src/i18n/id/autoprint.ts): its reasons are library texts too, so tLib finds their templates.
+Object.assign(id, autoprint);
 
 export default id;

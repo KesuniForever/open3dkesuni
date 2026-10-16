@@ -19,6 +19,11 @@ const id: Record<string, string> = {
   "local": "lokal",
   "Restore the simulated demo order. Real orders are not touched.": "Kembalikan pesanan demo simulasi. Pesanan nyata tidak disentuh.",
   "Reset simulated demo": "Reset demo simulasi",
+  "Reset the simulated demo?": "Reset demo simulasi?",
+  "Delete and reset": "Hapus dan reset",
+  "This deletes every simulated order with its escrow, Arc transfer records, print jobs and files, then restores the demo order. Real orders are not touched.":
+    "Ini menghapus semua pesanan simulasi beserta escrow, catatan transfer Arc, tugas cetak, dan filenya, lalu mengembalikan pesanan demo. Pesanan nyata tidak disentuh.",
+  "It cannot be undone.": "Ini tidak bisa dibatalkan.",
   "Order progress": "Progres pesanan",
   "created": "dibuat",
   "plan chosen": "rencana dipilih",
@@ -257,6 +262,15 @@ const id: Record<string, string> = {
   "Upload failed. Is the server running?": "Gagal mengunggah. Apakah server berjalan?",
   "Uploading…": "Mengunggah…",
   "Upload": "Unggah",
+  "Remove": "Hapus",
+  "Remove {file}": "Hapus {file}",
+  "Remove this file?": "Hapus file ini?",
+  "The photo evidence goes too.": "Bukti fotonya ikut terhapus.",
+  "{file} removed.": "{file} dihapus.",
+  "File removed by {name}": "File dihapus oleh {name}",
+  "{name} removed {file}": "{name} menghapus {file}",
+  "{file} removed; the stored copy stayed.": "{file} dihapus; salinan tersimpannya masih ada.",
+  "Stored copy not deleted": "Salinan tersimpan tidak terhapus",
 
   // printers and operator tasks
   "Printers and operator tasks": "Printer dan tugas operator",
