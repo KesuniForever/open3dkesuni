@@ -10,7 +10,7 @@ const passes = (r: Response) => r.headers.get("x-middleware-next") === "1";
 // Browsers send Basic credentials as UTF-8.
 const basic = (pw: string) => `Basic ${Buffer.from(`operator:${pw}`, "utf8").toString("base64")}`;
 
-afterEach(() => { delete process.env.OPERATOR_PASSWORD; delete process.env.RAILWAY_PROJECT_ID; });
+afterEach(() => { delete process.env.OPERATOR_PASSWORD; delete process.env.RAILWAY_PROJECT_ID; delete process.env.CUSTOMER_INVITE_CODE; });
 
 describe("proxy", () => {
   it("leaves local requests alone", () => {
@@ -23,6 +23,27 @@ describe("proxy", () => {
       expect(passes(proxy(req(p, tunnel)))).toBe(true);
     }
     expect(passes(proxy(post("/api/printers/report", tunnel)))).toBe(true);
+  });
+
+  it("shows the customer portal behind the invite code at /customer, on the public link too", () => {
+    process.env.CUSTOMER_INVITE_CODE = "kode rahasia/1";
+    process.env.OPERATOR_PASSWORD = "correct horse";
+    const rewrite = (r: Response) => new URL(r.headers.get("x-middleware-rewrite") ?? "http://x/none");
+    for (const p of ["/customer", "/customer/"]) {
+      const r = proxy(req(p, tunnel));
+      expect(r.status).toBe(200);
+      expect(rewrite(r).pathname).toBe("/request/kode%20rahasia%2F1");
+    }
+    const tab = rewrite(proxy(req("/customer?tab=machines", tunnel)));
+    expect(tab.pathname + tab.search).toBe("/request/kode%20rahasia%2F1?tab=machines");
+    expect(rewrite(proxy(req("/customer", tunnel, "HEAD"))).pathname).toBe("/request/kode%20rahasia%2F1");
+    expect(proxy(post("/customer", tunnel)).status).toBe(405);
+    // Anything below /customer is an ordinary (operator) path.
+    expect(proxy(req("/customer/x", tunnel)).status).toBe(401);
+  });
+
+  it("keeps /customer closed when there is no invite code", () => {
+    expect(proxy(req("/customer", tunnel)).status).toBe(404);
   });
 
   it("closes operator pages on the public link when no password is set", () => {

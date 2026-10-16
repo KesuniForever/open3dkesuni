@@ -66,7 +66,24 @@ function fromOtherSite(req: NextRequest): boolean {
   return !hosts.includes(from);
 }
 
+/**
+ * The easy address for customers: /customer shows the customer portal (/request/<invite code>) at that address, so
+ * nobody has to type or remember the code. A rewrite, not a redirect: Next.js wants an absolute redirect, and behind
+ * the tunnel or Railway this server does not know its public address. GET and HEAD only; the query (?tab=) is kept.
+ * Without CUSTOMER_INVITE_CODE the portal is closed: 404.
+ */
+function customerShortcut(req: NextRequest): NextResponse | null {
+  const path = req.nextUrl.pathname;
+  if (path !== "/customer" && path !== "/customer/") return null;
+  if (!READ_ONLY.has(req.method)) return new NextResponse("Method not allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+  const code = process.env.CUSTOMER_INVITE_CODE;
+  if (!code) return new NextResponse("The customer page is not open yet.", { status: 404 });
+  return NextResponse.rewrite(new URL(`/request/${encodeURIComponent(code)}${req.nextUrl.search}`, req.url));
+}
+
 export function proxy(req: NextRequest) {
+  const shortcut = customerShortcut(req);
+  if (shortcut) return shortcut;
   const path = req.nextUrl.pathname;
   if (OPEN.some((r) => r.test(path)) || OPEN_FOR.some(([r, methods]) => r.test(path) && methods.includes(req.method))) {
     return NextResponse.next();
