@@ -10,20 +10,21 @@ import { ON_ITS_WAY_TEXT, REAL_ORDER_TEXT } from "@/lib/printer/done-debug-rules
 import { PRINT_DONE_DEBUG_TOOL } from "@/lib/printer/done-debug";
 import type { AgentLogEntry } from "@/lib/types";
 
-// "Done (debug)" on the order page: every new English text has an Indonesian entry (English stays the source).
+// "Test: mark as printed" (was "Done (debug)") on the order page: every new English text has an Indonesian entry
+// (English stays the source).
 const id = makeT("id", ID);
 const src = ["PrintPanel.tsx", "OrderView.tsx"].map((f) => readFileSync(path.join(process.cwd(), "src/app/orders/[id]", f), "utf8")).join("\n");
 
-describe("Done (debug) in Indonesian", () => {
+describe("Test: mark as printed, in Indonesian", () => {
   it("the button, the dialog and the line", () => {
     const keys = [
-      "Done (debug)", "Mark the print as done?", "For testing only: nothing is printed. It is logged as a test.", "Mark done",
+      "Test: mark as printed", "Mark the print as done?", "For testing only: nothing is printed. It is logged as a test.", "Mark done",
       "Marked done for testing by {name} · {time}", "test", "print marked done for testing (no real print)",
     ];
     for (const k of keys) expect(src.includes(`t("${k}"`), k).toBe(true); // the pages use exactly these keys
     expect(keys.filter((k) => !(k in ID))).toEqual([]);
     expect(id("Marked done for testing by {name} · {time}", { name: "Khelda", time: "16 Okt 14.05" })).toBe("Ditandai selesai untuk uji oleh Khelda · 16 Okt 14.05");
-    expect(id("Done (debug)")).toBe("Selesai (debug)");
+    expect(id("Test: mark as printed")).toBe("Uji: tandai sudah dicetak");
   });
 
   it("the refusals and the dispatcher's reason", () => {

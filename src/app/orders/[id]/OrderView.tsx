@@ -1,32 +1,35 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { microToUsdc } from "@/lib/policy";
 import type {
-  Acceptance, AgentLogEntry, Attachment, CustomerMessage, Decision, Escrow, Evidence, OperatorTask, Order, OrderStatus, PaymentIntent, Printer, Quote, Vendor,
+  Acceptance, AgentLogEntry, Attachment, CustomerMessage, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, PrintJob, Printer, Quote, Vendor,
 } from "@/lib/types";
 import EscrowPanel from "./EscrowPanel";
-import PrinterPanel from "./PrinterPanel";
 import PrintPanel from "./PrintPanel";
+import SlicePanel, { useSliceJobs } from "./SlicePanel";
 import type { OrderAutoPrintView } from "./AgentPrintRow";
 import FilesPanel from "./FilesPanel";
 import AgreementPanel from "./AgreementPanel";
 import ActualPanel from "./ActualPanel";
 import WeightPricePanel from "./WeightPricePanel";
 import MessagesPanel from "./MessagesPanel";
+import { NowBanner, nowText, StepCard, StepLink } from "./Steps";
+import { nextStep, printFileOf, sliceGrams, STATUS_WORDS, statusWord, stepFacts, stepStates, weighedPlate } from "./operator-step";
 import type { PricingConfig } from "@/lib/pricing";
 import type { PublicNetwork } from "@/lib/network";
 import SkillChip from "@/app/components/SkillChip";
 import Info from "@/app/components/Info";
 import MoreText from "@/app/components/MoreText";
 import { oneLine } from "@/lib/text";
+import { duration } from "@/lib/machines";
 import { skillOf } from "@/lib/agent/skills";
 import { useLocale, useT } from "@/i18n/client";
-import type { T } from "@/i18n/core";
+import { dateLocale, type T } from "@/i18n/core";
 import { rich, units } from "./rich";
 import { tLib } from "@/lib/lib-text";
-import type { IssueTexts } from "@/app/machines/printer-details";
+import { taskText, type IssueTexts } from "@/app/machines/printer-details";
 import { useIssueTexts } from "@/app/machines/use-issue-texts";
 import { budgetRaiseText, budgetText } from "@/lib/budget";
 import { nameOf } from "@/lib/colors";
@@ -60,8 +63,6 @@ interface OrderData {
 
 type Notice = { kind: "ok" | "bad"; text: string; reasons?: string[] } | null;
 
-const FLOW: OrderStatus[] = ["CREATED", "PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED", "ACCEPTED"];
-
 async function post(url: string, body?: unknown) {
   const res = await fetch(url, {
     method: "POST",
@@ -82,9 +83,29 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
   const [notice, setNotice] = useState<Notice>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const [labelOpen, setLabelOpen] = useState(false);
+  const [collecting, setCollecting] = useState<Printer | null>(null);
 
   const [version, setVersion] = useState(0);
   const load = useCallback(() => setVersion((v) => v + 1), []);
+  // Slicing on the studio PC (step 2) and the step logic: a finished slice adds a sliced file to the order, so it reloads.
+  const slices = useSliceJobs(id, load);
+  // The print jobs as step 4 last read them: a start on its way to the printer (the Now banner).
+  const [printJobs, setPrintJobs] = useState<PrintJob[]>([]);
+  const [now, setNow] = useState(() => Date.now());
+  const printerCount = data?.printers.length ?? 0;
+
+  // A slice this page did not start (the customer's design weighed automatically, the agent's slice) shows up as a new
+  // design file or in the dispatcher's line: read the slices again then. No new timer.
+  const sliceKey = data
+    ? [...data.attachments.filter((a) => a.kind === "design").map((a) => a.id), data.autoPrint?.line?.action === "slicing" ? "slicing" : ""].join(",")
+    : null;
+  const seenSliceKey = useRef<string | null>(null);
+  const reloadSlices = slices.reload;
+  useEffect(() => {
+    if (sliceKey === null) return;
+    if (seenSliceKey.current !== null && seenSliceKey.current !== sliceKey) reloadSlices();
+    seenSliceKey.current = sliceKey;
+  }, [sliceKey, reloadSlices]);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +118,13 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
       .catch(() => { if (!cancelled) setNotice({ kind: "bad", text: "Could not load the order." }); });
     return () => { cancelled = true; };
   }, [id, version]);
+
+  // Refresh every 5 s while printers exist, so printer status and the Now banner stay live whatever card is folded.
+  useEffect(() => {
+    if (printerCount === 0) return;
+    const timer = setInterval(() => { setNow(Date.now()); load(); }, 5000);
+    return () => clearInterval(timer);
+  }, [printerCount, load]);
 
   async function act(url: string, body: unknown, success: string) {
     setBusy(true);
@@ -113,7 +141,8 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
   }
 
   if (missing) return <main className="wrap"><p>{t("Order not found.")} <Link href="/dashboard">{t("Back")}</Link></p></main>;
-  if (!data) return <main className="wrap"><p className="muted">{t("Loading…")}</p></main>;
+  // The slices tell a weighing file from one sliced to print: the steps wait for them (a failed read counts as read).
+  if (!data || !slices.loaded) return <main className="wrap"><p className="muted">{t("Loading…")}</p></main>;
 
   const { order, quotes, vendors, evidence, acceptance, agentLog, paymentIntents, escrow } = data;
   const evidenceOpen = ["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status);
@@ -122,10 +151,78 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
   const chosen = quotes.find((q) => q.id === order.chosenQuoteId);
   const chosenVendor = chosen ? vendors.find((v) => v.id === chosen.vendorId) : undefined;
   const usdc = data.network.isTestnet ? t("test USDC") : "USDC";
-  const stepIndex = order.status === "REJECTED" ? 3 : FLOW.indexOf(order.status === "PAID" ? "ACCEPTED" : order.status);
   const raised = budgetRaiseText(order, t, locale, data.network.isTestnet);
   // The real / simulated switch (src/lib/order-label.ts): a practice order from the public form stops counting.
   const nextLabel = order.label === "real" ? "simulated" : "real";
+
+  // ---------- the steps ----------
+  const facts = stepFacts({
+    order, attachments: data.attachments, slices: slices.slicer ? slices.jobs : null, printers: data.printers, tasks: data.tasks, evidence, escrow,
+    agreementCurrent: data.agreementCurrent, agentMode: data.agent.mode, autoPrint: data.autoPrint, quotes, jobs: printJobs, now,
+  });
+  const next = nextStep(facts);
+  const states = stepStates(facts, next);
+  const status = t(statusWord(order.status, facts.agreed));
+  const past = ["EVIDENCE_SUBMITTED", "ACCEPTED", "PAID", "REJECTED"].includes(order.status);
+  const doneTasks = data.tasks.filter((task) => task.status === "done");
+  const onBed = data.printers.filter((p) => p.bedOccupiedBy === order.id);
+  // A part still on a bed: collected in step 5, or in step 4 between the runs of a multi-run order. "Part collected"
+  // closes the printer's open collect task when there is one (the banner's Done does the same), else frees the bed;
+  // neither lets the agent print (only "Bed is empty" on My machines does).
+  const collectStep = facts.runDone ? "print" : "qc";
+  const collectTask = (p: Printer) => data.tasks.filter((x) => x.kind === "collect_and_qc" && x.status === "open" && x.printerId === p.id).at(-1);
+  const collectRows = onBed.map((p) => (
+    <div key={p.id} className="op-collect">
+      <span>{t("{printer} still has this order's print on the bed.", { printer: p.name })}</span>
+      <button disabled={busy} onClick={() => setCollecting(p)}>{t("Part collected")}</button>
+    </div>
+  ));
+  // The open card with those rows shows their collect tasks: the banner does not repeat them.
+  const rowsInView = states[collectStep] === "now" || states[collectStep] === "wait";
+  const bannerTasks = data.tasks.filter((x) => !(rowsInView && x.kind === "collect_and_qc" && onBed.some((p) => p.id === x.printerId)));
+  const runsLeft = facts.runs && facts.runs.needed > 1 && facts.runs.done < facts.runs.needed && ["PLAN_CHOSEN", "IN_PRODUCTION"].includes(order.status)
+    ? facts.runs : null;
+
+  // The design the order prints from: the newest model that is not a sliced file, else the newest sliced one.
+  const models = data.attachments.filter((a) => a.kind === "design" && !/\.(step|stp)$/i.test(a.filename));
+  const newestModel = models.filter((a) => !a.parsed3mf?.sliced).at(-1) ?? models.at(-1);
+  const modelSummary = newestModel
+    ? t(data.attachments.length === 1 ? "{file} · {n} file" : "{file} · {n} files", { file: newestModel.filename, n: data.attachments.length })
+    : t("No model yet.");
+
+  const printFile = printFileOf(data.attachments, slices.slicer ? slices.jobs : null);
+  const printPlate = weighedPlate(printFile) ?? printFile?.parsed3mf?.plates[0];
+  const weighing = sliceGrams(data.attachments, order.quantity);
+  const gramText = (g: number) => `${g.toLocaleString(dateLocale(locale), { maximumFractionDigits: 2 })} g`;
+  const sliceSummary = facts.sliceRunning ? t("Slicing…")
+    : printFile && printPlate ? t("Ready to print: {what} · {grams} · {time}", {
+      what: printPlate.filaments.map((f) => `${f.type} ${t(nameOf(f.color))}`).join(" + "),
+      grams: printPlate.weightG != null ? gramText(printPlate.weightG) : "—",
+      time: printPlate.predictionSec ? duration(printPlate.predictionSec / 60, false, t) : "—",
+    })
+      : weighing ? t("Weighed for the price: {grams} (any colour)", { grams: gramText(weighing.gramsPerUnit) })
+        : t("Not sliced yet.");
+
+  const w = order.gramPricing;
+  const payText = facts.paid ? t("Paid ✓") : facts.real ? t("Not paid yet") : t("Test order: no payment needed");
+  const priceSummary = w
+    ? [
+      t("{unit} per piece × {qty} = {total}", { unit: rp(w.unitPriceIdr), qty: w.quantity, total: rp(w.totalIdr) }),
+      facts.agreed ? t("Customer agreed ✓") : t("Waiting for the customer to agree"), payText,
+    ].join(" · ")
+    : chosen && order.status !== "CREATED" ? `${t("Price")}: ${microToUsdc(chosen.priceMicro)} ${usdc} · ${payText}`
+      : facts.chiefPricing && order.slicerGrams ? t("The Chief is pricing it with {grams} g per piece from the slice.", { grams: order.slicerGrams.gramsPerUnit })
+        : t("Needs the weight from step 2.");
+
+  const printSummary = facts.printing ? t("Printing on {printer} · {pct}%", { printer: facts.printing.printer, pct: facts.printing.pct })
+    : facts.sending ? nowText(next, t)
+      : facts.printed ? facts.printed.printer ? t("Printed on {printer} ✓", { printer: facts.printed.printer }) : t("Printed ✓")
+        : past ? t("Printed ✓")
+          : runsLeft && runsLeft.done > 0 ? t("{done} of {needed} prints done", { done: runsLeft.done, needed: runsLeft.needed })
+            : order.status === "CREATED" || (facts.real && !facts.paid) ? t("After the customer pays.") : t("Ready to start.");
+  const qcSummary = facts.qcDone || past ? t("QC recorded ✓") : facts.printed ? t("No QC result yet.") : t("After printing.");
+  const handoverSummary = order.status === "PAID" ? t("Paid ✓") : order.status === "REJECTED" ? t("Rejected")
+    : order.status === "ACCEPTED" ? t(STATUS_WORDS.ACCEPTED) : order.status === "EVIDENCE_SUBMITTED" ? t("Waiting for the customer.") : t("After QC.");
 
   return (
     <main className="wrap">
@@ -134,7 +231,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
           <p className="eyebrow">{t("Order · {id}", { id: order.id })}</p>
           <h1>{order.product}</h1>
           <p className="page-sub">
-            {order.customerName ? `${order.customerName} · ` : ""}{units(t, order.quantity)} · {t("due {date}", { date: order.deadline })} · <b>{t(order.status)}</b>
+            {order.customerName ? `${order.customerName} · ` : ""}{units(t, order.quantity)} · {t("due {date}", { date: order.deadline })} · <b>{status}</b>
           </p>
         </div>
         <div className="page-actions">
@@ -145,13 +242,15 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
               {t(nextLabel === "simulated" ? "Mark simulated" : "Mark real")}
             </button>
           )}
-          <button
-            disabled={busy}
-            onClick={() => setResetOpen(true)}
-            title={t("Restore the simulated demo order. Real orders are not touched.")}
-          >
-            {t("Reset simulated demo")}
-          </button>
+          {order.label === "simulated" && (
+            <button
+              disabled={busy}
+              onClick={() => setResetOpen(true)}
+              title={t("Restore the simulated demo order. Real orders are not touched.")}
+            >
+              {t("Reset simulated demo")}
+            </button>
+          )}
         </div>
       </header>
       {/* One click used to wipe every simulated order (with its Arc transfer records), so it asks first. */}
@@ -178,12 +277,8 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
         </p>
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>{t("Logged with your name.")}</p>
       </ConfirmDialog>
-      <ol className="timeline" aria-label={t("Order progress")}>
-        {FLOW.map((s, i) => (
-          <li key={s} className={i < stepIndex ? "done" : i === stepIndex ? "now" : ""}>{t(s.replaceAll("_", " ").toLowerCase())}</li>
-        ))}
-        {order.status === "REJECTED" && <li className="now">{t("rejected")}</li>}
-      </ol>
+
+      <NowBanner next={next} states={states} tasks={bannerTasks} issueTexts={issueTexts} busy={busy} act={act} />
 
       {notice && (
         <div className={`alert ${notice.kind}`} role="status" style={{ marginBottom: 16 }}>
@@ -194,9 +289,8 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
 
       <div className="order-layout">
         <div className="order-side">
-          {/* 1. Order */}
           <section className="card">
-            <h2><span className="step">1</span> {t("Order")}</h2>
+            <h2>{t("Order")}</h2>
             <dl className="grid kv">
               <div><dt>{t("Order / Job")}</dt><dd className="mono">{order.id} · {order.jobId}</dd></div>
               <div><dt>{t("Quantity")}</dt><dd>{order.quantity}</dd></div>
@@ -214,7 +308,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
                   ))}
                 </dd></div>
               )}
-              <div><dt>{t("Status")}</dt><dd><b>{t(order.status)}</b></dd></div>
+              <div><dt>{t("Status")}</dt><dd><b>{status}</b></dd></div>
             </dl>
           </section>
 
@@ -224,103 +318,93 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
         </div>
 
         <div className="order-main">
-          <WeightPricePanel order={order} quotes={quotes} pricing={data.pricing} budgetIdr={order.budgetIdr ?? Math.round((order.mandateMicro / 1e6) * data.idrPerUsdc)}
-            minMarginPct={data.ownerRules.minMarginPct} busy={busy} act={act} />
+          <StepCard id="model" state={states.model} summary={modelSummary}
+            explain={<>{t("The customer's model and the order's other files.")}{" "}
+              <Info>{t("Files stay with Kesuni and are never sent to the AI agent. A QC photo is also recorded as photo evidence; it does not replace the QC result.")}</Info></>}>
+            <FilesPanel order={order} attachments={data.attachments} onChange={load} />
+          </StepCard>
 
-          <AgreementPanel order={order} quotes={quotes} agreementCurrent={data.agreementCurrent} idrPerUsdc={data.idrPerUsdc} busy={busy} act={act} />
+          <StepCard id="slice" state={states.slice} summary={sliceSummary}
+            explain={t("The studio PC turns the model into a ready-to-print file, in the colour of the spool you pick.")}>
+            <SlicePanel order={order} attachments={data.attachments} printers={data.printers} data={slices} t={t} locale={locale} />
+          </StepCard>
 
-          <OwnerRules data={data} busy={busy} act={act} />
+          <StepCard id="price" state={states.price} summary={priceSummary}
+            explain={t("The price comes from the slice's weight. The customer agrees and pays on their own page.")}>
+            <WeightPricePanel order={order} quotes={quotes} pricing={data.pricing} budgetIdr={order.budgetIdr ?? Math.round((order.mandateMicro / 1e6) * data.idrPerUsdc)}
+              minMarginPct={data.ownerRules.minMarginPct} busy={busy} act={act} attachments={data.attachments} agentMode={data.agent.mode}
+              agreed={facts.agreed} agreementChanged={Boolean(order.agreement) && !data.agreementCurrent} paid={facts.paid} real={facts.real} />
+          </StepCard>
 
-          {/* 2. Options + agent */}
-          <section className="card">
-            <h2><span className="step">2</span> {t("Production options and agent decision")}</h2>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>{t("Quote")}</th><th>{t("Vendor")}</th><th>{t("Price")}</th><th>ETA</th><th>{t("Policy")}</th></tr></thead>
-                <tbody>
-                  {quotes.map((q) => {
-                    const refused = q.priceMicro > order.mandateMicro;
-                    return (
-                      <tr key={q.id}>
-                        <td className="mono">{q.id}{q.id === order.chosenQuoteId && " ✓"}</td>
-                        <td>{vendorName(q.vendorId)}</td>
-                        <td>{microToUsdc(q.priceMicro)} {usdc}</td>
-                        <td>{t("{n} h", { n: q.etaHours })}</td>
-                        <td>{refused ? <span className="badge bad">{t("over budget")}</span> : <span className="badge ok">{t("within budget")}</span>}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {order.status === "CREATED" && (
-              <QuoteForm vendors={vendors} disabled={busy}
-                onSubmit={(b) => act(`${base}/quotes`, b, t("Quote added."))} />
-            )}
-            {quotes.length === 0 && <p className="muted">{t("No quotes yet. Add at least one before running the agent.")}</p>}
-            <div className="row" style={{ marginTop: 12 }}>
-              <button className="primary" disabled={busy || ["PAID", "REJECTED"].includes(order.status)}
-                onClick={() => act(`${base}/agent-plan`, undefined, t("The agent ran. See its decisions below."))}>
-                {busy ? t("Agent is working…") : t("Run agent")}
-              </button>
-              <span className="muted" style={{ fontSize: 13 }}>
-                {data.agent.mode === "claude"
-                  ? <>{t("Chief on")} <b>{data.agent.model}</b> <Info>{t("It decides with tools; the policy engine and the owner's rules have the final say, and it has no payment tool.")}</Info></>
-                  : <>{t("Rule-based planner")} <Info>{t("No ANTHROPIC_API_KEY yet. Same tools and policy as the Chief.")}</Info></>}
-              </span>
-            </div>
-            {agentLog.length > 0 && <DecisionLog log={agentLog} />}
-            {data.decisions.map((d) => (
-              <div key={d.at} className="alert ok"><b>{t("Decision ({by}):", { by: t(d.decidedBy) })}</b> {d.reason}</div>
-            ))}
-          </section>
+          <StepCard id="print" state={states.print} summary={printSummary}
+            explain={t("Start the print at the printer. Pause or stop it on My machines.")}>
+            {collectStep === "print" && collectRows}
+            <PrintPanel order={order} attachments={data.attachments} printers={data.printers} paid={escrow?.state === "FUNDED"} issueTexts={issueTexts} autoPrint={data.autoPrint}
+              slices={slices} busy={busy} act={act} onChange={load} onJobs={setPrintJobs} />
+          </StepCard>
 
-          <FilesPanel order={order} attachments={data.attachments} onChange={load} />
-          <PrintPanel order={order} attachments={data.attachments} printers={data.printers} paid={escrow?.state === "FUNDED"} issueTexts={issueTexts} autoPrint={data.autoPrint}
-            busy={busy} act={act} onChange={load} />
-          <PrinterPanel order={order} printers={data.printers} tasks={data.tasks} busy={busy} act={act} onChange={load} issueTexts={issueTexts} />
-
-          {/* 3. Production evidence, then the QC check in its own card: both are needed, so neither hides in the other. */}
-          <section className="card">
-            <h2><span className="step">3</span> {t("Production evidence")}</h2>
-            <EvidenceList items={evidence.filter((e) => e.kind !== "qc")} empty={t("No evidence yet.")} />
-            {!evidenceOpen && <p className="muted">{t("Opens once a plan is chosen, after the price is agreed.")}</p>}
-            <EvidenceForm kinds={["log", "photo"]} disabled={busy || !evidenceOpen} button={t("Add evidence")}
-              placeholder={t("e.g. Printed 4 legs, PLA, 6h")}
-              onSubmit={(b) => act(`${base}/evidence`, b, t("Recorded {kind} evidence.", { kind: b.kind }))} />
-          </section>
-
-          <section className="card">
-            <h2><span className="step">Q</span> {t("Quality check (QC)")}{" "}
-              <Info>{t("Needed before the customer's payment can be released. A QC photo goes under Files (QC photo); it does not replace this result.")}</Info>
-            </h2>
+          <StepCard id="qc" state={states.qc} summary={qcSummary}
+            explain={t("Take the pieces off the bed, check them, then record the QC result.")}>
+            {collectStep === "qc" && collectRows}
+            <h3>{t("QC result")}{" "}
+              <Info>{t("Needed before the customer's payment can be released. Add a QC photo in step 1 (Model); it does not replace this result.")}</Info>
+            </h3>
+            {/* A multi-run order: the parts of each run are kept; QC comes after the last one (a line only, no new block). */}
+            {runsLeft && <p className="op-warn">{t("QC comes after the last run ({done} of {needed} printed).", { done: runsLeft.done, needed: runsLeft.needed })}</p>}
             <EvidenceList items={evidence.filter((e) => e.kind === "qc")} empty={t("No QC result yet.")} />
             {!evidenceOpen && <p className="muted">{t("Opens once a plan is chosen, after the price is agreed.")}</p>}
             <EvidenceForm kinds={["qc"]} disabled={busy || !evidenceOpen} button={t("Record QC result")}
               placeholder={t("e.g. All 5 checked: size, colour and finish OK")}
               onSubmit={(b) => act(`${base}/evidence`, b, t("Recorded {kind} evidence.", { kind: b.kind }))} />
-          </section>
+            <p style={{ margin: "10px 0 0", fontSize: 13.5 }}><StepLink id="model">{t("Add a QC photo")}</StepLink></p>
 
-          <ActualPanel key={order.actual?.at ?? "none"} order={order} busy={busy} act={act} />
+            <details className="fold">
+              <summary>{t("Add a production note")}</summary>
+              <EvidenceList items={evidence.filter((e) => e.kind !== "qc")} empty={t("No evidence yet.")} />
+              {!evidenceOpen && <p className="muted">{t("Opens once a plan is chosen, after the price is agreed.")}</p>}
+              <EvidenceForm kinds={["log", "photo"]} disabled={busy || !evidenceOpen} button={t("Add evidence")}
+                placeholder={t("e.g. Printed 4 legs, PLA, 6h")}
+                onSubmit={(b) => act(`${base}/evidence`, b, t("Recorded {kind} evidence.", { kind: b.kind }))} />
+            </details>
+            {doneTasks.length > 0 && (
+              <details className="fold">
+                <summary>{t(doneTasks.length === 1 ? "{n} done task" : "{n} done tasks", { n: doneTasks.length })}</summary>
+                <ul className="muted" style={{ margin: 0 }}>
+                  {doneTasks.map((task) => <li key={task.id}>{oneLine(taskText(task, t, issueTexts))} ({task.doneBy})</li>)}
+                </ul>
+              </details>
+            )}
+          </StepCard>
+          {/* "Part collected" only frees the bed, without a grant: it closes the printer's open collect task (which clears the
+              bed with grant:false, src/lib/printer/actions.ts completeTask), else clear_bed. "Bed is empty" on My machines is
+              what lets the agent print. */}
+          <ConfirmDialog open={collecting !== null} title={t("Part collected from {printer}?", { printer: collecting?.name ?? "" })} confirmLabel={t("Part collected")} busy={busy}
+            onConfirm={async (by) => {
+              if (!collecting) return;
+              const task = collectTask(collecting);
+              if (task) await act(`/api/tasks/${task.id}`, { by }, t("Task marked done."));
+              else await act(`/api/printers/${collecting.id}`, { action: "clear_bed", by }, t("{name}: bed marked empty.", { name: collecting.name }));
+              setCollecting(null);
+            }}
+            onClose={() => setCollecting(null)}>
+            <p style={{ margin: 0 }}>{t("This frees the printer for the next order. It does not start any print.")}</p>
+          </ConfirmDialog>
 
-          {/* 4. Acceptance */}
-          <section className="card">
-            <h2><span className="step">4</span> {t("Acceptance")}</h2>
+          <StepCard id="handover" state={states.handover} summary={handoverSummary}
+            explain={t("The customer accepts the pieces; then the payment is released.")}>
+            <h3>{t("Acceptance")}</h3>
             {acceptance ? (
               <p><span className={`badge ${acceptance.accepted ? "ok" : "bad"}`}>{acceptance.accepted ? t("accepted") : t("rejected")}</span>{" "}
                 {t("by {name}", { name: acceptance.by })}{acceptance.note && `: ${acceptance.note}`}</p>
             ) : <p className="muted">{t("A person decides this. Model output is never the release condition.")}</p>}
             <AcceptanceForm disabled={busy || order.status !== "EVIDENCE_SUBMITTED"}
               onSubmit={(b) => act(`${base}/acceptance`, b, b.accepted ? t("Order accepted.") : t("Order rejected."))} />
-          </section>
 
-          {/* 5. Settlement */}
-          <section className="card">
-            <h2><span className="step">5</span> {t("Payment")}{" "}
+            <h3>{t("Payment")}{" "}
               <Info>{escrow
                 ? t("The escrow release creates the payment intent, and the policy engine must approve it.")
                 : t("Without an escrow this creates a payment intent only; no USDC is sent. Change the address or amount to see the policy block it.")}</Info>
-            </h2>
+            </h3>
             {paymentIntents.map((p) => (
               <div key={p.id} className="alert ok">
                 <b>{p.id}</b> {rich(t("{amount} {token} to {recipient} on {network}. State {state}"), {
@@ -337,12 +421,71 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
                 defaults={{ recipient: chosenVendor?.address ?? "", amount: chosen ? microToUsdc(chosen.priceMicro) : "" }}
                 onSubmit={(b) => act(`${base}/payment-intent`, b, t("Payment intent created (local only, no USDC sent)."))} />
             )}
-          </section>
+          </StepCard>
+
+          {/* Folded for tidiness only: the operator password opens all of it, as before. */}
+          <details className="op-owner" id="owner-tools">
+            <summary>
+              <h2>{t("Owner & agent tools")}</h2>
+              <span>{t("Price check, spec, owner's rules, quotes, agent log, plan vs actual")}</span>
+            </summary>
+
+            <AgreementPanel order={order} quotes={quotes} agreementCurrent={data.agreementCurrent} idrPerUsdc={data.idrPerUsdc} busy={busy} act={act} />
+
+            <OwnerRules data={data} busy={busy} act={act} />
+
+            <section className="card">
+              <h2>{t("Production options and agent decision")}</h2>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>{t("Quote")}</th><th>{t("Vendor")}</th><th>{t("Price")}</th><th>ETA</th><th>{t("Policy")}</th></tr></thead>
+                  <tbody>
+                    {quotes.map((q) => {
+                      const refused = q.priceMicro > order.mandateMicro;
+                      return (
+                        <tr key={q.id}>
+                          <td className="mono">{q.id}{q.id === order.chosenQuoteId && " ✓"}</td>
+                          <td>{vendorName(q.vendorId)}</td>
+                          <td>{microToUsdc(q.priceMicro)} {usdc}</td>
+                          <td>{t("{n} h", { n: q.etaHours })}</td>
+                          <td>{refused ? <span className="badge bad">{t("over budget")}</span> : <span className="badge ok">{t("within budget")}</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {order.status === "CREATED" && (
+                <QuoteForm vendors={vendors} disabled={busy}
+                  onSubmit={(b) => act(`${base}/quotes`, b, t("Quote added."))} />
+              )}
+              {quotes.length === 0 && <p className="muted">{t("No quotes yet. Add at least one before running the agent.")}</p>}
+              <div className="row" style={{ marginTop: 12 }}>
+                <button className="primary" disabled={busy || ["PAID", "REJECTED"].includes(order.status)}
+                  onClick={() => act(`${base}/agent-plan`, undefined, t("The agent ran. See its decisions below."))}>
+                  {busy ? t("Agent is working…") : t("Run agent")}
+                </button>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {data.agent.mode === "claude"
+                    ? <>{t("Chief on")} <b>{data.agent.model}</b> <Info>{t("It decides with tools; the policy engine and the owner's rules have the final say, and it has no payment tool.")}</Info></>
+                    : <>{t("Rule-based planner")} <Info>{t("No ANTHROPIC_API_KEY yet. Same tools and policy as the Chief.")}</Info></>}
+                </span>
+              </div>
+              {agentLog.length > 0 && <DecisionLog log={agentLog} />}
+              {data.decisions.map((d) => (
+                <div key={d.at} className="alert ok"><b>{t("Decision ({by}):", { by: t(d.decidedBy) })}</b> {d.reason}</div>
+              ))}
+            </section>
+
+            <ActualPanel key={order.actual?.at ?? "none"} order={order} busy={busy} act={act} />
+          </details>
         </div>
       </div>
     </main>
   );
 }
+
+const rp = (n: number) => `Rp${Math.round(n).toLocaleString("id-ID")}`;
 
 function CustomerLink({ path, name, note }: { path: string; name?: string; note?: string }) {
   const t = useT();

@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Attachment, Order } from "@/lib/types";
-import Info from "@/app/components/Info";
-import { ConfirmDialog } from "@/app/components/PrinterControls";
+import { ConfirmDialog, useOperatorName } from "@/app/components/PrinterControls";
 import { useLocale, useT } from "@/i18n/client";
 import { dateLocale, type Locale, type T } from "@/i18n/core";
 import { tLib } from "@/lib/lib-text";
@@ -40,8 +39,9 @@ export function removalNote(file: string, ok: boolean, data: { error?: string; r
 }
 
 /**
- * Files attached to the order: designs for the operator's slicer, reference images, QC photos. A person can remove one
- * (with their name); the server refuses while a print uses it, and a QC photo once the evidence is submitted.
+ * Step 1 · Model: files attached to the order: designs for the operator's slicer, reference images, QC photos. A person
+ * can remove one (with their name); the server refuses while a print uses it, and a QC photo once the evidence is
+ * submitted. "Uploaded by" starts with the name this browser remembers (the same one every confirm dialog uses).
  */
 export default function FilesPanel({ order, attachments, onChange }: {
   order: Order;
@@ -51,7 +51,7 @@ export default function FilesPanel({ order, attachments, onChange }: {
   const t = useT();
   const locale = useLocale();
   const [kind, setKind] = useState<Attachment["kind"]>("design");
-  const [by, setBy] = useState("");
+  const [by, setBy] = useOperatorName();
   // Which action is running: the Upload button says "Uploading…" only for an upload.
   const [busyWith, setBusyWith] = useState<"upload" | "remove" | null>(null);
   const busy = busyWith !== null;
@@ -118,8 +118,7 @@ export default function FilesPanel({ order, attachments, onChange }: {
   const locked = removing?.kind === "qc_photo" ? qcPhotoLocked(order.status) : null;
 
   return (
-    <section className="card" id="files" style={{ scrollMarginTop: 80 }}>
-      <h2><span className="step">F</span> {t("Files")} <Info>{t("Files stay with Kesuni and are never sent to the AI agent. A QC photo is also recorded as photo evidence; it does not replace the QC result.")}</Info></h2>
+    <div className="files" id="files">
       {attachments.length === 0 ? (
         <p className="muted">{t("No files yet. Upload the design for the operator's slicer, reference images, or QC photos.")}</p>
       ) : (
@@ -154,7 +153,7 @@ export default function FilesPanel({ order, attachments, onChange }: {
             </select>
           </label>
           <label style={{ flex: "1 1 160px" }}>{t("Uploaded by")}
-            <input value={by} onChange={(e) => setBy(e.target.value)} placeholder={t("Your name")} disabled={busy} />
+            <input value={by} onChange={(e) => setBy(e.target.value)} placeholder={t("Your name")} maxLength={60} disabled={busy} />
           </label>
           <label style={{ flex: "2 1 240px" }}>{t("File (max 50 MB)")}
             <input ref={input} type="file" accept={KINDS.find((k) => k.value === kind)!.accept} disabled={busy} />
@@ -176,6 +175,6 @@ export default function FilesPanel({ order, attachments, onChange }: {
           ? <p style={{ margin: 0, color: "var(--bad)" }}>{tLib(t, locked)}</p>
           : <p className="muted" style={{ margin: 0 }}>{t("The photo evidence goes too.")}</p>)}
       </ConfirmDialog>
-    </section>
+    </div>
   );
 }

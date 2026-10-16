@@ -35,7 +35,7 @@ const id: Record<string, string> = {
   "Sent to the studio PC.": "Dikirim ke PC studio.",
   "Slice cancelled.": "Slice dibatalkan.",
   "Waiting for the studio PC": "Menunggu PC studio",
-  "Slicing…": "Sedang slicing…",
+  "Slicing…": "Sedang di-slice…",
   "Sliced": "Sudah di-slice",
   "Print it": "Cetak",
   "Older slices ({n})": "Slice lama ({n})",

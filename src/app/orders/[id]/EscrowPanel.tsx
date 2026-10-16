@@ -51,7 +51,7 @@ export default function EscrowPanel({ order, escrow, network, hasPlan, busy, act
   const toppedUp = escrow?.txs.some((tx) => tx.kind === "customer_topup" && !["FAILED", "DENIED", "CANCELLED"].includes(tx.state)) ?? false;
 
   return (
-    <section className="card money">
+    <section className="card money" id="payment" style={{ scrollMarginTop: 80 }}>
       <h2><span className="step">$</span> {t("Customer payment (escrow on {network} via Circle)", { network: network.name })}</h2>
       {!escrow ? (
         <>

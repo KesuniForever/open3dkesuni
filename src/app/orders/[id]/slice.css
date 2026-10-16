@@ -1,6 +1,9 @@
-/* Order page, "Colours & print": Slice here (SlicePanel.tsx). Phone first: every field wraps, nothing is wider than 390 px. */
-.sp { display: grid; gap: 10px; margin: 0 0 14px; padding: 0 0 14px; border-bottom: 1px solid var(--border-soft); }
-.sp > .pp-h { margin: 4px 0 0; }
+/* Order page, step 2 "Slice" (SlicePanel.tsx). Phone first: every field wraps, nothing is wider than 390 px. */
+.sp { display: grid; gap: 10px; margin: 0; padding: 0; min-width: 0; }
+.sp-wants { display: grid; gap: 8px; min-width: 0; }
+.sp-wants .pp-wish { margin: 0; }
+.sp-settings > summary { overflow-wrap: anywhere; }
+.sp-settings .sp-pick { margin-bottom: 8px; }
 .sp > .alert { margin: 0; }
 .sp-pick { gap: 10px 12px; }
 .sp-pick > label { min-width: 0; }
@@ -26,13 +29,11 @@
 .sp-job { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; display: grid; gap: 6px; min-width: 0; }
 .sp-job.done { border-color: var(--ok); }
 .sp-job-head { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-.sp-job-head > .badge { flex: none; margin-left: auto; }
+.sp-job-badges { flex: 0 1 auto; max-width: 55%; margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .sp-job-what { display: flex; flex-direction: column; min-width: 0; font-size: 13.5px; }
 .sp-job-what b { overflow-wrap: anywhere; }
 .sp-job-what small { font-size: 12px; overflow-wrap: anywhere; }
-.sp-result { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 14px; font-variant-numeric: tabular-nums; }
-.sp-result button { margin-left: auto; }
+.sp-result { margin: 0; font-size: 14px; font-variant-numeric: tabular-nums; }
 .sp-error { margin: 0; font-size: 13px; color: var(--bad); overflow-wrap: anywhere; }
 .sp-older > summary { font-size: 13px; }
 .sp-older .sp-jobs { margin-top: 8px; }
-#pp-printer { scroll-margin-top: 80px; }

@@ -2,22 +2,24 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { Attachment, ColorChoice, Order, PrintJob, PrintJobState, PrintOptions, Printer, ThreeMfPlate } from "@/lib/types";
+import type { Attachment, Order, PrintJob, PrintJobState, PrintOptions, Printer, ThreeMfPlate } from "@/lib/types";
 import { canStartPrint } from "@/lib/printer/control";
 import { deltaE, matchJob, MATCH_MAX_DELTA_E, nameOf, normalizeHex } from "@/lib/colors";
-import { COLOR_MODE_LABEL, type ColorMode } from "@/lib/pricing";
+import { toMaterial } from "@/lib/pricing";
 import { duration } from "@/lib/machines";
 import { tLib } from "@/lib/lib-text";
 import { useLocale, useT } from "@/i18n/client";
 import { dateLocale, type Locale, type T } from "@/i18n/core";
-import Info from "@/app/components/Info";
 import ColorSwatch from "@/app/components/ColorSwatch";
 import { ConfirmDialog } from "@/app/components/PrinterControls";
 import { amsSlots, bedTypeLabel, issueViews, mm, slotText, type IssueTexts } from "@/app/machines/printer-details";
 import { sliceSourceCheck } from "@/lib/slice-rules";
 import { canMarkPrintDoneDebug, ON_ITS_WAY_TEXT } from "@/lib/printer/done-debug-rules";
-import SlicePanel, { useSliceJobs } from "./SlicePanel";
+import type { SliceData } from "./SlicePanel";
 import AgentPrintRow, { type OrderAutoPrintView } from "./AgentPrintRow";
+import PrinterPanel from "./PrinterPanel";
+import { StepLink } from "./Steps";
+import { isWeighing } from "./operator-step";
 import "./print.css";
 
 type Act = (url: string, body: unknown, success: string) => Promise<void>;
@@ -29,6 +31,8 @@ const STEPS: PrintJobState[] = ["queued", "uploading", "sent", "printing", "done
 const STEP_LABEL: Record<PrintJobState, string> = {
   queued: "In queue", uploading: "Uploading", sent: "Sent", printing: "Printing", done: "Done", failed: "Failed", cancelled: "Cancelled",
 };
+/** QC is recorded or later: step 4 only shows what was printed. */
+const AFTER_PRINT: Order["status"][] = ["EVIDENCE_SUBMITTED", "ACCEPTED", "PAID", "REJECTED"];
 const JOBS_POLL_MS = 4_000;
 /** The bridge's text when an A1 did not start with file:///sdcard/: a person may try the ftp:/// path next (spec §4.5). */
 const NO_START = "The printer did not start within 45 s";
@@ -43,16 +47,15 @@ const grams = (n: number, locale: Locale) => `${n.toLocaleString(dateLocale(loca
 /** "16 Oct, 14:05" in Jakarta time, the way the visitor writes dates. */
 const when = (iso: string, locale: Locale) =>
   new Date(iso).toLocaleString(dateLocale(locale), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
-/** "A1 Combo #2" -> "#2". */
-const shortName = (name: string) => /#\d+$/.exec(name)?.[0] ?? name;
 
 /**
- * Colours & print: the customer's colours and where they are loaded, the order's sliced Bambu Studio file (plates,
- * filaments, the slicer's time and grams, which can price the order), which printer can print it with which AMS slot
- * for each filament, and the person's start: bed empty, at the printer, name. The LAN bridge uploads the file and starts
- * the print. The Chief (Claude) has no way to start a print; with agent prints on, code may (AgentPrintRow).
+ * Step 4 · Print: who prints this order (a person here, or the agent), the ready-to-print file (plates, filaments, the
+ * slicer's time and grams), which printer can print it with which AMS slot for each filament, and the person's start:
+ * bed empty, at the printer, warnings checked, name. The LAN bridge uploads the file and starts the print. The Chief
+ * (Claude) has no way to start a print; with agent prints on, code may (AgentPrintRow). While a print of this order is
+ * on its way its jobs come first; after QC the print history shows, and a reprint and the printers stay folded.
  */
-export default function PrintPanel({ order, attachments, printers, paid, issueTexts, autoPrint, busy, act, onChange }: {
+export default function PrintPanel({ order, attachments, printers, paid, issueTexts, autoPrint, slices, busy, act, onChange, onJobs }: {
   order: Order;
   attachments: Attachment[];
   printers: Printer[];
@@ -61,15 +64,23 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   issueTexts: IssueTexts;
   /** Agent prints for this order (GET /api/orders/:id autoPrint). */
   autoPrint?: OrderAutoPrintView | null;
+  /** The order's slices (OrderView): they tell a weighing result from a file sliced to print. */
+  slices: SliceData;
   busy: boolean;
   act: Act;
   onChange: () => void;
+  /** The jobs as this panel last read them (the Now banner: a start on its way to the printer). */
+  onJobs?: (jobs: PrintJob[]) => void;
 }) {
   const t = useT();
   const locale = useLocale();
+  const known = slices.slicer ? slices.jobs : null;
+  /** Sliced only to weigh the model for the price, in any colour. */
+  const forPrice = (a: Attachment) => Boolean(a.parsed3mf?.sliced) && isWeighing(a, known);
   const files = attachments.filter(is3mf).reverse(); // newest first
   const [fileId, setFileId] = useState<string | null>(null);
-  const file = files.find((f) => f.id === fileId) ?? files.find((f) => f.parsed3mf?.sliced) ?? files[0];
+  // The newest file sliced to print; a weighing result only when there is nothing else.
+  const file = files.find((f) => f.id === fileId) ?? files.find((f) => f.parsed3mf?.sliced && !forPrice(f)) ?? files.find((f) => f.parsed3mf?.sliced) ?? files[0];
   const info = file?.parsed3mf;
   const plates = info?.sliced ? info.plates : [];
   const [plateNo, setPlateNo] = useState<number | null>(null);
@@ -83,13 +94,10 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   const [bedEmpty, setBedEmpty] = useState(false);
   const [atPrinter, setAtPrinter] = useState(false);
   const [checked, setChecked] = useState(false);
-  const [asking, setAsking] = useState<"start" | "grams" | "debug" | PrintJob | null>(null);
+  const [asking, setAsking] = useState<"start" | "debug" | PrintJob | null>(null);
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState<Msg | null>(null);
-  const [units, setUnits] = useState("");
   const [ftp, setFtp] = useState(false);
-  // Slicing on the studio PC (SlicePanel): a finished slice adds a sliced file to the order, so the order reloads.
-  const slices = useSliceJobs(order.id, onChange);
   const canSlice = attachments.some((a) => a.kind === "design" && sliceSourceCheck(a).ok);
 
   const [jobsVersion, setJobsVersion] = useState(0);
@@ -102,6 +110,7 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
       .catch(() => { /* the next poll tries again */ });
     return () => { cancelled = true; };
   }, [order.id, jobsVersion]);
+  useEffect(() => { onJobs?.(jobs); }, [jobs, onJobs]);
   const open = jobs.some((j) => OPEN.includes(j.state));
   // Follow open jobs (queued -> uploading -> sent -> printing -> done) while the page is open.
   useEffect(() => {
@@ -183,7 +192,7 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
     }
   }
 
-  /** "Done (debug)": a test order's printing counts as finished without a print, to try QC and the customer's decision. */
+  /** "Test: mark as printed": a test order's printing counts as finished without a print, to try QC and the customer's decision. */
   async function markDone(by: string) {
     setSending(true);
     setMsg(null);
@@ -204,16 +213,21 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   const debugDone = order.printDoneDebug;
   const canDebug = canMarkPrintDoneDebug(order);
 
-  // ---------- the slicer's grams for the price ----------
-  const defaultUnits = plate?.objects && plate.objects > 1 ? Math.min(plate.objects, order.quantity) : 1;
-  const perPlate = Math.max(1, Math.round(Number(units) || defaultUnits));
-  const gramsPerUnit = plate?.weightG ? Math.round((plate.weightG / perPlate) * 100) / 100 : null;
-  const colorMode: ColorMode = plate && plate.filaments.length > 1 ? "multi" : "single";
-  const source = file && plate ? `Bambu Studio sliced file ${file.filename}, plate ${plate.index}${perPlate > 1 ? `, ${perPlate} units on the plate` : ""}` : "";
-
   const blocked = picked ? picked.verdict.reasons : [];
-  // Same rule as the server: a real order the customer has not paid for yet is a warning the person accepts.
-  const warnings = [...(picked?.warnings ?? []), ...(order.label === "real" && !paid ? ["The customer has not paid into escrow yet"] : [])];
+  // Same rule as the server: a real order the customer has not paid for yet is a warning the person accepts. The page
+  // adds its own warnings (a weighing file, not the customer's colour, no agreed price): each only asks for the tick.
+  const wanted = order.preferredColors ?? [];
+  const only = plate?.filaments.length === 1 ? plate.filaments[0] : null;
+  const onlyHex = only ? normalizeHex(only.color) : null;
+  const warnings = [
+    ...[...(picked?.warnings ?? []), ...(order.label === "real" && !paid ? ["The customer has not paid into escrow yet"] : [])].map((w) => tLib(t, w)),
+    ...(file && forPrice(file) ? [t("This file was sliced only to weigh the model, in any colour. Slice it in the customer's colour first (step 2).")] : []),
+    ...(only && wanted.length && !wanted.some((c) => c.type === toMaterial(only.type) && onlyHex && deltaE(c.color, onlyHex) <= MATCH_MAX_DELTA_E)
+      ? [t("Not the customer's colour: they chose {wanted}, this file prints {got}.", {
+        wanted: wanted.map((c) => `${c.type} ${t(c.name ?? nameOf(c.color))}`).join(", "), got: `${only.type} ${t(nameOf(only.color))}`,
+      })] : []),
+    ...(order.status === "CREATED" ? [t("The customer has not agreed to the price yet. Print now only if the owner says so.")] : []),
+  ];
   const ready = Boolean(picked && plate && blocked.length === 0 && bedEmpty && atPrinter && (warnings.length === 0 || checked));
   const bed = bedTypeLabel(plate?.bedType);
   const slots = picked ? amsSlots(picked.p.snapshot) : [];
@@ -230,171 +244,212 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
     const code = FAULT_REASON.exec(reason)?.[1];
     return code && issueTexts[code] ? `${tLib(t, reason)} · ${issueTexts[code]}` : tLib(t, reason);
   };
+  const why = blocked.length > 1 ? t("Can't start yet: {reason} (+{n} more above)", { reason: firstReason(blocked[0]), n: blocked.length - 1 })
+    : blocked.length === 1 ? t("Can't start yet: {reason}", { reason: firstReason(blocked[0]) })
+      : !ready ? t("Tick the boxes above first.") : null;
+  const fileText = (f: Attachment) => `${f.filename} · ${when(f.at, locale)}${forPrice(f) ? ` · ${t("for the price only")}` : ""}`;
 
-  return (
-    <section className="card pp" id="print">
-      <h2><span className="step">C</span> {t("Colours & print")}{" "}
-        <Info>{t("Print the order's sliced Bambu Studio file on a studio printer. A person confirms the bed is empty and stands at the printer; the LAN bridge uploads the file and starts the print. The Chief (Claude) never starts a print; with agent prints on, code does, only after a person confirmed the bed empty.")}</Info>
-      </h2>
+  const debugLine = debugDone && (
+    <p className="pp-debug-done">
+      <span className="badge simulated">{t("test")}</span>{" "}
+      {t("Marked done for testing by {name} · {time}", { name: debugDone.by, time: when(debugDone.at, locale) })}
+    </p>
+  );
+  // The ftp:/// retry sits on the newest start that did not start, only once.
+  const ftpFor = jobs.find((x) => x.state === "failed" && x.error?.startsWith(NO_START))?.id;
+  const list = (js: PrintJob[]) => (
+    <JobList jobs={js} printers={printers} busy={sending} onCancel={(j) => setAsking(j)} onFtp={() => setFtp(true)} ftp={ftp} ftpFor={ftpFor} t={t} locale={locale} />
+  );
+  const jobList = jobs.length > 0 && list(jobs);
+  // The last start failed (e.g. the printer did not start within 45 s): it stays in view with its error and the ftp:///
+  // retry, above the start area; the older jobs fold into the history.
+  const lastFailed = !open && jobs[0]?.state === "failed";
+  const older = lastFailed ? jobs.slice(1) : jobs;
+  const history = older.length > 0 && (
+    <details className="fold pp-history">
+      <summary>{t("Print history ({n})", { n: older.length })}</summary>
+      {list(older)}
+    </details>
+  );
+  const note = msg && (
+    <div className={`alert ${msg.ok ? "ok" : "bad"}`} role="status">
+      {msg.text}{msg.list && msg.list.length > 0 && <ul>{msg.list.map((x) => <li key={x}>{x}</li>)}</ul>}
+    </div>
+  );
+  const cancelDialog = (
+    <ConfirmDialog open={typeof asking === "object" && asking !== null} title={t("Cancel this print job?")} confirmLabel={t("Cancel job")} danger busy={sending}
+      onConfirm={(by) => { if (asking && typeof asking === "object") void cancel(asking, by); }} onClose={() => setAsking(null)}>
+      <p style={{ margin: 0 }}>{typeof asking === "object" && asking ? t("{id} has not reached the printer yet.", { id: asking.id }) : ""}</p>
+    </ConfirmDialog>
+  );
 
-      <AgentPrintRow order={order} data={autoPrint} busy={busy} act={act} t={t} />
+  // After QC: what was printed first; a reprint (a failed QC, a rejection) and the printers stay reachable, folded.
+  const afterQc = AFTER_PRINT.includes(order.status);
 
-      <CustomerColours colors={order.preferredColors ?? []} printers={printers} t={t} />
+  const startArea = files.length === 0 ? (
+    <div className="pp-empty">
+      {canSlice
+        ? <b>{t("No ready-to-print file yet. Slice the model in step 2, or upload a .gcode.3mf from Bambu Studio in step 1.")}</b>
+        : <><b>{t("No sliced file yet.")}</b>{" "}
+          <span className="muted">{t("In Bambu Studio: slice for the Bambu Lab A1 (0.4 mm), then File > Export > Export plate sliced file. Upload the .gcode.3mf in step 1.")}</span></>}{" "}
+      <StepLink id={canSlice ? "slice" : "model"}>{t("Go to step {n}", { n: canSlice ? 2 : 1 })}</StepLink>
+    </div>
+  ) : (
+    <>
+      <div className="row fields pp-pick">
+        {files.length > 1 && (
+          <label style={{ flex: "2 1 220px" }}>{t("Ready-to-print file")}
+            <select value={file?.id} onChange={(e) => { setFileId(e.target.value); setPlateNo(null); }}>
+              {files.map((f) => <option key={f.id} value={f.id}>{fileText(f)}</option>)}
+            </select>
+          </label>
+        )}
+        {plates.length > 1 && (
+          <label style={{ flex: "1 1 120px" }}>{t("Plate")}
+            <select value={plate?.index} onChange={(e) => setPlateNo(Number(e.target.value))}>
+              {plates.map((p) => <option key={p.index} value={p.index}>{t("Plate {n}", { n: p.index })}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      {files.length === 1 && (
+        <p className="pp-file"><span className="muted">{t("Ready-to-print file")}:</span> <a href={`/api/files/${file!.id}`}>{file!.filename}</a>
+          <span className="muted"> · {when(file!.at, locale)}{forPrice(file!) ? ` · ${t("for the price only")}` : ""}</span></p>
+      )}
 
-      <SlicePanel order={order} attachments={attachments} printers={printers} data={slices} t={t} locale={locale}
-        onPrint={(id, pid) => {
-          setFileId(id); setPlateNo(null); setPrinterId(pid);
-          document.getElementById("pp-printer")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }} />
-
-      {files.length === 0 ? (
-        <div className="pp-empty">
-          <b>{t("No sliced file yet.")}</b>{" "}
-          <span className="muted">{canSlice
-            ? t("Slice it above, or upload a .gcode.3mf from Bambu Studio under Files.")
-            : t("In Bambu Studio: slice for the Bambu Lab A1 (0.4 mm), then File > Export > Export plate sliced file. Upload the .gcode.3mf under Files.")}</span>{" "}
-          <a href="#files">{t("Go to Files")}</a>
-        </div>
+      {!info ? (
+        <div className="alert bad">{t("This file was uploaded before 3MF files were read. Upload it again.")}</div>
+      ) : !plate ? (
+        <div className="alert bad">{tLib(t, info.error ? `The 3MF could not be read: ${info.error}` : "Not a sliced file: in Bambu Studio use File > Export > Export plate sliced file (.gcode.3mf)")}</div>
       ) : (
         <>
-          <div className="row fields pp-pick">
-            {files.length > 1 && (
-              <label style={{ flex: "2 1 220px" }}>{t("Sliced file")}
-                <select value={file?.id} onChange={(e) => { setFileId(e.target.value); setPlateNo(null); }}>
-                  {files.map((f) => <option key={f.id} value={f.id}>{f.filename}</option>)}
-                </select>
-              </label>
-            )}
-            {plates.length > 1 && (
-              <label style={{ flex: "1 1 120px" }}>{t("Plate")}
-                <select value={plate?.index} onChange={(e) => setPlateNo(Number(e.target.value))}>
-                  {plates.map((p) => <option key={p.index} value={p.index}>{t("Plate {n}", { n: p.index })}</option>)}
-                </select>
-              </label>
-            )}
-          </div>
-          {files.length === 1 && <p className="pp-file"><span className="muted">{t("Sliced file")}:</span> <a href={`/api/files/${file!.id}`}>{file!.filename}</a></p>}
+          <PlateSummary plate={plate} plates={plates.length} bed={bed} t={t} locale={locale} />
 
-          {!info ? (
-            <div className="alert bad">{t("This file was uploaded before 3MF files were read. Upload it again.")}</div>
-          ) : !plate ? (
-            <div className="alert bad">{tLib(t, info.error ? `The 3MF could not be read: ${info.error}` : "Not a sliced file: in Bambu Studio use File > Export > Export plate sliced file (.gcode.3mf)")}</div>
-          ) : (
-            <>
-              <PlateSummary plate={plate} plates={plates.length} bed={bed} t={t} locale={locale} />
-
-              {order.status === "CREATED" && gramsPerUnit !== null && (
-                <div className="pp-price">
-                  <label className="pp-units">{t("Units on this plate")}
-                    <input type="number" min={1} max={order.quantity} value={units || String(defaultUnits)} onChange={(e) => setUnits(e.target.value)} disabled={busy} />
+          <h3 className="pp-h" id="pp-printer">{t("Printer")}</h3>
+          <ul className="pp-printers" role="radiogroup" aria-label={t("Printer")}>
+            {rows.map((r) => {
+              const status = !r.verdict.ok ? "bad" : r.warnings.length ? "warn" : "ok";
+              return (
+                <li key={r.p.id} className={r === picked ? "on" : ""}>
+                  <label>
+                    <input type="radio" name="pp-printer" checked={r === picked} onChange={() => setPrinterId(r.p.id)} />
+                    <span className="pp-printer-name">
+                      <span className="pp-printer-top"><b>{r.p.name}</b>
+                        <span className={`badge ${status}`}>{status === "bad" ? t("can't print") : status === "warn" ? t("check first") : t("ready")}</span>
+                      </span>
+                      <small>{status === "bad" ? firstReason(r.verdict.reasons[0]) : r.match.ok ? t("Colours match") : t("Check the colours")}</small>
+                    </span>
                   </label>
-                  <span className="pp-price-text">
-                    <b>{t("{grams} g per unit", { grams: gramsPerUnit.toLocaleString(dateLocale(locale), { maximumFractionDigits: 2 }) })}</b> · {t(COLOR_MODE_LABEL[colorMode])}
-                  </span>
-                  <div className="row pp-price-buttons">
-                    <button disabled={busy} onClick={() => void act(`/api/orders/${order.id}/price-by-weight`, { gramsPerUnit, source, colorMode },
-                      t("Kesuni quote added by weight. Run the agent to choose a plan."))}>{t("Use as Kesuni quote")}</button>
-                    <button disabled={busy} onClick={() => setAsking("grams")}>{t("Only give the grams to the Chief")}</button>
-                  </div>
+                </li>
+              );
+            })}
+          </ul>
+
+          {picked && (
+            <div className="pp-detail">
+              {faults.map((f) => (
+                <div key={f.code} className={`pp-fault ${f.tone}`} role="alert">
+                  <b>{f.tone === "bad" ? t("Printer error") : t("Printer warning")} <code>{f.code}</code></b>{" "}
+                  {f.text ?? t("Unknown printer message")}{" "}
+                  <a href={f.url} target="_blank" rel="noreferrer">{t("Open guide")}</a>
+                </div>
+              ))}
+              {blocked.length > 0 && (
+                <div className="alert bad">
+                  <b>{t("{printer} cannot start this print:", { printer: picked.p.name })}</b>
+                  <ul>{blocked.map((x) => <li key={x}>{tLib(t, x)}</li>)}</ul>
                 </div>
               )}
 
-              <h3 className="pp-h" id="pp-printer">{t("Printer")}</h3>
-              <ul className="pp-printers" role="radiogroup" aria-label={t("Printer")}>
-                {rows.map((r) => {
-                  const status = !r.verdict.ok ? "bad" : r.warnings.length ? "warn" : "ok";
-                  return (
-                    <li key={r.p.id} className={r === picked ? "on" : ""}>
-                      <label>
-                        <input type="radio" name="pp-printer" checked={r === picked} onChange={() => setPrinterId(r.p.id)} />
-                        <span className="pp-printer-name">
-                          <span className="pp-printer-top"><b>{r.p.name}</b>
-                            <span className={`badge ${status}`}>{status === "bad" ? t("blocked") : status === "warn" ? t("check") : t("ready")}</span>
-                          </span>
-                          <small>{status === "bad" ? firstReason(r.verdict.reasons[0]) : r.match.ok ? t("Colours match") : t("Check the colours")}</small>
-                        </span>
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
+              {opts.useAms || !canExternal ? (
+                <MappingEditor plate={plate} slots={slots} mapping={picked.mapping} disabled={sending} onPick={setSlot} t={t} locale={locale} />
+              ) : (
+                <p className="pp-ext"><ColorSwatch color={ext?.color} size={18} /> {t("External spool")}: {ext?.type} {ext?.color ? t(nameOf(ext.color)) : ""}</p>
+              )}
 
-              {picked && (
-                <div className="pp-detail">
-                  {faults.map((f) => (
-                    <div key={f.code} className={`pp-fault ${f.tone}`} role="alert">
-                      <b>{f.tone === "bad" ? t("Printer error") : t("Printer warning")} <code>{f.code}</code></b>{" "}
-                      {f.text ?? t("Unknown printer message")}{" "}
-                      <a href={f.url} target="_blank" rel="noreferrer">{t("Open guide")}</a>
-                    </div>
-                  ))}
-                  {blocked.length > 0 && (
-                    <div className="alert bad">
-                      <b>{t("{printer} cannot start this print:", { printer: picked.p.name })}</b>
-                      <ul>{blocked.map((x) => <li key={x}>{tLib(t, x)}</li>)}</ul>
-                    </div>
-                  )}
+              <details className="fold pp-options">
+                <summary>{t("Options")}: {optionsText}</summary>
+                <div className="pp-checks">
+                  <Check on={opts.bedLevelling} set={(v) => setOpts({ ...opts, bedLevelling: v })} label={t("Auto bed levelling")} />
+                  <Check on={opts.flowCali} set={(v) => setOpts({ ...opts, flowCali: v })} label={t("Flow calibration (about 1–2 min)")} />
+                  <Check on={opts.timelapse} set={(v) => setOpts({ ...opts, timelapse: v })} label={t("Timelapse (slows the print)")} />
+                  {canExternal && <Check on={!opts.useAms} set={(v) => setOpts({ ...opts, useAms: !v })} label={t("Print from the external spool, not the AMS")} />}
+                  {(noStart || ftp) && <Check on={ftp} set={setFtp} label={t("Start with the ftp:/// path (when the printer did not start)")} />}
+                </div>
+              </details>
 
-                  {opts.useAms || !canExternal ? (
-                    <MappingEditor plate={plate} slots={slots} mapping={picked.mapping} disabled={sending} onPick={setSlot} t={t} locale={locale} />
-                  ) : (
-                    <p className="pp-ext"><ColorSwatch color={ext?.color} size={18} /> {t("External spool")}: {ext?.type} {ext?.color ? t(nameOf(ext.color)) : ""}</p>
-                  )}
-
-                  <details className="fold pp-options">
-                    <summary>{t("Options")}: {optionsText}</summary>
-                    <div className="pp-checks">
-                      <Check on={opts.bedLevelling} set={(v) => setOpts({ ...opts, bedLevelling: v })} label={t("Auto bed levelling")} />
-                      <Check on={opts.flowCali} set={(v) => setOpts({ ...opts, flowCali: v })} label={t("Flow calibration (about 1–2 min)")} />
-                      <Check on={opts.timelapse} set={(v) => setOpts({ ...opts, timelapse: v })} label={t("Timelapse (slows the print)")} />
-                      {canExternal && <Check on={!opts.useAms} set={(v) => setOpts({ ...opts, useAms: !v })} label={t("Print from the external spool, not the AMS")} />}
-                      {(noStart || ftp) && <Check on={ftp} set={setFtp} label={t("Start with the ftp:/// path (when the printer did not start)")} />}
-                    </div>
-                  </details>
-
-                  {warnings.length > 0 && (
-                    <div className="pp-warn">
-                      <ul>{warnings.map((w) => <li key={w}>{tLib(t, w)}</li>)}</ul>
-                      <Check on={checked} set={setChecked} label={t("I checked this")} />
-                    </div>
-                  )}
-
-                  <div className="pp-checks pp-must">
-                    <Check on={bedEmpty} set={setBedEmpty} label={bed ? t("The bed is empty and clean, with the {plate}", { plate: t(bed) }) : t("The bed is empty and clean")} />
-                    <Check on={atPrinter} set={setAtPrinter} label={t("I am at the printer")} />
-                  </div>
-                  <div className="row">
-                    <button className="primary" disabled={!ready || sending || busy} onClick={() => setAsking("start")}>{t("Start print")}</button>
-                    {!ready && blocked.length === 0 && <span className="muted pp-hint">{t("Tick the boxes above first.")}</span>}
-                  </div>
+              {warnings.length > 0 && (
+                <div className="pp-warn">
+                  <ul>{warnings.map((w) => <li key={w}>{w}</li>)}</ul>
                 </div>
               )}
-            </>
+
+              <div className="pp-checks pp-must">
+                <b className="pp-must-h">{t("Before you start")}</b>
+                <Check on={bedEmpty} set={setBedEmpty} label={bed ? t("The bed is empty and clean, with the {plate}", { plate: t(bed) }) : t("The bed is empty and clean")} />
+                <Check on={atPrinter} set={setAtPrinter} label={t("I am at the printer")} />
+                {warnings.length > 0 && <Check on={checked} set={setChecked} label={t("I checked the warnings above")} />}
+              </div>
+              <div className="pp-go">
+                <button className="primary" disabled={!ready || sending || busy} onClick={() => setAsking("start")}>{t("Start print")}</button>
+                {why && <span className="muted pp-hint">{why}</span>}
+              </div>
+            </div>
           )}
         </>
       )}
+    </>
+  );
 
-      {msg && (
-        <div className={`alert ${msg.ok ? "ok" : "bad"}`} role="status">
-          {msg.text}{msg.list && msg.list.length > 0 && <ul>{msg.list.map((x) => <li key={x}>{x}</li>)}</ul>}
-        </div>
+  const another = (
+    <details className="fold pp-another">
+      <summary>{t("Start another print")}</summary>
+      {startArea}
+    </details>
+  );
+
+  return (
+    <div className="pp" id="print">
+      {!afterQc && <AgentPrintRow mode="line" order={order} data={autoPrint} busy={busy} act={act} t={t} />}
+      {debugLine}
+
+      {open ? (
+        <>
+          {jobList}
+          {note}
+          {another}
+        </>
+      ) : afterQc ? (
+        <>
+          {lastFailed && list([jobs[0]])}
+          {history}
+          {note}
+          {another}
+        </>
+      ) : (
+        <>
+          {lastFailed && list([jobs[0]])}
+          {startArea}
+          {note}
+          {history}
+        </>
       )}
 
-      {(jobs.length > 0 || canDebug || debugDone) && <h3 className="pp-h">{t("Print jobs")}</h3>}
-      {debugDone && (
-        <p className="pp-debug-done">
-          <span className="badge simulated">{t("test")}</span>{" "}
-          {t("Marked done for testing by {name} · {time}", { name: debugDone.by, time: when(debugDone.at, locale) })}
-        </p>
-      )}
-      {jobs.length > 0 && <JobList jobs={jobs} printers={printers} busy={sending} onCancel={(j) => setAsking(j)} onFtp={() => setFtp(true)} ftp={ftp} t={t} locale={locale} />}
-      {/* Test orders only: nothing is printed, the order's printing just counts as finished (src/lib/printer/done-debug.ts). */}
-      {canDebug && (
-        <div className="row pp-debug">
-          <button className="pp-debug-btn" disabled={busy || sending || open} onClick={() => setAsking("debug")}>{t("Done (debug)")}</button>
-          {open && <span className="muted pp-hint">{tLib(t, ON_ITS_WAY_TEXT)}</span>}
+      <details className="fold pp-more">
+        <summary>{t("More options")}</summary>
+        <div className="pp-more-body">
+          {autoPrint && <div className="row"><AgentPrintRow mode="edit" order={order} data={autoPrint} busy={busy} act={act} t={t} /></div>}
+          <h3 className="pp-h">{t("All printers")}</h3>
+          <PrinterPanel order={order} printers={printers} busy={busy} act={act} now={now} />
+          {/* Test orders only: nothing is printed, the order's printing just counts as finished (src/lib/printer/done-debug.ts). */}
+          {canDebug && (
+            <div className="row pp-debug">
+              <button className="pp-debug-btn" disabled={busy || sending || open} onClick={() => setAsking("debug")}>{t("Test: mark as printed")}</button>
+              {open && <span className="muted pp-hint">{tLib(t, ON_ITS_WAY_TEXT)}</span>}
+            </div>
+          )}
         </div>
-      )}
+      </details>
 
       <ConfirmDialog open={asking === "start"} title={t("Start the print?")} confirmLabel={t("Start print")} busy={sending}
         onConfirm={(by) => void start(by)} onClose={() => setAsking(null)}>
@@ -423,22 +478,12 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
           </>
         )}
       </ConfirmDialog>
-      <ConfirmDialog open={asking === "grams"} title={t("Give the grams to the Chief?")} confirmLabel={t("Give the grams")} busy={busy}
-        onConfirm={(by) => { setAsking(null); void act(`/api/orders/${order.id}/slicer-grams`, { gramsPerUnit, source, by, colorMode },
-          t("Grams saved. The Chief prices by weight and continues (rules mode: price it here).")); }} onClose={() => setAsking(null)}>
-        <p style={{ margin: 0 }}>{t("{grams} g per unit, {mode}, from {file}. The Chief prices by weight with these grams.", {
-          grams: gramsPerUnit ?? "?", mode: t(COLOR_MODE_LABEL[colorMode]).toLowerCase(), file: file?.filename ?? "",
-        })}</p>
-      </ConfirmDialog>
-      <ConfirmDialog open={typeof asking === "object" && asking !== null} title={t("Cancel this print job?")} confirmLabel={t("Cancel job")} danger busy={sending}
-        onConfirm={(by) => { if (asking && typeof asking === "object") void cancel(asking, by); }} onClose={() => setAsking(null)}>
-        <p style={{ margin: 0 }}>{typeof asking === "object" && asking ? t("{id} has not reached the printer yet.", { id: asking.id }) : ""}</p>
-      </ConfirmDialog>
+      {cancelDialog}
       <ConfirmDialog open={asking === "debug"} title={t("Mark the print as done?")} confirmLabel={t("Mark done")} busy={sending}
         onConfirm={(by) => void markDone(by)} onClose={() => setAsking(null)}>
         <p style={{ margin: 0 }}>{t("For testing only: nothing is printed. It is logged as a test.")}</p>
       </ConfirmDialog>
-    </section>
+    </div>
   );
 }
 
@@ -518,33 +563,6 @@ function colourWarnings(plate: ThreeMfPlate, p: Printer, mapping: number[], opts
   return out;
 }
 
-/** The colours the customer picked, and where each one is loaded now (same material, close colour). */
-function CustomerColours({ colors, printers, t }: { colors: ColorChoice[]; printers: Printer[]; t: T }) {
-  if (!colors.length) return null;
-  const where = (c: ColorChoice) => printers.flatMap((p) => (p.snapshot?.ams?.trays ?? [])
-    .filter((x) => !x.empty && x.type === c.type && x.color && deltaE(c.color, x.color) <= MATCH_MAX_DELTA_E)
-    .map((x) => t("{printer} slot {slots}", { printer: shortName(p.name), slots: x.slot + 1 })));
-  const reported = printers.some((p) => p.snapshot?.ams);
-  return (
-    <div className="pp-wish">
-      <span className="pp-label">{t("Customer's colours")}</span>
-      <ul>
-        {colors.map((c) => {
-          const at = where(c);
-          return (
-            <li key={c.type + c.color}>
-              <ColorSwatch color={c.color} size={20} title={c.color} />
-              <span><b>{c.type} {t(c.name ?? nameOf(c.color))}</b>
-                <small className={at.length ? undefined : "pp-missing"}>{at.length ? at.join(" · ") : reported ? t("not loaded now") : t("AMS not reported yet")}</small>
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
 function Check({ on, set, label }: { on: boolean; set: (v: boolean) => void; label: string }) {
   return (
     <label className="pp-check"><input type="checkbox" checked={on} onChange={(e) => set(e.target.checked)} /> <span>{label}</span></label>
@@ -552,8 +570,8 @@ function Check({ on, set, label }: { on: boolean; set: (v: boolean) => void; lab
 }
 
 /** This order's print jobs, newest first, as steps: queued, uploading, sent, printing, done (or failed / cancelled). */
-function JobList({ jobs, printers, busy, onCancel, onFtp, ftp, t, locale }: {
-  jobs: PrintJob[]; printers: Printer[]; busy: boolean; onCancel: (j: PrintJob) => void; onFtp: () => void; ftp: boolean; t: T; locale: Locale;
+function JobList({ jobs, printers, busy, onCancel, onFtp, ftp, ftpFor, t, locale }: {
+  jobs: PrintJob[]; printers: Printer[]; busy: boolean; onCancel: (j: PrintJob) => void; onFtp: () => void; ftp: boolean; ftpFor?: string; t: T; locale: Locale;
 }) {
   const time = (iso: string) => new Date(iso).toLocaleTimeString(dateLocale(locale), { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
   return (
@@ -578,7 +596,7 @@ function JobList({ jobs, printers, busy, onCancel, onFtp, ftp, t, locale }: {
             {j.error && <p className="pp-job-error">{tLib(t, j.error)}</p>}
             <div className="row pp-job-actions">
               {(j.state === "queued" || j.state === "uploading") && <button disabled={busy} onClick={() => onCancel(j)}>{t("Cancel")}</button>}
-              {j === jobs.find((x) => x.state === "failed" && x.error?.startsWith(NO_START)) && !ftp && (
+              {j.id === ftpFor && !ftp && (
                 <button disabled={busy} onClick={onFtp}>{t("Next start: try the ftp:/// path")}</button>
               )}
               {(j.state === "sent" || j.state === "printing") && <Link href={`/machines#printer-${j.printerId}`}>{t("Pause or stop on My machines")}</Link>}

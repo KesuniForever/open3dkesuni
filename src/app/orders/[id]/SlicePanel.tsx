@@ -1,22 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Attachment, Order, Printer, SliceJob, SliceQuality } from "@/lib/types";
+import type { Attachment, ColorChoice, Order, Printer, SliceJob, SliceQuality } from "@/lib/types";
 import { DEFAULT_INFILL_PCT, QUALITY, SLICE_QUALITIES, sliceSourceCheck } from "@/lib/slice-rules";
 import { deltaE, MATCH_MAX_DELTA_E, nameOf } from "@/lib/colors";
 import { toMaterial } from "@/lib/pricing";
 import { duration } from "@/lib/machines";
-import { rp } from "@/lib/budget";
 import { tLib } from "@/lib/lib-text";
 import { dateLocale, type Locale, type T } from "@/i18n/core";
-import Info from "@/app/components/Info";
 import ColorSwatch from "@/app/components/ColorSwatch";
 import { ConfirmDialog } from "@/app/components/PrinterControls";
 import { amsSlots, slotText } from "@/app/machines/printer-details";
+import { units } from "./rich";
 import "./slice.css";
 
 export type SlicerStatus = { seenAt: string | null; ready: boolean };
-export interface SliceData { jobs: SliceJob[]; slicer: SlicerStatus | null; reload: () => void }
+/** loaded: the first read came back (or failed): until then nobody knows which sliced file is a weighing. */
+export interface SliceData { jobs: SliceJob[]; slicer: SlicerStatus | null; reload: () => void; loaded?: boolean }
 
 const ACTIVE: SliceJob["state"][] = ["queued", "slicing"];
 const POLL_MS = 3_000;
@@ -24,13 +24,14 @@ const STATE_LABEL: Record<SliceJob["state"], string> = {
   queued: "Waiting for the studio PC", slicing: "Slicing…", done: "Sliced", failed: "Failed", cancelled: "Cancelled",
 };
 const STATE_TONE: Record<SliceJob["state"], string> = { queued: "", slicing: "warn", done: "ok", failed: "bad", cancelled: "" };
-/** Shown at once; older slices fold away. */
-const SHOWN = 3;
+/** Shown at once (the newest); older slices fold away. */
+const SHOWN = 1;
 
 /** The order's slices (newest first) and the studio PC's slicer, followed while a slice runs. onDone: a slice finished (the order has a new file). */
 export function useSliceJobs(orderId: string, onDone: () => void): SliceData {
   const [jobs, setJobs] = useState<SliceJob[]>([]);
   const [slicer, setSlicer] = useState<SlicerStatus | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [version, setVersion] = useState(0);
   const reload = useCallback(() => setVersion((v) => v + 1), []);
   const states = useRef(new Map<string, SliceJob["state"]>());
@@ -40,16 +41,19 @@ export function useSliceJobs(orderId: string, onDone: () => void): SliceData {
     let cancelled = false;
     fetch(`/api/slice-jobs?orderId=${encodeURIComponent(orderId)}`, { cache: "no-store" })
       .then(async (r) => {
-        if (!r.ok || cancelled) return;
+        if (cancelled) return;
+        if (!r.ok) return setLoaded(true);
         const body = (await r.json()) as { jobs: SliceJob[]; slicer: SlicerStatus };
+        if (cancelled) return;
         // A slice that was running is done now: the order has a new sliced file.
         const finished = body.jobs.some((j) => j.state === "done" && states.current.has(j.id) && states.current.get(j.id) !== "done");
         states.current = new Map(body.jobs.map((j) => [j.id, j.state]));
         setJobs(body.jobs);
         setSlicer(body.slicer);
+        setLoaded(true);
         if (finished) done.current();
       })
-      .catch(() => { /* the next poll tries again */ });
+      .catch(() => { if (!cancelled) setLoaded(true); /* the next poll tries again */ });
     return () => { cancelled = true; };
   }, [orderId, version]);
   const running = jobs.some((j) => ACTIVE.includes(j.state));
@@ -58,11 +62,15 @@ export function useSliceJobs(orderId: string, onDone: () => void): SliceData {
     const timer = setInterval(reload, POLL_MS);
     return () => clearInterval(timer);
   }, [running, reload]);
-  return { jobs, slicer, reload };
+  return { jobs, slicer, reload, loaded };
 }
 
 /** The spools a slice can use on this printer: PLA or PETG with a colour. */
 const usable = (p: Printer | undefined) => amsSlots(p?.snapshot).filter((s) => !s.empty && s.color && toMaterial(s.type));
+
+/** A spool is one of the customer's colours: same material, colour within the colour limit. */
+const customersColour = (colors: ColorChoice[], s: { type: string | null; color: string | null }) =>
+  colors.some((c) => toMaterial(s.type) === c.type && Boolean(s.color) && deltaE(c.color, s.color!) <= MATCH_MAX_DELTA_E);
 
 /** The customer's colour if this printer has it loaded, else the order's material, else the first usable spool. */
 function bestTray(p: Printer | undefined, order: Order): number | null {
@@ -78,16 +86,40 @@ function bestTray(p: Printer | undefined, order: Order): number | null {
 const grams = (n: number, locale: Locale) => `${n.toLocaleString(dateLocale(locale), { maximumFractionDigits: 2 })} g`;
 const shortName = (name: string) => /#\d+$/.exec(name)?.[0] ?? name;
 
+/** The colours the customer picked, and where each one is loaded now (same material, close colour). */
+export function CustomerColours({ colors, printers, t }: { colors: ColorChoice[]; printers: Printer[]; t: T }) {
+  if (!colors.length) return null;
+  const where = (c: ColorChoice) => printers.flatMap((p) => (p.snapshot?.ams?.trays ?? [])
+    .filter((x) => !x.empty && x.type === c.type && x.color && deltaE(c.color, x.color) <= MATCH_MAX_DELTA_E)
+    .map((x) => t("{printer} slot {slots}", { printer: shortName(p.name), slots: x.slot + 1 })));
+  const reported = printers.some((p) => p.snapshot?.ams);
+  return (
+    <div className="pp-wish">
+      <span className="pp-label">{t("Customer's colours")}</span>
+      <ul>
+        {colors.map((c) => {
+          const at = where(c);
+          return (
+            <li key={c.type + c.color}>
+              <ColorSwatch color={c.color} size={20} title={c.color} />
+              <span><b>{c.type} {t(c.name ?? nameOf(c.color))}</b>
+                <small className={at.length ? undefined : "pp-missing"}>{at.length ? at.join(" · ") : reported ? t("not loaded now") : t("AMS not reported yet")}</small>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 /**
- * Slice here: an order's STL/OBJ (or an unsliced A1 3MF) becomes a printable .gcode.3mf on the studio PC, in the
- * material and colour of one AMS spool. The sliced file then shows below like any sliced file, and prints from that
- * spool. Single colour only. Nothing prints from here.
+ * Step 2 · Slice: an order's STL/OBJ (or an unsliced A1 3MF) becomes a printable .gcode.3mf on the studio PC, in the
+ * material and colour of one AMS spool. The sliced file then prints in step 4, from that spool. Single colour only.
+ * Nothing prints from here.
  */
-export default function SlicePanel({ order, attachments, printers, data, onPrint, t, locale }: {
-  order: Order; attachments: Attachment[]; printers: Printer[]; data: SliceData;
-  /** Show this sliced file (and printer) in the print part below. */
-  onPrint: (attachmentId: string, printerId: string) => void;
-  t: T; locale: Locale;
+export default function SlicePanel({ order, attachments, printers, data, t, locale }: {
+  order: Order; attachments: Attachment[]; printers: Printer[]; data: SliceData; t: T; locale: Locale;
 }) {
   const sources = attachments.filter((a) => a.kind === "design" && sliceSourceCheck(a).ok).reverse();
   const steps = attachments.filter((a) => /\.(step|stp)$/i.test(a.filename));
@@ -110,8 +142,26 @@ export default function SlicePanel({ order, attachments, printers, data, onPrint
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string; list?: string[] } | null>(null);
 
+  const wanted = order.preferredColors ?? [];
+  const material = order.material ?? order.spec?.material;
+  // What the customer wants and where each of their colours is loaded: shown also when nothing can be sliced here (a
+  // sliced 3MF or a STEP file only), since no other step shows the customer's colours.
+  const wants = (
+    <div className="sp-wants">
+      <p className="sp-note"><span className="pp-label">{t("Customer wants")}</span>{" "}
+        {units(t, order.quantity)}{material ? ` · ${material}` : ""}</p>
+      <CustomerColours colors={wanted} printers={printers} t={t} />
+      {order.spec?.color && <p className="sp-note">{t("Spec colour: {color}", { color: order.spec.color })}</p>}
+    </div>
+  );
+
   if (!sources.length && !data.jobs.length) {
-    return steps.length ? <p className="muted sp-note">{t("STEP files cannot be sliced here: export an STL from the CAD program")}</p> : null;
+    return (
+      <div className="sp" id="slice">
+        {wants}
+        {steps.length > 0 && <p className="muted sp-note">{t("STEP files cannot be sliced here: export an STL from the CAD program")}</p>}
+      </div>
+    );
   }
   const infillPct = Number(infill);
   const infillOk = Number.isInteger(infillPct) && infillPct >= 0 && infillPct <= 100;
@@ -119,7 +169,9 @@ export default function SlicePanel({ order, attachments, printers, data, onPrint
   const settings = mode === "project"
     ? t("Project settings")
     : `${t(QUALITY[quality].label)} · ${t("infill {n}%", { n: infillOk ? infillPct : "?" })} · ${supports === "auto" ? t("supports auto") : t("no supports")}`;
-  const waiting = data.jobs.some((j) => ACTIVE.includes(j.state));
+  const notTheirs = Boolean(spool && wanted.length && !customersColour(wanted, spool));
+  // The studio PC was seen and is not ready: one line says what to do (the dot's own label would repeat it).
+  const pcOff = Boolean(data.slicer && !data.slicer.ready);
 
   async function slice(by: string) {
     if (!source || !printer || tray === null) return;
@@ -165,14 +217,11 @@ export default function SlicePanel({ order, attachments, printers, data, onPrint
 
   const shown = data.jobs.slice(0, SHOWN);
   const older = data.jobs.slice(SHOWN);
-  const row = (j: SliceJob) => <SliceRow key={j.id} job={j} printers={printers} busy={sending} t={t} locale={locale}
-    onCancel={() => setAsking(j)} onPrint={() => j.resultAttachmentId && onPrint(j.resultAttachmentId, j.printerId)} />;
+  const row = (j: SliceJob) => <SliceRow key={j.id} job={j} printers={printers} busy={sending} t={t} locale={locale} onCancel={() => setAsking(j)} />;
 
   return (
     <div className="sp" id="slice">
-      <h3 className="pp-h">{t("Slice here")}{" "}
-        <Info>{t("Bambu Studio on the studio PC slices the file for the A1 (0.4 mm nozzle, textured PEI plate) in the colour of the spool you pick. The sliced file shows below and prints from that spool. Multi-colour: paint the 3MF in Bambu Studio and upload the .gcode.3mf.")}</Info>
-      </h3>
+      {wants}
 
       {sources.length > 0 && (
         <>
@@ -194,12 +243,20 @@ export default function SlicePanel({ order, attachments, printers, data, onPrint
               <span className="sp-spool-pick">
                 <ColorSwatch color={spool?.color} size={20} />
                 <select value={tray ?? ""} onChange={(e) => printer && setTrays({ ...trays, [printer.id]: Number(e.target.value) })} disabled={sending || !slots.length}>
-                  {slots.map((s) => <option key={s.tray} value={s.tray}>{slotText(s.tray, t)} · {s.type} {s.name ? t(s.name) : ""}</option>)}
+                  {slots.map((s) => (
+                    <option key={s.tray} value={s.tray}>
+                      {slotText(s.tray, t)} · {s.type} {s.name ? t(s.name) : ""}{customersColour(wanted, s) ? ` · ${t("customer's colour ✓")}` : ""}
+                    </option>
+                  ))}
                 </select>
               </span>
             </label>
-            {mode === "mesh" && (
-              <>
+          </div>
+          {notTheirs && <p className="sp-warn">{t("This spool is not one of the customer's colours.")}</p>}
+          {mode === "mesh" ? (
+            <details className="fold sp-settings">
+              <summary>{t("Settings: {settings}", { settings })}</summary>
+              <div className="row fields sp-pick">
                 <label className="sp-quality">{t("Quality")}
                   <select value={quality} onChange={(e) => setQuality(e.target.value as SliceQuality)} disabled={sending}>
                     {SLICE_QUALITIES.map((q) => <option key={q} value={q}>{t(QUALITY[q].label)}</option>)}
@@ -214,18 +271,23 @@ export default function SlicePanel({ order, attachments, printers, data, onPrint
                     <option value="off">{t("Off")}</option>
                   </select>
                 </label>
-              </>
-            )}
-          </div>
-          <p className="muted sp-note">{mode === "project" ? t("Keeps the project's own settings; one colour.") : t("One colour: an STL carries no colours.")}</p>
+              </div>
+              <p className="muted sp-note">{t("One colour: an STL carries no colours.")}</p>
+            </details>
+          ) : (
+            <p className="muted sp-note">{t("Keeps the project's own settings; one colour.")}</p>
+          )}
           <div className="row sp-go">
             <button className="primary" disabled={!ready || sending} onClick={() => setAsking("slice")}>{t("Slice")}</button>
-            <span className={`sp-pc ${data.slicer?.ready ? "ok" : ""}`}>
-              <span className="sp-dot" aria-hidden />{data.slicer?.ready ? t("Studio PC ready") : t("Studio PC not seen")}
-            </span>
+            {!pcOff && (
+              <span className={`sp-pc ${data.slicer?.ready ? "ok" : ""}`}>
+                <span className="sp-dot" aria-hidden />{data.slicer?.ready ? t("Studio PC ready") : t("Studio PC not seen")}
+              </span>
+            )}
           </div>
-          {waiting && data.slicer && !data.slicer.ready && (
-            <p className="sp-warn">{t("The studio PC has not asked for slices in the last 2 min: is the bridge running with Bambu Studio?")}</p>
+          {/* The button stays on: a slice waits up to 15 min for the studio PC. */}
+          {pcOff && (
+            <p className="sp-warn">{t("The slicing PC is off. Turn on the studio PC (Bambu Studio and the Kesuni bridge) or tell the owner. A slice waits up to 15 min.")}</p>
           )}
         </>
       )}
@@ -264,9 +326,9 @@ export default function SlicePanel({ order, attachments, printers, data, onPrint
   );
 }
 
-/** One slice: file, spool and settings, its state, and the result (time, grams, price) or the reason it failed. */
-function SliceRow({ job: j, printers, busy, onCancel, onPrint, t, locale }: {
-  job: SliceJob; printers: Printer[]; busy: boolean; onCancel: () => void; onPrint: () => void; t: T; locale: Locale;
+/** One slice: file, spool and settings, its state, and the result (time and grams) or the reason it failed. */
+function SliceRow({ job: j, printers, busy, onCancel, t, locale }: {
+  job: SliceJob; printers: Printer[]; busy: boolean; onCancel: () => void; t: T; locale: Locale;
 }) {
   const p = printers.find((x) => x.id === j.printerId);
   const r = j.result;
@@ -278,18 +340,16 @@ function SliceRow({ job: j, printers, busy, onCancel, onPrint, t, locale }: {
           <b>{j.sourceName}</b>
           <small className="muted">
             {j.material} {t(nameOf(j.color))} · {j.mode === "project" ? t("Project settings") : `${t(QUALITY[j.quality].label)} · ${j.infillPct}%`}
-            {p ? ` · ${shortName(p.name)} ${slotText(j.tray, t)}` : ""}{j.actor === "agent" ? ` · ${t("agent")}` : j.actor === "system" ? ` · ${t("automatic, for the price")}` : ""}
+            {p ? ` · ${shortName(p.name)} ${slotText(j.tray, t)}` : ""}{j.actor === "agent" ? ` · ${t("by the agent")}` : ""}
           </small>
         </span>
-        <span className={`badge ${STATE_TONE[j.state]}`}>{t(STATE_LABEL[j.state])}</span>
+        <span className="sp-job-badges">
+          {j.actor === "system" && <span className="badge warn">{t("For the price only")}</span>}
+          <span className={`badge ${STATE_TONE[j.state]}`}>{t(STATE_LABEL[j.state])}</span>
+        </span>
       </div>
       {j.state === "done" && r && (
-        <div className="sp-result">
-          <span>{r.predictionSec ? duration(r.predictionSec / 60, false, t) : "—"}</span>
-          <span>{r.weightG != null ? grams(r.weightG, locale) : "—"}</span>
-          {r.priceIdr != null && <span><b>{rp(r.priceIdr)}</b></span>}
-          <button onClick={onPrint} disabled={busy}>{t("Print it")}</button>
-        </div>
+        <p className="sp-result">{r.predictionSec ? duration(r.predictionSec / 60, false, t) : "—"} · {r.weightG != null ? grams(r.weightG, locale) : "—"}</p>
       )}
       {j.error && j.state !== "cancelled" && <p className="sp-error">{tLib(t, j.error)}</p>}
       {ACTIVE.includes(j.state) && (
