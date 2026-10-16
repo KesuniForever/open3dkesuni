@@ -455,6 +455,7 @@ function summarize(e: AgentLogEntry, t: T): string {
   if (e.tool === "start_print") return t("{name} started plate {plate} on {printer}", { name: String(input.by ?? ""), plate: String(input.plate ?? ""), printer: String(out?.printer ?? input.printerId ?? "") });
   if (e.tool === "printer_command") return `${String(input.kind ?? "")} · ${t("by {name}", { name: String(input.by ?? "") })}`;
   if (e.tool === "print_job") return t("sent to {printer}", { printer: String(out?.printer ?? "") });
+  if (e.tool === "print_done_debug") return `${t("print marked done for testing (no real print)")} · ${t("by {name}", { name: String(input.by ?? "") })}`;
   if (e.tool === "remove_file") return t("{name} removed {file}", { name: String(input.by ?? ""), file: String(input.filename ?? "") });
   if (e.tool === "message_customer") return t("wrote to the customer: “{text}”", { text: String(input.text ?? "") });
   if (e.tool === "customer_decision") return (input.accepted ? t("customer accepted") : t("customer rejected"));

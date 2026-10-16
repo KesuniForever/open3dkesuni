@@ -248,6 +248,8 @@ describe("printers: the Chief reads their status, only people control them", () 
       // Agent prints: only the dispatcher's read (planDispatch/safePlan) and its "look now" (safeDispatch) are reachable;
       // never the enforcer, the switch, a bed confirmation, an order's runs or a slice request.
       expect(src, file).not.toMatch(/createAgentPrintJob|agentStartReasons|setAutoPrint|setOrderRuns|clearBed|completeTask|confirmColors|requestSlice|runDispatch/);
+      // "Done (debug)" (a test order counts as printed without a print) is for people only.
+      expect(src, file).not.toMatch(/done-debug|markPrintDoneDebug|print_done_debug/);
       for (const m of src.matchAll(/from "\.\.\/printer\/([\w-]+)"/g)) expect(["actions", "bambu", "errors", "dispatch", "autoprint", "autoprint-rules"], file).toContain(m[1]);
     }
   });

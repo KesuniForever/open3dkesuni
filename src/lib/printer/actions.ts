@@ -144,9 +144,11 @@ export function choosePrinter(orderId: string): { ok: true; printer: Printer; re
 
 /**
  * The order's print has finished and now waits for collection and QC: its last collect_and_qc task is newer
- * than its last reprint task. A failed print (reprint task last) does need a new production run.
+ * than its last reprint task. A failed print (reprint task last) does need a new production run. A test order a person
+ * marked printed without a print ("Done (debug)", src/lib/printer/done-debug.ts) counts as finished too.
  */
 export function printFinished(orderId: string): boolean {
+  if (store.getOrder(orderId)?.printDoneDebug) return true;
   const last = store.listTasks(orderId).filter((t) => t.kind === "collect_and_qc" || t.kind === "reprint").at(-1);
   return last?.kind === "collect_and_qc";
 }

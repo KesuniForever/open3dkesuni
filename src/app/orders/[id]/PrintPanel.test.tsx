@@ -116,3 +116,36 @@ describe("order page: the Agent line", () => {
     expect(withAgent(null)).toMatch(/The Chief \(Claude\) never starts a print; with agent prints on, code does/);
   });
 });
+
+describe("order page: Done (debug) under Print jobs", () => {
+  const html = (o: Order, locale: Locale = "en") => renderToStaticMarkup(
+    <LocaleProvider locale={locale}>
+      <PrintPanel order={o} attachments={[file("kesuni-benchy.gcode.3mf", benchy)]} printers={printers} paid={false} issueTexts={{}} busy={false} act={async () => {}} onChange={() => {}} />
+    </LocaleProvider>,
+  );
+  const mark = { by: "Khelda", at: "2026-10-16T07:05:00.000Z" };
+
+  it("a small secondary button on a test order in production; never on a real order or outside production", () => {
+    for (const status of ["PLAN_CHOSEN", "IN_PRODUCTION"] as const) {
+      const h = html(order({ status }));
+      expect(text(h)).toMatch(/Print jobs Done \(debug\)/);
+      expect(h).toMatch(/<button class="pp-debug-btn">Done \(debug\)<\/button>/);
+    }
+    expect(text(html(order({ status: "PLAN_CHOSEN", label: "real" })))).not.toMatch(/Done \(debug\)|Print jobs/);
+    for (const status of ["CREATED", "EVIDENCE_SUBMITTED", "ACCEPTED"] as const) expect(text(html(order({ status }))), status).not.toMatch(/Done \(debug\)/);
+  });
+
+  it("once marked: one line with a test badge instead of the button", () => {
+    const h = html(order({ status: "IN_PRODUCTION", printDoneDebug: mark }));
+    expect(h).toMatch(/<span class="badge simulated">test<\/span>/);
+    expect(text(h)).toMatch(/Print jobs test Marked done for testing by Khelda · 16 Oct(,| at) 14:05/);
+    expect(text(h)).not.toMatch(/Done \(debug\)/);
+    // Still shown after QC moved the order on.
+    expect(text(html(order({ status: "EVIDENCE_SUBMITTED", printDoneDebug: mark })))).toMatch(/Marked done for testing by Khelda/);
+  });
+
+  it("in Indonesian", () => {
+    expect(text(html(order({ status: "PLAN_CHOSEN" }), "id"))).toMatch(/Job cetak Selesai \(debug\)/);
+    expect(text(html(order({ status: "IN_PRODUCTION", printDoneDebug: mark }), "id"))).toMatch(/Job cetak uji Ditandai selesai untuk uji oleh Khelda · 16 Okt/);
+  });
+});

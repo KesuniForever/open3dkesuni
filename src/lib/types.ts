@@ -79,6 +79,11 @@ export interface Order {
   /** Agent prints for this order, set by a person (src/lib/printer/dispatch.ts setOrderRuns). Missing: 1 run on a real,
    *  paid order; an order that is not real is never printed by the agent until a person sets this. 0 = never. */
   autoPrint?: OrderAutoPrint;
+  /** "Done (debug)" on the order page: a person marked this test order's printing as finished WITHOUT printing, to try
+   *  QC and the customer's accept or reject quickly (src/lib/printer/done-debug.ts). Never on a real order, never set by
+   *  the agent, and nothing was printed: the dispatcher counts its runs as printed (orderGate), printFinished says
+   *  printed and the customer page says "Printing finished". A "simulated" log evidence and a log row record it. */
+  printDoneDebug?: { by: string; at: string };
 }
 
 export interface OrderAutoPrint {

@@ -572,7 +572,7 @@ export function liveView(rows: LiveRows, now: Date, t: T = EN, locale: Locale = 
       const o = (e.output ?? {}) as Record<string, unknown>;
       return [i.by, i.bedConfirmedBy, o.by];
     }),
-    ...rows.orders.flatMap((o) => [o.ownerApproval?.by, o.slicerGrams?.by, o.actual?.by, o.review?.by, o.agreement?.by, o.autoPrint?.by]),
+    ...rows.orders.flatMap((o) => [o.ownerApproval?.by, o.slicerGrams?.by, o.actual?.by, o.review?.by, o.agreement?.by, o.autoPrint?.by, o.printDoneDebug?.by]),
   ].filter((n): n is string => typeof n === "string" && nameParts(n).length > 0);
   const hide: Hide = {
     customers: rows.orders.map((o) => o.customerName ?? "").filter(Boolean),

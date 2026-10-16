@@ -21,6 +21,8 @@ import type { ActualReport, ChainTx, ColorChoice, Escrow, Material, Order, Revie
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
 const live = (t: ChainTx) => !["FAILED", "DENIED", "CANCELLED"].includes(t.state);
 const PAYABLE = ["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"];
+/** printedOn of a test order marked printed without a print (Order.printDoneDebug): no printer printed it. */
+export const TEST_PRINTED_ON = "Test (no real print)";
 
 export { idrPerUsdc };
 
@@ -37,6 +39,7 @@ export interface CustomerView {
   } | null;
   paying: boolean;
   printing: { printer: string; state: string; percent: number; remainingMin: number | null; online: boolean } | null;
+  /** The printer whose bed holds the finished part, TEST_PRINTED_ON for a test order marked printed, else null. */
   printedOn: string | null;
   updates: { kind: string; note: string; label: string; at: string; photo?: string }[];
   /** Short updates from the Chief (AI) or a person at Kesuni, oldest first. Text, author kind and time only. */
@@ -89,7 +92,8 @@ export function customerView(order: Order, token: string): CustomerView {
       printer: p.name, state: p.snapshot.state, percent: p.snapshot.percent, remainingMin: p.snapshot.remainingMin,
       online: !(notReadyReason(p) ?? "").startsWith("offline"),
     } : null,
-    printedOn: printers.find((x) => x.bedOccupiedBy === order.id)?.name ?? null,
+    // A test order a person marked printed without a print ("Done (debug)") reads as printed: QC comes next.
+    printedOn: printers.find((x) => x.bedOccupiedBy === order.id)?.name ?? (order.printDoneDebug ? TEST_PRINTED_ON : null),
     updates: store.listEvidence(order.id).map((e) => ({
       kind: e.kind, note: e.note, label: e.label, at: e.at,
       photo: e.attachmentId ? `/api/c/${token}/files/${e.attachmentId}` : undefined,

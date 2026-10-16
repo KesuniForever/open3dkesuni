@@ -15,6 +15,7 @@ import ColorSwatch from "@/app/components/ColorSwatch";
 import { ConfirmDialog } from "@/app/components/PrinterControls";
 import { amsSlots, bedTypeLabel, issueViews, mm, slotText, type IssueTexts } from "@/app/machines/printer-details";
 import { sliceSourceCheck } from "@/lib/slice-rules";
+import { canMarkPrintDoneDebug, ON_ITS_WAY_TEXT } from "@/lib/printer/done-debug-rules";
 import SlicePanel, { useSliceJobs } from "./SlicePanel";
 import AgentPrintRow, { type OrderAutoPrintView } from "./AgentPrintRow";
 import "./print.css";
@@ -39,6 +40,9 @@ const AS_IF_CONFIRMED = { bedEmptyConfirmed: true, personPresent: true, by: "Ope
 const DEFAULT_OPTIONS: PrintOptions = { bedLevelling: true, flowCali: true, timelapse: false, useAms: true };
 /** Grams the way the visitor writes numbers: "9.82 g", "9,82 g". */
 const grams = (n: number, locale: Locale) => `${n.toLocaleString(dateLocale(locale), { maximumFractionDigits: 2 })} g`;
+/** "16 Oct, 14:05" in Jakarta time, the way the visitor writes dates. */
+const when = (iso: string, locale: Locale) =>
+  new Date(iso).toLocaleString(dateLocale(locale), { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
 /** "A1 Combo #2" -> "#2". */
 const shortName = (name: string) => /#\d+$/.exec(name)?.[0] ?? name;
 
@@ -79,7 +83,7 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   const [bedEmpty, setBedEmpty] = useState(false);
   const [atPrinter, setAtPrinter] = useState(false);
   const [checked, setChecked] = useState(false);
-  const [asking, setAsking] = useState<"start" | "grams" | PrintJob | null>(null);
+  const [asking, setAsking] = useState<"start" | "grams" | "debug" | PrintJob | null>(null);
   const [sending, setSending] = useState(false);
   const [msg, setMsg] = useState<Msg | null>(null);
   const [units, setUnits] = useState("");
@@ -178,6 +182,27 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
       setAsking(null);
     }
   }
+
+  /** "Done (debug)": a test order's printing counts as finished without a print, to try QC and the customer's decision. */
+  async function markDone(by: string) {
+    setSending(true);
+    setMsg(null);
+    try {
+      const r = await fetch(`/api/orders/${encodeURIComponent(order.id)}/print-done-debug`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ by }),
+      });
+      const j = (await r.json().catch(() => ({}))) as { error?: string; reasons?: string[] };
+      if (r.ok) onChange();
+      else setMsg({ ok: false, text: tLib(t, j.error ?? t("Request failed ({status})", { status: r.status })), list: (j.reasons ?? []).map((x) => tLib(t, x)) });
+    } catch {
+      setMsg({ ok: false, text: t("Request failed") });
+    } finally {
+      setSending(false);
+      setAsking(null);
+    }
+  }
+  const debugDone = order.printDoneDebug;
+  const canDebug = canMarkPrintDoneDebug(order);
 
   // ---------- the slicer's grams for the price ----------
   const defaultUnits = plate?.objects && plate.objects > 1 ? Math.min(plate.objects, order.quantity) : 1;
@@ -355,7 +380,21 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
         </div>
       )}
 
+      {(jobs.length > 0 || canDebug || debugDone) && <h3 className="pp-h">{t("Print jobs")}</h3>}
+      {debugDone && (
+        <p className="pp-debug-done">
+          <span className="badge simulated">{t("test")}</span>{" "}
+          {t("Marked done for testing by {name} · {time}", { name: debugDone.by, time: when(debugDone.at, locale) })}
+        </p>
+      )}
       {jobs.length > 0 && <JobList jobs={jobs} printers={printers} busy={sending} onCancel={(j) => setAsking(j)} onFtp={() => setFtp(true)} ftp={ftp} t={t} locale={locale} />}
+      {/* Test orders only: nothing is printed, the order's printing just counts as finished (src/lib/printer/done-debug.ts). */}
+      {canDebug && (
+        <div className="row pp-debug">
+          <button className="pp-debug-btn" disabled={busy || sending || open} onClick={() => setAsking("debug")}>{t("Done (debug)")}</button>
+          {open && <span className="muted pp-hint">{tLib(t, ON_ITS_WAY_TEXT)}</span>}
+        </div>
+      )}
 
       <ConfirmDialog open={asking === "start"} title={t("Start the print?")} confirmLabel={t("Start print")} busy={sending}
         onConfirm={(by) => void start(by)} onClose={() => setAsking(null)}>
@@ -394,6 +433,10 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
       <ConfirmDialog open={typeof asking === "object" && asking !== null} title={t("Cancel this print job?")} confirmLabel={t("Cancel job")} danger busy={sending}
         onConfirm={(by) => { if (asking && typeof asking === "object") void cancel(asking, by); }} onClose={() => setAsking(null)}>
         <p style={{ margin: 0 }}>{typeof asking === "object" && asking ? t("{id} has not reached the printer yet.", { id: asking.id }) : ""}</p>
+      </ConfirmDialog>
+      <ConfirmDialog open={asking === "debug"} title={t("Mark the print as done?")} confirmLabel={t("Mark done")} busy={sending}
+        onConfirm={(by) => void markDone(by)} onClose={() => setAsking(null)}>
+        <p style={{ margin: 0 }}>{t("For testing only: nothing is printed. It is logged as a test.")}</p>
       </ConfirmDialog>
     </section>
   );
@@ -514,38 +557,35 @@ function JobList({ jobs, printers, busy, onCancel, onFtp, ftp, t, locale }: {
 }) {
   const time = (iso: string) => new Date(iso).toLocaleTimeString(dateLocale(locale), { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
   return (
-    <>
-      <h3 className="pp-h">{t("Print jobs")}</h3>
-      <ol className="pp-jobs">
-        {jobs.map((j) => {
-          const p = printers.find((x) => x.id === j.printerId);
-          const ended = j.state === "failed" || j.state === "cancelled";
-          const at = STEPS.indexOf(j.state);
-          const s = p?.snapshot;
-          const live = j.state === "printing" && s && (s.state === "RUNNING" || s.state === "PAUSE" || s.state === "PREPARE");
-          return (
-            <li key={j.id}>
-              <div className="pp-job-head">
-                <b className="mono">{j.id}</b>
-                <span className="muted">{p?.name ?? j.printerId} · {t("Plate {n}", { n: j.plate })} · {j.actor === "agent" ? t("by the agent (bed: {name})", { name: j.bedConfirmedBy ?? "?" }) : t("by {name}", { name: j.by })} · {time(j.createdAt)}</span>
-              </div>
-              <ol className="pp-steps">
-                {ended ? <li className="bad">{t(STEP_LABEL[j.state])}</li>
-                  : STEPS.map((st, i) => <li key={st} className={i < at || j.state === "done" ? "done" : i === at ? "now" : ""}>{t(STEP_LABEL[st])}</li>)}
-              </ol>
-              {live && <p className="pp-job-live">{Math.floor(s.percent)}%{s.totalLayers ? ` · ${t("layer {n} of {total}", { n: s.layer ?? 0, total: s.totalLayers })}` : ""}</p>}
-              {j.error && <p className="pp-job-error">{tLib(t, j.error)}</p>}
-              <div className="row pp-job-actions">
-                {(j.state === "queued" || j.state === "uploading") && <button disabled={busy} onClick={() => onCancel(j)}>{t("Cancel")}</button>}
-                {j === jobs.find((x) => x.state === "failed" && x.error?.startsWith(NO_START)) && !ftp && (
-                  <button disabled={busy} onClick={onFtp}>{t("Next start: try the ftp:/// path")}</button>
-                )}
-                {(j.state === "sent" || j.state === "printing") && <Link href={`/machines#printer-${j.printerId}`}>{t("Pause or stop on My machines")}</Link>}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-    </>
+    <ol className="pp-jobs">
+      {jobs.map((j) => {
+        const p = printers.find((x) => x.id === j.printerId);
+        const ended = j.state === "failed" || j.state === "cancelled";
+        const at = STEPS.indexOf(j.state);
+        const s = p?.snapshot;
+        const live = j.state === "printing" && s && (s.state === "RUNNING" || s.state === "PAUSE" || s.state === "PREPARE");
+        return (
+          <li key={j.id}>
+            <div className="pp-job-head">
+              <b className="mono">{j.id}</b>
+              <span className="muted">{p?.name ?? j.printerId} · {t("Plate {n}", { n: j.plate })} · {j.actor === "agent" ? t("by the agent (bed: {name})", { name: j.bedConfirmedBy ?? "?" }) : t("by {name}", { name: j.by })} · {time(j.createdAt)}</span>
+            </div>
+            <ol className="pp-steps">
+              {ended ? <li className="bad">{t(STEP_LABEL[j.state])}</li>
+                : STEPS.map((st, i) => <li key={st} className={i < at || j.state === "done" ? "done" : i === at ? "now" : ""}>{t(STEP_LABEL[st])}</li>)}
+            </ol>
+            {live && <p className="pp-job-live">{Math.floor(s.percent)}%{s.totalLayers ? ` · ${t("layer {n} of {total}", { n: s.layer ?? 0, total: s.totalLayers })}` : ""}</p>}
+            {j.error && <p className="pp-job-error">{tLib(t, j.error)}</p>}
+            <div className="row pp-job-actions">
+              {(j.state === "queued" || j.state === "uploading") && <button disabled={busy} onClick={() => onCancel(j)}>{t("Cancel")}</button>}
+              {j === jobs.find((x) => x.state === "failed" && x.error?.startsWith(NO_START)) && !ftp && (
+                <button disabled={busy} onClick={onFtp}>{t("Next start: try the ftp:/// path")}</button>
+              )}
+              {(j.state === "sent" || j.state === "printing") && <Link href={`/machines#printer-${j.printerId}`}>{t("Pause or stop on My machines")}</Link>}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

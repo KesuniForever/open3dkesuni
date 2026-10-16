@@ -40,6 +40,7 @@ const MAX_AGENT_SLICE_TRIES = 3;
 const QUIET = new Set([
   "Not a real order: a person sets its runs to let the agent print it", "A person set 0 runs: the agent does not print it",
   "All runs printed ({done} of {needed})", "Run {n} of {needed} is on the printer", "Slicing on the studio PC…", "Started on {printer}",
+  "Marked printed for testing: the agent does not print it",
 ]);
 
 export type Trigger =

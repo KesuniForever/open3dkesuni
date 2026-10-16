@@ -351,6 +351,7 @@ const id: Dict = {
   "File is larger than {n} MB": "File lebih dari {n} MB",
   "File content is not a real image": "Isi file bukan gambar asli",
   "Order is {status}; QC photos belong to an order in production": "Pesanan berstatus {status}; foto QC hanya untuk pesanan yang sedang diproduksi",
+  "Order is {status}; only an order in production can be marked printed": "Pesanan berstatus {status}; hanya pesanan yang sedang diproduksi yang bisa ditandai selesai cetak",
   "File refused": "File ditolak",
   "File not found": "File tidak ditemukan",
   "File is too large": "File terlalu besar",

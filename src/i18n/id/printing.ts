@@ -202,6 +202,20 @@ const id: Record<string, string> = {
   "Printer control by {name}": "Kendali printer oleh {name}",
   "Print sent to the printer": "Cetakan dikirim ke printer",
   "Print did not start": "Cetakan tidak dimulai",
+
+  // ---------- "Done (debug)" under Print jobs: a test order counts as printed without a print (16 Oct) ----------
+  "Done (debug)": "Selesai (debug)",
+  "Mark the print as done?": "Tandai cetakan sudah selesai?",
+  "For testing only: nothing is printed. It is logged as a test.": "Hanya untuk uji: tidak ada yang dicetak. Dicatat sebagai uji.",
+  "Mark done": "Tandai selesai",
+  "Marked done for testing by {name} · {time}": "Ditandai selesai untuk uji oleh {name} · {time}",
+  "test": "uji",
+  "print marked done for testing (no real print)": "cetakan ditandai selesai untuk uji (tanpa cetak sungguhan)",
+  "Only test orders can be marked printed without a print": "Hanya pesanan uji yang bisa ditandai selesai cetak tanpa mencetak",
+  "A print of this order is on its way: stop it first": "Cetakan pesanan ini sedang berjalan: hentikan dulu",
+  "Marked printed for testing: the agent does not print it": "Ditandai selesai cetak untuk uji: agen tidak mencetaknya",
+  "Print marked done for testing by {name}": "Cetakan ditandai selesai untuk uji oleh {name}",
+  "No real print: a test order": "Tanpa cetak sungguhan: pesanan uji",
 };
 
 export default id;

@@ -201,6 +201,8 @@ export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
     case "auto_print_switch": return { title: t(i.on ? "Agent prints turned on by {name}" : "Agent prints turned off by {name}", { name: str(i.by) }) };
     case "auto_print_runs": return { title: t("Runs set by {name}", { name: str(i.by) }), line: t("{n} runs", { n: str(i.runsNeeded) }) };
     case "clear_bed": return { title: t("Bed confirmed empty by {name}", { name: str(i.by) }), line: str(o.printer) || undefined };
+    // "Done (debug)" on a test order (src/lib/printer/done-debug.ts): a person, never the Chief; nothing was printed.
+    case "print_done_debug": return { title: t("Print marked done for testing by {name}", { name: str(i.by) }), line: t("No real print: a test order") };
     case "request_dispatch": return { title: t("Asked the dispatcher to look"), line: oneLine(str(o.thisOrder)) || undefined };
     case "agent_start": return { title: triggerTitle(str(i.trigger), t), ...detail(str(i.trigger)) };
     case "agent_thought": case "agent_summary": return { title: t("Chief summary"), ...detail(str(o.text)) };

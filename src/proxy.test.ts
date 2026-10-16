@@ -168,6 +168,17 @@ describe("proxy: printing from the website", () => {
     expect(passes(proxy(post("/api/printers/a1/camera", lan)))).toBe(true);
   });
 
+  it("Done (debug) is an operator write like any other: open at the studio, the password on the public link", () => {
+    const path = "/api/orders/ORD-001/print-done-debug";
+    expect(passes(proxy(post(path)))).toBe(true);
+    expect(passes(proxy(post(path, { host: "192.168.100.99:3000" })))).toBe(true); // it moves no machine
+    expect(proxy(post(path, tunnel)).status).toBe(403);
+    process.env.OPERATOR_PASSWORD = "correct horse";
+    expect(proxy(post(path, tunnel)).status).toBe(401);
+    expect(passes(proxy(post(path, { ...tunnel, authorization: basic("correct horse") })))).toBe(true);
+    expect(proxy(post(path, { ...tunnel, authorization: basic("correct horse"), "sec-fetch-site": "cross-site" })).status).toBe(403);
+  });
+
   it("agent prints: the 'Bed is empty' that lets the agent print, the switch and an order's runs need the password from the studio Wi-Fi too", () => {
     const lan = { host: "192.168.100.99:3000" };
     const gates = ["/api/printers/a1/bed", "/api/auto-print", "/api/orders/ORD-001/auto-print"];

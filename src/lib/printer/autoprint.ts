@@ -10,7 +10,8 @@
 // - bed: a person's "Bed is empty" given after the last print started and ended, not used, not older than 2 h;
 // - order: PLAN_CHOSEN or IN_PRODUCTION; a real order is paid into escrow (FUNDED); an order that is not real only when a
 //   person set its runs; runs left (runs needed - finished prints - prints on their way > 0, one at a time). Finished: the
-//   order's done print jobs, or its collect tasks from a printer if more (a print started outside the website). On its
+//   order's done print jobs, or its collect tasks from a printer if more (a print started outside the website); every
+//   run when a person marked the test order printed without a print ("Done (debug)", done-debug.ts). On its
 //   way: its jobs not ended, and any printer linked to it that is printing. No open reprint task and no open "agent
 //   print did not start" task;
 // - file: only a .gcode.3mf the studio PC sliced from the order's newest design file, an STL or OBJ, with the studio's
@@ -120,14 +121,16 @@ export function orderGate(o: Order): OrderGate {
   // A print a person started outside the website (Bambu Studio, the printer screen) has no print job: the collect task
   // the printer's "finished" raised counts it, and a linked printer that is printing counts as a run on its way.
   const collected = store.listTasks(o.id).filter((t) => t.kind === "collect_and_qc" && t.printerId && t.createdBy === "agent").length;
-  const runsDone = Math.max(jobs.filter((j) => j.state === "done").length, collected);
+  const need = runsNeeded(o);
+  // "Done (debug)": a person marked this test order printed without a print (done-debug.ts): every run counts as printed.
+  const runsDone = Math.max(jobs.filter((j) => j.state === "done").length, collected, o.printDoneDebug ? need : 0);
   const busy = new Set(jobs.filter((j) => ACTIVE.includes(j.state)).map((j) => j.printerId));
   for (const p of store.listPrinters()) if (p.currentOrderId === o.id && ON_PRINTER.includes(p.snapshot?.state ?? "")) busy.add(p.id);
   const runsActive = busy.size;
-  const need = runsNeeded(o);
   const base = { runsNeeded: need, runsDone, runsActive, real };
   const no = (why: Why): OrderGate => ({ ...base, why });
   if (!PRODUCTION_STATUSES.includes(o.status)) return no({ key: "Order is {status}", vars: { status: o.status } });
+  if (o.printDoneDebug) return no({ key: "Marked printed for testing: the agent does not print it" });
   if (!real && !o.autoPrint) return no({ key: "Not a real order: a person sets its runs to let the agent print it" });
   if (need === 0) return no({ key: "A person set 0 runs: the agent does not print it" });
   if (real && store.getEscrow(o.id)?.state !== "FUNDED") return no({ key: "Waiting for the customer's payment" });
