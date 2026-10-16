@@ -20,12 +20,15 @@ export const MAX_CUSTOMER_DESIGN_BYTES = 25 * 1024 * 1024;
  */
 export const CUSTOMER_DESIGN_EXTS = [".stl", ".obj"];
 
+/** The name is not .stl or .obj (the order form then reads the first bytes: src/lib/model-sniff.ts). */
+export const NOT_A_MODEL = "Send your design as an STL or OBJ file";
+
 /** Why the order form refuses this file before sending it (name and size only; the server reads the content), or null. */
 export function customerDesignProblem(name: string, size: number): string | null {
   const ext = /\.[^./\\]+$/.exec(name.toLowerCase())?.[0] ?? "";
   if (ext === ".step" || ext === ".stp") return "STEP files cannot be weighed here: export an STL from your CAD program";
   if (ext === ".3mf") return "Export your model as an STL or OBJ. Send a 3MF project on WhatsApp.";
-  if (!CUSTOMER_DESIGN_EXTS.includes(ext)) return "Send your design as an STL or OBJ file";
+  if (!CUSTOMER_DESIGN_EXTS.includes(ext)) return NOT_A_MODEL;
   if (size <= 0) return "Your design file is empty";
   if (size > MAX_CUSTOMER_DESIGN_BYTES) return "Your design is larger than 25 MB. Send it on WhatsApp instead.";
   return null;

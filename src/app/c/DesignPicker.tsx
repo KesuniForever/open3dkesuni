@@ -6,7 +6,8 @@
 import { useEffect, useRef } from "react";
 import { useT } from "@/i18n/client";
 import { tLib } from "@/lib/lib-text";
-import { customerDesignProblem } from "@/lib/file-rules";
+import { NOT_A_MODEL, customerDesignProblem } from "@/lib/file-rules";
+import { SNIFF_BYTES, modelName, sniffModel } from "@/lib/model-sniff";
 import Info from "@/app/components/Info";
 import ModelPreview from "./ModelPreview";
 
@@ -30,18 +31,27 @@ export default function DesignPicker({ file, onFile, error, onError, label, disa
   const input = useRef<HTMLInputElement>(null);
   // Taken off (removed, refused by the server, or sent): the field empties too, so the same file can be picked again.
   useEffect(() => { if (!file && input.current) input.current.value = ""; }, [file]);
-  const pick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = e.target.files?.[0] ?? null;
-    const problem = picked ? customerDesignProblem(picked.name, picked.size) : null;
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const field = e.target;
+    let picked = field.files?.[0] ?? null;
+    let problem = picked ? customerDesignProblem(picked.name, picked.size) : null;
+    // A phone may have renamed it ("model.stl.bin", "1000012345"): the first bytes say whether it is a model after all.
+    if (picked && problem === NOT_A_MODEL) {
+      const ext = await picked.slice(0, SNIFF_BYTES).arrayBuffer().then((b) => sniffModel(new Uint8Array(b), picked!.size), () => null);
+      if (ext) {
+        picked = new File([picked], modelName(picked.name, ext), { type: "application/octet-stream", lastModified: picked.lastModified });
+        problem = customerDesignProblem(picked.name, picked.size);
+      }
+    }
     onError(problem);
-    if (problem) e.target.value = "";
+    if (problem) field.value = "";
     onFile(problem ? null : picked);
   };
   return (
     <>
       <div className="dp-row">
         {/* No accept filter: phones grey out model files they have no app for. Name and size are checked here, the content on the server. */}
-        <input ref={input} type="file" onChange={pick} disabled={disabled} aria-label={label} />
+        <input ref={input} type="file" onChange={(e) => void pick(e)} disabled={disabled} aria-label={label} />
         {file && (
           <button type="button" className="quiet" onClick={() => { onFile(null); onError(null); }} disabled={disabled}>{t("Remove file")}</button>
         )}
