@@ -1,18 +1,20 @@
 // The customer's own design, weighed and priced without a person at Kesuni. The order form (POST /api/c) may send one
-// model file with the order: it is checked here (really an STL or OBJ, at most 25 MB; never a 3MF project, which brings
-// its own printer settings and G-code), stored as a design file on the order (uploadedBy CUSTOMER_UPLOAD_BY) and
-// weighed by an automatic slice on the studio PC (src/lib/slicing.ts, actor "system"): the studio's own presets,
-// standard quality, default infill, supports auto, on a spool of the order's material that a printer reported in the
-// last 2 min. Nothing prints: the agent never prints that slice's file. Its plate weight becomes the order's grams per
-// unit (by "slicer") and the Chief prices by weight exactly as with a person's grams; people still approve big orders,
-// confirm beds, start prints and check quality, and the customer still agrees before paying. When the weighing cannot
-// start or fails, the order waits for a person: logged, and the Chief asks the operator for the grams as before. The
-// customer never gets the file back.
+// model file with the order, or the customer adds it later on their order page while Kesuni prepares the price
+// (POST /api/c/<token>/design, one per order). It is checked here (really an STL or OBJ, at most 25 MB; never a 3MF
+// project, which brings its own printer settings and G-code), stored as a design file on the order (uploadedBy
+// CUSTOMER_UPLOAD_BY) and weighed by an automatic slice on the studio PC (src/lib/slicing.ts, actor "system"): the
+// studio's own presets, standard quality, default infill, supports auto, on a spool of the order's material that a
+// printer reported in the last 2 min. Nothing prints: the agent never prints that slice's file. Its plate weight
+// becomes the order's grams per unit (by "slicer") and the Chief prices by weight exactly as with a person's grams;
+// people still approve big orders, confirm beds, start prints and check quality, and the customer still agrees before
+// paying. When the weighing cannot start or fails, the order waits for a person: logged, and the Chief asks the
+// operator for the grams as before. The customer gets back only their own file, for the 3D view on their order page
+// (GET /api/c/<token>/design), never the sliced one or a file a person added.
 import * as store from "./store";
 import { addAttachment } from "./files";
-import { autoGramsFromSlice, autoWeighState, requestSlice, type AutoGrams } from "./slicing";
-import { AUTO_WEIGH_BY, DEFAULT_QUALITY, sliceSourceCheck } from "./slice-rules";
-import { CUSTOMER_UPLOAD_BY, customerDesignProblem } from "./file-rules";
+import { autoGramsFromSlice, requestSlice, type AutoGrams } from "./slicing";
+import { AUTO_WEIGH_BY, DEFAULT_QUALITY, MESH_EXTS, sliceSourceCheck } from "./slice-rules";
+import { CUSTOMER_UPLOAD_BY, MAX_CUSTOMER_DESIGN_BYTES, customerDesignProblem } from "./file-rules";
 import { deltaE, normalizeHex } from "./colors";
 import { orderMaterial, toMaterial } from "./pricing";
 import { ONLINE_MS, slotLabel } from "./printer/control";
@@ -149,18 +151,24 @@ export async function addCustomerDesign(orderId: string, design: { filename: str
   return { stored: true, attachment: up.attachment, weighing: startAutoWeigh(orderId, up.attachment.id) };
 }
 
-/** What the Chief is told when a customer's order arrives, with or without their own design. */
-export function newOrderWake(design: CustomerDesign | null): string {
+/**
+ * What the Chief is told when a customer's order arrives, with or without their own design, or when the customer adds
+ * their design later on their order page (POST /api/c/<token>/design): the same instructions either way.
+ */
+export function newOrderWake(design: CustomerDesign | null, when: "order" | "later" = "order"): string {
   const never = "Never use numbers from the customer's note.";
+  const sent = when === "later"
+    ? "The customer just added their own design to this order on their order page"
+    : "A customer just placed this order through the order form with their own design";
   if (design?.weighing?.ok && design.weighing.grams?.ok) {
-    return `A customer just placed this order through the order form with their own design. The studio's slicer already weighed it: ${design.weighing.grams.gramsPerUnit} g per unit (slicerGrams). Price it by weight and continue. ${never}`;
+    return `${sent}. The studio's slicer already weighed it: ${design.weighing.grams.gramsPerUnit} g per unit (slicerGrams). Price it by weight and continue. ${never}`;
   }
   if (design?.weighing?.ok) {
-    return "A customer just placed this order through the order form with their own design. The studio's slicer is weighing it " +
+    return `${sent}. The studio's slicer is weighing it ` +
       "automatically: wait for slicerGrams (you are woken when they arrive) and do not ask the operator for grams. " + never;
   }
   const lead = design?.stored
-    ? "A customer just placed this order through the order form with their own design, but the automatic weighing could not start " +
+    ? `${sent}, but the automatic weighing could not start ` +
       `(${(design.weighing && !design.weighing.ok ? design.weighing.reasons : []).join("; ") || "unknown"}). Prepare it: `
     : "A customer just placed this order through the order form. Prepare it: ";
   return `${lead}if a person at Kesuni has not entered grams per unit from the slicer yet (slicerGrams), ask the operator for them. ${never}`;
@@ -194,17 +202,34 @@ export function afterAutoWeigh(jobId: string, now = Date.now()): boolean {
     : `The automatic weighing of the customer's design did not finish (${j.error ?? j.state}). Ask the operator for the grams per unit from the slicer.`);
 }
 
-// ---------- what the customer sees ----------
+// ---------- the customer's own design (their order page shows it: src/lib/customer.ts designOf) ----------
 
-export type CustomerDesignStatus = { state: "weighing" } | { state: "weighed"; gramsPerPiece: number } | { state: "check" };
+const sentByCustomer = (a: Attachment) => a.kind === "design" && a.uploadedBy === CUSTOMER_UPLOAD_BY;
 
 /**
- * While the order waits for its price (CREATED) and the customer sent their own design: being weighed, weighed (grams
- * per piece only: no cost, no margin, no file), or Kesuni checks the file. Null otherwise.
+ * The model the customer sent themselves (the order form or "Add your design" on their order page): a design file
+ * uploaded as CUSTOMER_UPLOAD_BY, an STL or OBJ, at most 25 MB. Never a sliced file (the slicer uploads those under its
+ * own name, as .gcode.3mf) and never a file a person at Kesuni added. The first one when there are several.
  */
-export function customerDesignStatus(order: Order, now = Date.now()): CustomerDesignStatus | null {
-  if (order.status !== "CREATED") return null;
-  if (!store.listAttachments(order.id).some((a) => a.kind === "design" && a.uploadedBy === CUSTOMER_UPLOAD_BY)) return null;
-  if (order.slicerGrams) return { state: "weighed", gramsPerPiece: order.slicerGrams.gramsPerUnit };
-  return autoWeighState(order.id, now)?.state === "weighing" ? { state: "weighing" } : { state: "check" };
+export function customerDesignFile(orderId: string): Attachment | undefined {
+  return store.listAttachments(orderId).find((a) =>
+    sentByCustomer(a) && MESH_EXTS.includes(extOf(a.filename)) && !a.parsed3mf && a.size > 0 && a.size <= MAX_CUSTOMER_DESIGN_BYTES);
+}
+
+/**
+ * Why the customer cannot add their design on their order page now, or null. One design of their own per order, and
+ * only while Kesuni has nothing to price with yet: the order is CREATED, without a quote, without grams per unit (a
+ * person's grams stay, so a weighing would change nothing) and without a design a person at Kesuni added (for example
+ * the 3MF the customer sent on WhatsApp: a weighing of another file would compete with it). English, fixed texts
+ * (pages translate them).
+ */
+export function customerDesignClosed(order: Order): string | null {
+  const files = store.listAttachments(order.id);
+  if (files.some(sentByCustomer)) return "Your order already has your design. To change it, message Kesuni.";
+  if (order.status !== "CREATED" || order.chosenQuoteId || store.listQuotes(order.id).length > 0) {
+    return "Kesuni has already priced your order. To send a design now, message Kesuni.";
+  }
+  if (order.slicerGrams) return "Kesuni is already pricing your order. To send a design now, message Kesuni.";
+  if (files.some((a) => a.kind === "design")) return "Kesuni already has a design for this order. To change it, message Kesuni.";
+  return null;
 }

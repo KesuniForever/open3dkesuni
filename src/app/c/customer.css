@@ -44,3 +44,35 @@
 .cc-actions > button { flex: 1 1 140px; min-height: 44px; }
 .cust-fieldset { border: 1px solid var(--border); border-radius: 12px; padding: 12px 13px 14px; margin: 0; min-width: 0; }
 .cust-fieldset > legend { font-size: 13px; font-weight: 600; color: var(--text-2); padding: 0 6px; margin-left: -6px; }
+
+/* The customer's model in 3D (ModelPreview.tsx): under the order form's file field and on the order page. */
+.dp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.dp-row > input[type="file"] { max-width: 100%; min-width: 0; }
+.mp { margin: 10px 0 0; display: grid; gap: 8px; min-width: 0; }
+.mp-view {
+  position: relative; height: 220px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border);
+  display: grid; place-items: center; overflow: hidden;
+}
+/* pan-y: a finger moving up or down still scrolls the page; sideways (or a mouse) turns the model. Two fingers still zoom. */
+.mp-view > canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: pan-y pinch-zoom; cursor: grab; }
+.mp-view > canvas:active { cursor: grabbing; }
+.mp-view > canvas:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px; }
+.mp-view > .muted { font-size: 13px; padding: 0 12px; text-align: center; }
+.mp > figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; font-size: 13px; min-width: 0; }
+.mp > figcaption b { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+.mp > figcaption span { color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; min-width: 0; }
+.mp.compact { grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 0; }
+.mp.compact .mp-view { height: 112px; }
+.mp.compact > figcaption { display: grid; justify-content: start; }
+.mp-failed { margin: 10px 0 0; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.mp-failed b { color: var(--text); font-weight: 600; }
+
+/* "Your design" and "Add your design" on the order page (CustomerView.tsx). A long badge goes under the title. */
+.dc .cc-card-head { flex-wrap: wrap; gap: 6px 12px; }
+.dc .calc-kv { margin-top: 10px; }
+.dc .calc-kv dd small { display: block; font-weight: 400; font-size: 12.5px; color: var(--muted); }
+.dc .dc-spool { display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.dc .dc-spool .cc-dot { width: 16px; height: 16px; }
+.dc-note { margin-top: 8px; }
+.dc-send { width: 100%; margin-top: 14px; }
+@media (max-width: 420px) { .mp-view { height: 200px; } }

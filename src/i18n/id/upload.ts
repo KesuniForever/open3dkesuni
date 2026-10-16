@@ -26,10 +26,37 @@ const id: Record<string, string> = {
   "Too many designs sent in one hour. Try again later or contact Kesuni.": "Terlalu banyak desain yang dikirim dalam satu jam. Coba lagi nanti atau hubungi Kesuni.",
   "Kesuni is receiving other designs right now. Try again in a minute.": "Kesuni sedang menerima desain lain. Coba lagi sebentar lagi.",
 
+  // ---------- the 3D preview (src/app/c/ModelPreview.tsx): the order form and the order page ----------
+  "Reading your model…": "Membaca model Anda…",
+  "No 3D preview for this file.": "Tidak ada pratinjau 3D untuk file ini.",
+  "3D view of your model. Drag to turn it.": "Tampilan 3D model Anda. Geser untuk memutarnya.",
+  "Show 3D view": "Tampilkan 3D",
+
   // ---------- the customer's order page (src/app/c/[token]/CustomerView.tsx) ----------
-  "Weighing your design…": "Sedang menimbang desain Anda…",
-  "Your design: {g} g per piece": "Desain Anda: {g} g per buah",
-  "Kesuni will check your file": "Kesuni akan mengecek file Anda",
+  // "Your design": the customer's own model, what the slicer found, the estimate
+  "Your design": "Desain Anda",
+  "Your own file, shown in your browser: drag to turn it. The studio's slicer weighs it with standard settings to set the price.":
+    "File Anda sendiri, ditampilkan di browser Anda: geser untuk memutarnya. Slicer studio menimbangnya dengan pengaturan standar untuk menentukan harga.",
+  "The colour does not change the weight.": "Warna tidak mengubah berat.",
+  "Weighing…": "Sedang ditimbang…",
+  "Weighed": "Sudah ditimbang",
+  "Kesuni checks your file": "Kesuni mengecek file Anda",
+  "{g} g per piece": "{g} g per buah",
+  "Print time (estimate)": "Waktu cetak (perkiraan)",
+  "{time} per piece": "{time} per buah",
+  "{time} for {n} pieces": "{time} untuk {n} buah",
+  "Weighed with": "Ditimbang dengan",
+  "Estimated price": "Perkiraan harga",
+  "Estimate · the final price comes with your agreement": "Perkiraan · harga akhir ada di kesepakatan Anda",
+  // "Add your design": sending it later (POST /api/c/<token>/design)
+  "Add your design": "Tambahkan desain Anda",
+  "Send design": "Kirim desain",
+  "Your order already has your design. To change it, message Kesuni.": "Pesanan Anda sudah berisi desain Anda. Untuk menggantinya, hubungi Kesuni.",
+  "Kesuni has already priced your order. To send a design now, message Kesuni.": "Kesuni sudah menghitung harga pesanan Anda. Untuk mengirim desain sekarang, hubungi Kesuni.",
+  "Kesuni is already pricing your order. To send a design now, message Kesuni.": "Kesuni sedang menghitung harga pesanan Anda. Untuk mengirim desain sekarang, hubungi Kesuni.",
+  "Kesuni already has a design for this order. To change it, message Kesuni.": "Kesuni sudah punya desain untuk pesanan ini. Untuk menggantinya, hubungi Kesuni.",
+  "Your design could not be read. Please try again.": "Desain Anda tidak terbaca. Silakan coba lagi.",
+  "Your design is still being received. Wait a moment, then reload the page.": "Desain Anda masih dalam proses pengiriman. Tunggu sebentar, lalu muat ulang halaman.",
 
   // ---------- the order page (operator) ----------
   "From the customer": "Dari pelanggan",

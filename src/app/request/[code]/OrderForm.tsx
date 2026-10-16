@@ -1,14 +1,13 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocale, useT } from "@/i18n/client";
 import { CustTop } from "@/app/c/CustTop";
 import ColorPicker, { NO_CHOICE, useStudioColors, type Choice } from "@/app/c/ColorPicker";
+import DesignPicker, { DesignInfo } from "@/app/c/DesignPicker";
 import { tLib } from "@/lib/lib-text";
-import { customerDesignProblem } from "@/lib/file-rules";
 import { rememberOrder } from "@/app/c/my-orders";
-import Info from "@/app/components/Info";
 
 const EMPTY = { name: "", product: "", quantity: "1", deadline: "", budgetIdr: "", note: "" };
 type Fields = typeof EMPTY;
@@ -59,18 +58,6 @@ export default function OrderForm({ code, embedded = false }: { code: string; em
   // Its own error line, under the field: a refused file never hides behind the other messages.
   const [design, setDesign] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const clearDesign = () => {
-    if (fileInput.current) fileInput.current.value = "";
-    setDesign(null);
-  };
-  const pickDesign = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null;
-    const problem = file ? customerDesignProblem(file.name, file.size) : null;
-    setFileError(problem);
-    if (problem) e.target.value = "";
-    setDesign(problem ? null : file);
-  };
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -98,7 +85,7 @@ export default function OrderForm({ code, embedded = false }: { code: string; em
         // The file was refused: say so under the field and take it off, so the next Send goes without it.
         if (design && (res.status === 413 || data.error === "Your design cannot be used")) {
           setFileError(data.reasons?.[0] ?? data.error);
-          clearDesign();
+          setDesign(null);
           return;
         }
         return setErrors(data.reasons ?? [data.error]);
@@ -140,15 +127,9 @@ export default function OrderForm({ code, embedded = false }: { code: string; em
           <ColorPicker value={choice} onChange={setChoice} palette={palette} disabled={busy} />
         </fieldset>
         <fieldset className="cust-fieldset">
-          <legend>{t("Your design (one piece)")} <Info>{t("Optional. One file is one piece: the price is multiplied by the quantity. STL or OBJ, up to 25 MB. Kesuni weighs it to set the price. For a 3MF or several colours, send the file on WhatsApp.")}</Info></legend>
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-            {/* No accept filter: phones grey out model files they have no app for. Name and size are checked here, the content on the server. */}
-            <input ref={fileInput} type="file" onChange={pickDesign} disabled={busy} aria-label={t("Your design (one piece)")} style={{ maxWidth: "100%", minWidth: 0 }} />
-            {design && (
-              <button type="button" className="quiet" onClick={() => { clearDesign(); setFileError(null); }} disabled={busy}>{t("Remove file")}</button>
-            )}
-          </div>
-          {fileError && <p className="alert bad" role="status" style={{ margin: "10px 0 0" }}>{tLib(t, fileError)}</p>}
+          <legend>{t("Your design (one piece)")} <DesignInfo /></legend>
+          <DesignPicker file={design} onFile={setDesign} error={fileError} onError={setFileError} label={t("Your design (one piece)")}
+            disabled={busy} color={choice.colors[0]?.color ?? null} />
         </fieldset>
         <label>{t("Notes (size, colour, design)")}
           <textarea value={f.note} onChange={set("note")} rows={3} maxLength={1000} placeholder={t("Optional")} />

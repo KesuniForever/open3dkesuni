@@ -16,7 +16,7 @@ describe("order status in My orders", () => {
     const stage = (v: V) => orderStatus(v).stage;
     expect(stage(view("CREATED"))).toBe("preparing");
     expect(stage(view("CREATED", { design: { state: "weighing" } }))).toBe("weighing");
-    expect(stage(view("CREATED", { design: { state: "weighed", gramsPerPiece: 16 } }))).toBe("preparing");
+    expect(stage(view("CREATED", { design: { state: "weighed" } }))).toBe("preparing");
     expect(stage(view("CREATED", { design: { state: "check" } }))).toBe("preparing");
     expect(stage(view("PLAN_CHOSEN"))).toBe("price");
     expect(stage(view("PLAN_CHOSEN", { escrow: escrow("AWAITING_DEPOSIT") }))).toBe("price");

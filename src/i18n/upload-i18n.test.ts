@@ -17,12 +17,43 @@ describe("the customer's design in Indonesian", () => {
   it("every t(\"…\") on the order form, and the new lines on the customer's and the operator's pages", () => {
     const keys = [
       ...literals("src/app/request/[code]/OrderForm.tsx"), ...literals("src/app/orders/[id]/SlicePanel.tsx"),
-      "Sending your design…", "Remove file", "Weighing your design…", "Your design: {g} g per piece", "Kesuni will check your file",
+      "Sending your design…", "Remove file",
       "From the customer", "Automatic slice", "automatic, for the price",
     ];
     const missing = [...new Set(keys)].filter((k) => !(k in ID) && !["Slot {n}", "Printer"].includes(k));
     expect(missing).toEqual([]);
-    expect(id("Your design: {g} g per piece", { g: "16" })).toBe("Desain Anda: 16 g per buah");
+    expect(id("{g} g per piece", { g: "16" })).toBe("16 g per buah");
+  });
+
+  it("the 3D preview, the design field, \"Your design\" and \"Add your design\" on the order page", () => {
+    const card = readFileSync(path.join(process.cwd(), "src/app/c/[token]/CustomerView.tsx"), "utf8");
+    // DesignCard, its badges and AddDesign: from the badge table to the material card.
+    const part = card.slice(card.indexOf("const DESIGN_BADGE"), card.indexOf("/** The material and colours the customer picked"));
+    const keys = [
+      ...literals("src/app/c/ModelPreview.tsx"), ...literals("src/app/c/DesignPicker.tsx"),
+      ...[...part.matchAll(/\bt\(\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]), ...[...part.matchAll(/text: "([^"]+)"/g)].map((m) => m[1]),
+    ];
+    expect(keys.length).toBeGreaterThan(20);
+    expect([...new Set(keys)].filter((k) => !(k in ID))).toEqual([]);
+    expect(id("{time} for {n} pieces", { time: "1 j 15 mnt", n: 3 })).toBe("1 j 15 mnt untuk 3 buah");
+    // The page's own words: "Kesepakatan" (the Agreement card) and "Harga akhir" (the portal's estimate).
+    expect(id("Estimate · the final price comes with your agreement")).toBe("Perkiraan · harga akhir ada di kesepakatan Anda");
+    expect(id("Agreement")).toBe("Kesepakatan");
+  });
+
+  it("every answer of \"Add your design\" and of the design download", () => {
+    const texts = [
+      "Order not found", "File not found", "Your design could not be read. Please try again.", "Your design cannot be used",
+      "Your order already has your design. To change it, message Kesuni.",
+      "Kesuni has already priced your order. To send a design now, message Kesuni.",
+      "Kesuni is already pricing your order. To send a design now, message Kesuni.",
+      "Kesuni already has a design for this order. To change it, message Kesuni.",
+      "Your design is still being received. Wait a moment, then reload the page.", "Connection lost. Please try again.",
+      "Too many tries in one hour. Try again later or contact Kesuni.", "Too many designs sent in one hour. Try again later or contact Kesuni.",
+      "Kesuni is receiving other designs right now. Try again in a minute.", "Your design is larger than 25 MB. Send it on WhatsApp instead.",
+      "Blocked: this request came from another site.", "The design could not be stored", "Saving the file failed on the studio PC",
+    ];
+    expect(texts.filter((x) => tLib(id, x) === x)).toEqual([]);
   });
 
   it("every reason a design is refused or not weighed", () => {

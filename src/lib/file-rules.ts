@@ -10,7 +10,7 @@ export const qcPhotoLocked = (status: Order["status"]): string | null =>
 
 // ---------- the customer's own design (order form, src/lib/auto-weigh.ts) ----------
 
-/** Who uploaded a design the customer sent with the order form (the attachment's uploadedBy). */
+/** Who uploaded a design the customer sent themselves: with the order form or later on their order page (uploadedBy). */
 export const CUSTOMER_UPLOAD_BY = "Customer (order form)";
 /** The customer's design: at most this big (a person may upload up to 50 MB on the order page). */
 export const MAX_CUSTOMER_DESIGN_BYTES = 25 * 1024 * 1024;

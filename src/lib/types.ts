@@ -3,6 +3,7 @@
 import type { PrinterSnapshot } from "./printer/bambu";
 import type { CostInput } from "./costing";
 import type { ColorMode } from "./pricing";
+import type { MeshSize } from "./mesh";
 
 export type Label = "simulated" | "real" | "manual" | "device" | "local" | "testnet" | "mainnet";
 
@@ -190,6 +191,9 @@ export interface Attachment {
   storageKey: string;
   /** What a Bambu Studio .3mf holds, read right after upload (src/lib/threemf.ts). Missing for other files. */
   parsed3mf?: ThreeMfInfo;
+  /** An STL or OBJ: its size in mm and triangle count, read right after upload (src/lib/mesh.ts). Missing for other
+   *  files, files uploaded before 16 Oct 2026 and meshes that could not be read. */
+  mesh?: MeshSize;
 }
 
 export interface Acceptance {

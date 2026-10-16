@@ -1,19 +1,20 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as store from "./store";
 import { addAttachment, setFileStore, type FileStore } from "./files";
-import { customerCreateOrder } from "./customer";
+import { customerCreateOrder, customerView, designOf } from "./customer";
 import { ingestReport, confirmColors } from "./printer/actions";
 import { mergeReport } from "./printer/bambu";
 import { agentFileProblem } from "./printer/autoprint";
 import { setAutoPrint } from "./printer/dispatch";
 import { MAX_ACTIVE_WEIGHING, noteSlicerPoll, requestSlice, resetSlicerSeen, storeSliceResult, updateSliceItem } from "./slicing";
-import { setSlicerGrams } from "./agreement";
+import { quoteByWeight, setSlicerGrams } from "./agreement";
+import { microToUsdc } from "./policy";
 import { fake3mf, makeZip } from "./threemf.test-helper";
 import { AUTO_WEIGH_BY } from "./slice-rules";
 import { CUSTOMER_UPLOAD_BY, customerDesignProblem } from "./file-rules";
 import { checkHeartbeat } from "./agent/heartbeat";
 import {
-  addCustomerDesign, afterAutoWeigh, customerDesignContentProblem, customerDesignStatus, newOrderWake, pricingSpool, startAutoWeigh,
+  addCustomerDesign, afterAutoWeigh, customerDesignContentProblem, newOrderWake, pricingSpool, startAutoWeigh,
 } from "./auto-weigh";
 
 // The Chief is not called in tests: only who would be woken, and with what.
@@ -109,7 +110,7 @@ describe("weighing it automatically (nothing prints)", () => {
       actor: "system", by: AUTO_WEIGH_BY, state: "queued", printerId: "a1", tray: 0, material: "PLA", color: "#FEC600", quality: "standard", infillPct: 20, supports: "auto",
     } });
     expect(newOrderWake(d)).toMatch(/weighing it automatically: wait for slicerGrams .* do not ask the operator/);
-    expect(customerDesignStatus(store.getOrder(o.id)!)).toEqual({ state: "weighing" });
+    expect(designOf(store.getOrder(o.id)!)).toMatchObject({ state: "weighing", gramsPerPiece: null });
     expect(store.listLog(o.id).map((e) => e.tool)).toEqual(["customer_design", "slice_request"]);
     // While it is weighed the heartbeat does not wake the Chief to ask for grams.
     const f = checkHeartbeat().filter((x) => x.orderId === o.id);
@@ -128,7 +129,7 @@ describe("weighing it automatically (nothing prints)", () => {
     expect(store.listSliceJobs({ orderId: o.id })).toEqual([]);
     expect(newOrderWake(none)).toMatch(/could not start \(No printer reported .*\)\. Prepare it: .* ask the operator/);
     expect(newOrderWake(null)).toMatch(/^A customer just placed this order through the order form\. Prepare it: .*ask the operator/);
-    expect(customerDesignStatus(store.getOrder(o.id)!)).toEqual({ state: "check" });
+    expect(designOf(store.getOrder(o.id)!)).toMatchObject({ state: "check", gramsPerPiece: null });
   });
 
   it("the sliced weight becomes the grams per unit (one piece), by the slicer, and the Chief is woken once to price it", async () => {
@@ -146,7 +147,7 @@ describe("weighing it automatically (nothing prints)", () => {
     expect(afterAutoWeigh(job!.id)).toBe(false); // once
     expect(wake).toHaveBeenCalledTimes(1);
     expect(wake.mock.calls[0]).toEqual([o.id, "The studio's slicer weighed the customer's design: 16.4 g per unit, single colour (slicerGrams). Price it by weight and continue."]);
-    expect(customerDesignStatus(after)).toEqual({ state: "weighed", gramsPerPiece: 16.4 });
+    expect(designOf(after)).toMatchObject({ state: "weighed", gramsPerPiece: 16.4 });
     // The quantity multiplies it; the note's "2 g" is never used.
     expect(after.quantity).toBe(3);
   });
@@ -200,7 +201,7 @@ describe("weighing it automatically (nothing prints)", () => {
     expect(afterAutoWeigh(id)).toBe(true);
     expect(wake.mock.calls[0][1]).toBe("The automatic weighing of the customer's design did not finish (Slicing failed (code -77)). Ask the operator for the grams per unit from the slicer.");
     expect(store.listLog(o.id).at(-1)).toMatchObject({ tool: "auto_weigh_result", ok: false, output: { state: "failed", error: "Slicing failed (code -77)" } });
-    expect(customerDesignStatus(store.getOrder(o.id)!)).toEqual({ state: "check" });
+    expect(designOf(store.getOrder(o.id)!)).toMatchObject({ state: "check", gramsPerPiece: null });
     const f = checkHeartbeat().find((x) => x.orderId === o.id)!;
     expect(f).toMatchObject({ key: `needs_price:${o.id}`, wake: true });
     expect(f.text).toMatch(/automatic weighing of the customer's design did not finish\. Ask the operator/);
@@ -229,10 +230,10 @@ describe("weighing it automatically (nothing prints)", () => {
     studio();
     noteSlicerPoll();
     const o = order();
-    expect(customerDesignStatus(o)).toBeNull();
+    expect(designOf(o)).toBeNull();
     const d = await addCustomerDesign(o.id, { filename: "Clip.stl", bytes: ASCII_STL });
     store.saveOrder({ ...store.getOrder(o.id)!, status: "PLAN_CHOSEN" });
-    expect(customerDesignStatus(store.getOrder(o.id)!)).toBeNull();
+    expect(designOf(store.getOrder(o.id)!)).toMatchObject({ state: "weighing", estimate: null }); // still theirs to see, no estimate
     const r = requestSlice({ orderId: o.id, attachmentId: d.attachment!.id, printerId: "a1", tray: 1, by: AUTO_WEIGH_BY, actor: "system" });
     expect(r).toMatchObject({ ok: false, status: 409, error: "Order is PLAN_CHOSEN; nothing to slice now" });
   });
@@ -275,5 +276,82 @@ describe("weighing it automatically (nothing prints)", () => {
     expect(row).toMatchObject({ ok: false, output: { error: "The design could not be stored" } });
     expect(JSON.stringify(row)).not.toMatch(/ENOSPC|kesuni\/files/);
     expect(newOrderWake(d)).toMatch(/^A customer just placed this order through the order form\. Prepare it: .*ask the operator/);
+  });
+});
+
+describe("what the customer sees of their design (the order page's \"Your design\")", () => {
+  const KEYS = ["name", "bytes", "sizeMm", "state", "gramsPerPiece", "printMinutesPerPiece", "material", "colourName", "colourHex", "estimate", "priced"];
+
+  it("weighed: their file, its size, weight, print time, the spool, and the estimate the quote by weight gives; nothing else", async () => {
+    studio();
+    noteSlicerPoll();
+    const o = order({ material: "PLA", colors: [{ type: "PLA", color: "#FEC600" }] });
+    const { weighing } = await addCustomerDesign(o.id, { filename: "Clip.stl", bytes: ASCII_STL });
+    await slicedBack(weighing!.ok ? weighing!.job.id : "");
+    const d = designOf(store.getOrder(o.id)!)!;
+    expect(Object.keys(d).sort()).toEqual([...KEYS].sort());
+    expect(d).toEqual({
+      name: "Clip.stl", bytes: ASCII_STL.byteLength, sizeMm: [1, 1, 0], state: "weighed", gramsPerPiece: 16.4, printMinutesPerPiece: 25,
+      material: "PLA", colourName: "Yellow", colourHex: "#FEC600",
+      // 16.4 g × Rp1.500 = Rp24.600, rounded up to Rp25.000 per piece, × 3 pieces
+      estimate: { unitIdr: 25_000, totalIdr: 75_000, usdc: expect.stringMatching(/^\d+(\.\d+)?$/) }, priced: false,
+    });
+    // The very numbers Kesuni's quote by weight gives for the same grams.
+    const q = quoteByWeight(o.id, { gramsPerUnit: 16.4, source: "slicer", by: "agent" });
+    if (!q.ok) throw new Error(q.error);
+    expect(d.estimate).toEqual({ unitIdr: q.price.unitPriceIdr, totalIdr: q.price.totalIdr, usdc: microToUsdc(q.quote.priceMicro) });
+    // The whole customer view: no printer, tray, sliced file, cost per gram or margin anywhere in the design.
+    const view = customerView(store.getOrder(o.id)!, o.customerToken!);
+    expect(JSON.stringify(view.design)).not.toMatch(/a1|tray|printer|gcode|cost|margin|perGram|F-[0-9a-f]{8}|Slicer/i);
+  });
+
+  it("a person's grams: weighed and estimated in the order's material, without the automatic slice's time or spool", async () => {
+    process.env.KESUNI_PRICE_PER_GRAM_IDR_PETG = "2000";
+    try {
+      const o = order({ material: "PETG" });
+      await addCustomerDesign(o.id, { filename: "Clip.obj", bytes: OBJ }); // no PETG reports now: not weighed automatically
+      expect(designOf(store.getOrder(o.id)!)).toMatchObject({ state: "check", gramsPerPiece: null, estimate: null, sizeMm: [1, 1, 0] });
+      expect(setSlicerGrams(o.id, { gramsPerUnit: 10, source: "Bambu Studio, plate 1", by: "Khelda" }).ok).toBe(true);
+      expect(designOf(store.getOrder(o.id)!)).toMatchObject({
+        state: "weighed", gramsPerPiece: 10, printMinutesPerPiece: null, material: null, colourName: null, colourHex: null,
+        estimate: { unitIdr: 20_000, totalIdr: 60_000 },
+      });
+    } finally {
+      delete process.env.KESUNI_PRICE_PER_GRAM_IDR_PETG;
+    }
+  });
+
+  it("once Kesuni's price exists the card is short: no estimate (the price block shows the real price), no new design", async () => {
+    studio();
+    noteSlicerPoll();
+    const o = order();
+    const { weighing } = await addCustomerDesign(o.id, { filename: "Clip.stl", bytes: ASCII_STL });
+    expect(designOf(store.getOrder(o.id)!)).toMatchObject({ state: "weighing", gramsPerPiece: null, estimate: null, priced: false });
+    await slicedBack(weighing!.ok ? weighing!.job.id : "");
+    const q = quoteByWeight(o.id, { gramsPerUnit: 16.4, source: "slicer", by: "agent" });
+    if (!q.ok) throw new Error(q.error);
+    store.saveOrder({ ...store.getOrder(o.id)!, chosenQuoteId: q.quote.id, status: "PLAN_CHOSEN" });
+    expect(designOf(store.getOrder(o.id)!)).toMatchObject({ state: "weighed", gramsPerPiece: 16.4, estimate: null, priced: true });
+    expect(customerView(store.getOrder(o.id)!, o.customerToken!).canAddDesign).toBe(false);
+  });
+
+  it("only the customer's own STL or OBJ: none for a file a person added or a 3MF under the customer's name", async () => {
+    const o = order();
+    await addAttachment(o.id, { kind: "design", filename: "Kesuni.stl", bytes: ASCII_STL, uploadedBy: "Khelda" });
+    await addAttachment(o.id, { kind: "design", filename: "clip.3mf", bytes: PROJECT, uploadedBy: CUSTOMER_UPLOAD_BY });
+    expect(designOf(store.getOrder(o.id)!)).toBeNull();
+    expect(customerView(store.getOrder(o.id)!, o.customerToken!).canAddDesign).toBe(false); // a design of theirs is there (a 3MF)
+    const fresh = order();
+    expect(designOf(fresh)).toBeNull();
+    expect(customerView(fresh, fresh.customerToken!).canAddDesign).toBe(true);
+  });
+
+  it("the Chief hears a design added later in the same words, with only the first line changed", async () => {
+    studio();
+    noteSlicerPoll();
+    const d = await addCustomerDesign(order().id, { filename: "Clip.stl", bytes: ASCII_STL });
+    expect(newOrderWake(d, "later")).toBe(newOrderWake(d).replace(
+      "A customer just placed this order through the order form with their own design", "The customer just added their own design to this order on their order page"));
+    expect(newOrderWake(d, "later")).toMatch(/^The customer just added their own design to this order on their order page\. The studio's slicer is weighing it/);
   });
 });

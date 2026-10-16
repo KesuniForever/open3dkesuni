@@ -10,6 +10,9 @@ import { CUSTOMER_UPLOAD_BY } from "@/lib/file-rules";
 import { POST as createOrder } from "./c/route";
 import { GET as customerView } from "./c/[token]/route";
 import { GET as customerFile } from "./c/[token]/files/[fileId]/route";
+import { GET as customerDesign } from "./c/[token]/design/route";
+import { idrToMicro } from "@/lib/costing";
+import { microToUsdc } from "@/lib/policy";
 import { GET as queue } from "./slicer/queue/route";
 import { POST as queueItem } from "./slicer/queue/[id]/route";
 import { POST as result } from "./slicer/jobs/[id]/result/route";
@@ -101,16 +104,27 @@ describe("POST /api/c with the customer's design", () => {
     expect(store.getOrder(o.id)!.slicerGrams).toMatchObject({ gramsPerUnit: 12.5, by: "slicer" });
     expect(wake).toHaveBeenLastCalledWith(o.id, "The studio's slicer weighed the customer's design: 12.5 g per unit, single colour (slicerGrams). Price it by weight and continue.");
 
-    // The customer sees the grams per piece, never the file.
+    // The customer sees their own design and what the slicer found: weight, time, spool, the estimate by weight.
+    // Never the sliced file, a file id or path, the printer or tray, cost or margin.
     const token = body.link.slice(3);
     const view = await (await customerView(new Request("http://x"), { params: Promise.resolve({ token }) })).json();
-    expect(view.design).toEqual({ state: "weighed", gramsPerPiece: 12.5 });
+    expect(view.design).toEqual({
+      name: "Clip.stl", bytes: STL.byteLength, sizeMm: [1, 1, 0], state: "weighed", gramsPerPiece: 12.5, printMinutesPerPiece: 25,
+      material: "PLA", colourName: "Yellow", colourHex: "#FEC600",
+      // 12.5 g × Rp1.500 = Rp18.750, rounded up to Rp19.000 per piece, × 2
+      estimate: { unitIdr: 19_000, totalIdr: 38_000, usdc: microToUsdc(idrToMicro(38_000)) }, priced: false,
+    });
+    expect(view.canAddDesign).toBe(false);
     const text = JSON.stringify(view);
+    const sliced = store.listAttachments(o.id).find((a) => a.uploadedBy !== CUSTOMER_UPLOAD_BY)!;
+    expect(sliced.filename).toMatch(/\.gcode\.3mf$/);
+    expect(text).not.toContain(sliced.filename);
     for (const a of store.listAttachments(o.id)) {
       expect(text).not.toContain(a.id);
-      expect(text).not.toContain(a.filename);
       expect(text).not.toContain(a.storageKey);
     }
+    expect(text).not.toMatch(/printerId|"tray"|margin|gcode|Bambu Studio|Slicer \(automatic|"a1"/i);
+    expect(JSON.stringify(view.design)).not.toMatch(/cost|perGram/i);
   });
 
   it("checks the invite before anything is stored, and the header's before the body is read", async () => {
@@ -228,7 +242,7 @@ describe("POST /api/c with the customer's design", () => {
     expect((await badColours.json()).reasons).toEqual(["Colours must be a list"]);
   });
 
-  it("the customer's design is never served back on their order link", async () => {
+  it("the customer's design comes back only through its own route on their order link (for the 3D view), never as an order file", async () => {
     await queue(new Request("http://x/api/slicer/queue", { headers: bridge }));
     const body = await (await send({}, { name: "Clip.stl", bytes: STL })).json();
     const [o] = orders();
@@ -237,7 +251,10 @@ describe("POST /api/c with the customer's design", () => {
     const res = await customerFile(new Request("http://x"), { params: Promise.resolve({ token, fileId: design.id }) });
     expect(res.status).toBe(404);
     const view = await (await customerView(new Request("http://x"), { params: Promise.resolve({ token }) })).json();
-    expect(view.design).toEqual({ state: "weighing" });
+    expect(view.design).toMatchObject({ state: "weighing", name: "Clip.stl", gramsPerPiece: null, estimate: null });
     expect(JSON.stringify(view)).not.toContain(design.id);
+    const own = await customerDesign(new Request("http://x"), { params: Promise.resolve({ token }) });
+    expect(own.status).toBe(200);
+    expect(new Uint8Array(await own.arrayBuffer())).toEqual(STL);
   });
 });

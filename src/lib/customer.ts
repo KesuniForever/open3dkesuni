@@ -8,14 +8,16 @@ import { deposit, openEscrow, refund, release, syncEscrow, topUpCustomer } from 
 import { circle } from "./circle";
 import { microToUsdc } from "./policy";
 import { notReadyReason } from "./printer/actions";
-import { idrPerUsdc } from "./costing";
+import { idrPerUsdc, idrToMicro } from "./costing";
 import { agreementCurrent, costingForChosen, gramPricingForChosen } from "./agreement";
 import { isTestnetChain, publicNetwork, type PublicNetwork } from "./network";
 import { quoteIdr } from "./owner-rules";
 import { wakeChief } from "./agent/chief";
 import { nameOf, parseColorChoices, studioPalette, type PaletteColor } from "./colors";
-import { MATERIALS, orderMaterial } from "./pricing";
-import { customerDesignStatus, type CustomerDesignStatus } from "./auto-weigh";
+import { MATERIALS, orderMaterial, priceByWeight, pricingConfig, pricingFor } from "./pricing";
+import { customerDesignClosed, customerDesignFile } from "./auto-weigh";
+import { autoWeighState } from "./slicing";
+import type { Vec3 } from "./mesh";
 import type { ActualReport, ChainTx, ColorChoice, Escrow, Material, Order, Review, Spec } from "./types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
@@ -62,9 +64,38 @@ export interface CustomerView {
   /** The material and colours the customer picked (English names: pages translate them). They may change them while
    *  Kesuni has not priced the order yet (canChange); the material is fixed once a quote exists (materialLocked). */
   choice: { material: Material | null; colors: ColorChoice[]; canChange: boolean; materialLocked: boolean };
-  /** The design the customer sent with the order, while Kesuni prepares the price: being weighed, its grams per piece,
-   *  or Kesuni checks it. Never the file itself, its id or its name. Null without a design of their own. */
-  design: CustomerDesignStatus | null;
+  /** The design the customer sent themselves, as their order page shows it. Null without a design of their own. */
+  design: CustomerDesignView | null;
+  /** The customer may still add their design on the order page ("Add your design": POST /api/c/<token>/design). */
+  canAddDesign: boolean;
+}
+
+/**
+ * The customer's own design (order form or "Add your design") on their order page: only what is theirs or about their
+ * own piece. Never cost, margin, printer or tray, slicer settings, the sliced file, file ids, storage paths or names of
+ * people at Kesuni. The file itself comes from GET /api/c/<token>/design (the 3D view is drawn in their browser).
+ */
+export interface CustomerDesignView {
+  /** Their own file name, as they sent it (cleaned). */
+  name: string;
+  /** Its size in bytes: a phone asks before downloading a big model for the 3D view. */
+  bytes: number;
+  /** Width, depth and height in mm, read when it was stored; null for older files (the page measures it then). */
+  sizeMm: Vec3 | null;
+  /** Being weighed by the studio's slicer, weighed (grams known), or Kesuni checks the file (a person weighs it). */
+  state: "weighing" | "weighed" | "check";
+  /** The order's grams per piece (what the price is made from). */
+  gramsPerPiece: number | null;
+  /** The automatic weighing's print time for one piece, in minutes: an estimate. Only when its grams are the order's. */
+  printMinutesPerPiece: number | null;
+  /** The spool it was weighed with: material, English colour name (pages translate it) and "#RRGGBB". */
+  material: Material | null;
+  colourName: string | null;
+  colourHex: string | null;
+  /** The official price by weight for the order's quantity, until Kesuni's own price exists. Not a quote. */
+  estimate: { unitIdr: number; totalIdr: number; usdc: string } | null;
+  /** Kesuni's price exists (the price block shows it): the page keeps this card short. */
+  priced: boolean;
 }
 
 export function customerView(order: Order, token: string): CustomerView {
@@ -115,8 +146,37 @@ export function customerView(order: Order, token: string): CustomerView {
     overTolerance: overTolerance(order) !== null,
     review: order.review ?? null,
     choice: choiceOf(order),
-    design: customerDesignStatus(order),
+    design: designOf(order),
+    canAddDesign: customerDesignClosed(order) === null,
   };
+}
+
+/** The customer's own design and what the automatic weighing found, customer-safe (see CustomerDesignView). */
+export function designOf(order: Order, now = Date.now()): CustomerDesignView | null {
+  const file = customerDesignFile(order.id);
+  if (!file) return null;
+  const weigh = autoWeighState(order.id, now);
+  const grams = order.slicerGrams?.gramsPerUnit ?? null;
+  // The automatic slice whose weight the order's grams are (src/lib/slicing.ts autoGramsFromSlice names it in the source).
+  const job = weigh?.state === "done" && order.slicerGrams?.source.startsWith(`slicer (automatic), ${weigh.job.id},`) ? weigh.job : null;
+  const sec = job?.result?.predictionSec;
+  const priced = Boolean(order.chosenQuoteId);
+  return {
+    name: file.filename, bytes: file.size, sizeMm: file.mesh?.sizeMm ?? null,
+    state: grams !== null ? "weighed" : weigh?.state === "weighing" ? "weighing" : "check",
+    gramsPerPiece: grams,
+    printMinutesPerPiece: sec && sec > 0 ? Math.max(1, Math.round(sec / 60)) : null,
+    material: job?.material ?? null, colourName: job ? nameOf(job.color) : null, colourHex: job?.color ?? null,
+    estimate: grams !== null && !priced && order.status === "CREATED" ? estimateFor(order, grams) : null,
+    priced,
+  };
+}
+
+/** The price Kesuni's quote by weight would give (src/lib/agreement.ts quoteByWeight): the order's material and quantity. */
+function estimateFor(order: Order, gramsPerUnit: number): CustomerDesignView["estimate"] {
+  const r = priceByWeight(gramsPerUnit, order.quantity, order.slicerGrams?.colorMode ?? "single", pricingFor(pricingConfig(), orderMaterial(order)));
+  if (!r.ok) return null;
+  return { unitIdr: r.price.unitPriceIdr, totalIdr: r.price.totalIdr, usdc: microToUsdc(idrToMicro(r.price.totalIdr)) };
 }
 
 /** While the customer may still change colours but a quote exists, the material is the one it was priced in

@@ -1,13 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { CustomerView as View } from "@/lib/customer";
 import { dateLocale, type Locale, type T } from "@/i18n/core";
 import { useLocale, useT } from "@/i18n/client";
 import { CustTop, bold } from "../CustTop";
 import ColorPicker, { ChoiceSummary, keepOffered, swatchesFor, useStudioColors, type Choice } from "../ColorPicker";
+import ModelPreview from "../ModelPreview";
+import DesignPicker, { DesignInfo } from "../DesignPicker";
+import Info from "@/app/components/Info";
 import { tLib } from "@/lib/lib-text";
 import { finishingText } from "@/lib/spec-choices";
+import { duration } from "@/lib/machines";
 import { rememberIfNew } from "../my-orders";
 
 // English text is the key; useT() gives the Indonesian when the visitor chose ID.
@@ -54,19 +58,6 @@ function headline(v: View, t: T): { title: string; sub: string } {
   return { title: t("Payment safe in escrow"), sub: t("Your order is waiting for its turn on a printer.") };
 }
 
-/** The design the customer sent with the order, while Kesuni prepares the price: grams only, never cost or margin. */
-function DesignStatus({ d, t, locale }: { d: NonNullable<View["design"]>; t: T; locale: Locale }) {
-  if (d.state === "weighed") {
-    const g = d.gramsPerPiece.toLocaleString(dateLocale(locale), { maximumFractionDigits: 1 });
-    return <div className="alert ok" role="status">{t("Your design: {g} g per piece", { g })}</div>;
-  }
-  return (
-    <div className="alert" role="status" style={{ background: "var(--tint)" }}>
-      {d.state === "weighing" ? t("Weighing your design…") : t("Kesuni will check your file")}
-    </div>
-  );
-}
-
 export default function CustomerView({ token }: { token: string }) {
   const t = useT();
   const locale = useLocale();
@@ -76,6 +67,8 @@ export default function CustomerView({ token }: { token: string }) {
   const [busy, setBusy] = useState(false);
   // English texts (from this page or the server); translated when shown.
   const [error, setError] = useState<{ text: string; reasons?: string[] } | null>(null);
+  // The design sent with "Add your design" on this page, kept for its 3D view.
+  const [sent, setSent] = useState<File | null>(null);
   const fresh = useSyncExternalStore(noop, () => new URLSearchParams(window.location.search).has("new"), () => false);
 
   const load = useCallback(async () => {
@@ -148,7 +141,6 @@ export default function CustomerView({ token }: { token: string }) {
         </p>
         <h1>{h.title}</h1>
         <p className="muted">{h.sub}</p>
-        {v.design && <DesignStatus d={v.design} t={t} locale={locale} />}
 
         {printingNow && v.printing && (
           <div className="cust-progress" aria-label={t("Print progress {n} percent", { n: Math.round(v.printing.percent) })}>
@@ -196,6 +188,16 @@ export default function CustomerView({ token }: { token: string }) {
           </div>
         )}
       </section>
+
+      {v.design && (
+        <DesignCard d={v.design} quantity={v.order.quantity} t={t} locale={locale}
+          // The file just sent from this page is drawn from memory: no second download of the same model.
+          preview={<ModelPreview source={sent && sent.size === v.design.bytes ? sent : `/api/c/${token}/design`} name={v.design.name}
+            sizeMm={v.design.sizeMm} bytes={v.design.bytes} color={designColour(v)} compact={v.design.priced} />} />
+      )}
+      {!v.design && v.canAddDesign && (
+        <AddDesign token={token} color={v.choice.colors[0]?.color ?? null} onSent={async (file) => { setSent(file); await load(); }} />
+      )}
 
       {(v.choice.canChange || v.choice.material || v.choice.colors.length > 0) && (
         <ChoiceCard token={token} choice={v.choice} onSaved={load} />
@@ -315,6 +317,113 @@ export default function CustomerView({ token }: { token: string }) {
         <p>{t("Your address and phone number are not stored here and are never sent to the AI. Money can only move through the safety rules (policy), never at the AI's will.")}</p>
       </footer>
     </main>
+  );
+}
+
+/** The model's colour in 3D: the customer's own choice first. The spool it was weighed with may be another colour (the
+ *  nearest loaded one): the colour does not change the weight, and Kesuni prints the colour the customer chose. */
+export const designColour = (v: Pick<View, "choice" | "design">): string | null =>
+  v.choice.colors[0]?.color ?? v.design?.colourHex ?? null;
+
+const DESIGN_BADGE: Record<NonNullable<View["design"]>["state"], { tone: string; text: string }> = {
+  weighing: { tone: "testnet", text: "Weighing…" },
+  weighed: { tone: "ok", text: "Weighed" },
+  check: { tone: "", text: "Kesuni checks your file" },
+};
+
+/**
+ * "Your design": the model the customer sent themselves, in 3D (`preview`), with its size and what the studio's slicer
+ * found (weight, print time, the spool it was weighed with) and, until Kesuni's own price exists, the estimated price by
+ * weight. Nothing about cost, margin, printers or files. Once the price is ready it shrinks to the model and its size.
+ */
+export function DesignCard({ d, quantity, preview, t, locale }: {
+  d: NonNullable<View["design"]>; quantity: number; preview: ReactNode; t: T; locale: Locale;
+}) {
+  const grams = (n: number) => n.toLocaleString(dateLocale(locale), { maximumFractionDigits: 1 });
+  const badge = d.priced ? null : DESIGN_BADGE[d.state];
+  const g = d.priced ? null : d.gramsPerPiece;
+  const min = d.printMinutesPerPiece;
+  return (
+    <section className="card dc">
+      <div className="cc-card-head">
+        <h2>{t("Your design")} <Info>{t("Your own file, shown in your browser: drag to turn it. The studio's slicer weighs it with standard settings to set the price.")} {t("The colour does not change the weight.")}</Info></h2>
+        {badge && <span className={`badge ${badge.tone}`}>{t(badge.text)}</span>}
+      </div>
+      {preview}
+      {g !== null && (
+        <dl className="calc-kv">
+          <div><dt>{t("Weight")}</dt><dd>{t("{g} g per piece", { g: grams(g) })}</dd></div>
+          {min !== null && (
+            <div>
+              <dt>{t("Print time (estimate)")}</dt>
+              <dd>
+                {t("{time} per piece", { time: duration(min, false, t) })}
+                {quantity > 1 && <small>{t("{time} for {n} pieces", { time: duration(min * quantity, false, t), n: quantity })}</small>}
+              </dd>
+            </div>
+          )}
+          {d.material && (
+            <div>
+              <dt>{t("Weighed with")}</dt>
+              <dd className="dc-spool">{d.colourHex && <span className="cc-dot" style={{ background: d.colourHex }} />}{d.material}{d.colourName && ` ${t(d.colourName)}`}</dd>
+            </div>
+          )}
+          {d.estimate && (
+            <div>
+              <dt>{t("Estimated price")}</dt>
+              <dd>
+                {rupiah(d.estimate.totalIdr)}
+                <small>{quantity > 1 && `${t("{price} per piece", { price: rupiah(d.estimate.unitIdr) })} · `}≈ {d.estimate.usdc} USDC</small>
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {g !== null && d.estimate && <p className="cust-note dc-note">{t("Estimate · the final price comes with your agreement")}</p>}
+    </section>
+  );
+}
+
+/** "Add your design": the customer sends their model now, while Kesuni prepares the price (POST /api/c/<token>/design). */
+function AddDesign({ token, color, onSent }: { token: string; color: string | null; onSent: (file: File) => Promise<void> }) {
+  const t = useT();
+  const [file, setFile] = useState<File | null>(null);
+  // English texts (this page's or the server's); translated when shown.
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function send() {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.set("design", file);
+      const res = await fetch(`/api/c/${token}/design`, { method: "POST", body: form });
+      const data: { error?: string; reasons?: string[] } = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data.error === "Your design cannot be used" ? data.reasons?.[0] : data.error) ?? "Connection lost. Please try again.");
+        // A refused file comes off, so the next Send does not try it again.
+        if (res.status === 400 || res.status === 413) setFile(null);
+        return;
+      }
+      setFile(null);
+      await onSent(file);
+    } catch {
+      setError("Connection lost. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>{t("Add your design")} <DesignInfo /></h2>
+      <DesignPicker file={file} onFile={setFile} error={error} onError={setError} label={t("Add your design")} disabled={busy} color={color} />
+      <button type="button" className="primary cust-cta dc-send" disabled={busy || !file} onClick={send}>
+        {busy ? t("Sending your design…") : t("Send design")}
+      </button>
+    </section>
   );
 }
 

@@ -23,7 +23,7 @@ const status = (stage: OrderStage, text: string, tone: OrderStatus["tone"], your
   ({ stage, text, tone, yourTurn, percent: null });
 
 export function orderStatus(
-  v: Pick<CustomerView, "order" | "escrow" | "paying" | "printing" | "printedOn"> & { design?: CustomerView["design"] },
+  v: Pick<CustomerView, "order" | "escrow" | "paying" | "printing" | "printedOn"> & { design?: Pick<NonNullable<CustomerView["design"]>, "state"> | null },
 ): OrderStatus {
   const s = v.order.status;
   const funded = Boolean(v.escrow && v.escrow.state !== "AWAITING_DEPOSIT");

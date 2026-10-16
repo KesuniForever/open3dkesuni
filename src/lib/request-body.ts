@@ -34,6 +34,17 @@ export async function readCapped(req: Request, max: number): Promise<Uint8Array 
 /** The request's media type, lower case, without parameters ("multipart/form-data"). */
 export const mediaType = (req: Request): string => (req.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
 
+/** A multipart form body of at most `max` bytes: null when it cannot be read as a form, "too-large" past the limit. */
+export async function readFormCapped(req: Request, max: number): Promise<FormData | null | "too-large"> {
+  const bytes = await readCapped(req, max);
+  if (bytes === "too-large") return bytes;
+  try {
+    return await new Response(bytes as BodyInit, { headers: { "content-type": req.headers.get("content-type") ?? "" } }).formData();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A JSON object body of at most `max` bytes: null when it is not application/json (a form on another site cannot send
  * that without a CORS check) or not an object, "too-large" past the limit.

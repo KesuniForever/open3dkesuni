@@ -9,6 +9,7 @@ import path from "node:path";
 import * as store from "./store";
 import type { Fail } from "./actions";
 import { parse3mf } from "./threemf";
+import { meshSizeAsync } from "./mesh";
 import { isPersonName, ONLINE_MS } from "./printer/control";
 import { expireStale } from "./printer/jobs";
 import { qcPhotoLocked } from "./file-rules";
@@ -93,6 +94,8 @@ export async function addAttachment(orderId: string, input: {
   }
   if (r.length) return fail(400, "File refused", r);
 
+  // An STL or OBJ: its size in mm (the customer's order page shows it), read in steps so other requests are not held up.
+  const mesh = ext === ".stl" || ext === ".obj" ? await meshSizeAsync(filename, input.bytes).catch(() => null) : null;
   const id = `F-${randomUUID().slice(0, 8)}`;
   const storageKey = `${id}${ext}`;
   await fileStore().put(storageKey, input.bytes);
@@ -101,6 +104,7 @@ export async function addAttachment(orderId: string, input: {
     uploadedBy: input.uploadedBy.trim(), at: new Date().toISOString(), storageKey,
     // A Bambu Studio file: which plates can print, their time, weight and colours (read in memory, never unpacked to disk).
     ...(ext === ".3mf" ? { parsed3mf: parse3mf(input.bytes) } : {}),
+    ...(mesh ? { mesh } : {}),
   };
   store.saveAttachment(attachment);
 
