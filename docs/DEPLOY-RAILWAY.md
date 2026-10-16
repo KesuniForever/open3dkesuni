@@ -1,8 +1,8 @@
 # Deploying Open3DKesuni on Railway
 
 One long-running Node server (`next start`) on Railway, with the SQLite database and the uploaded files on a
-Railway **volume**. The printer bridge stays on the studio PC. Step-by-step for the owners (Indonesian):
-`L:\Tameion\catatan\panduan-railway.md`.
+Railway **volume**. The printer bridge stays on the studio PC. The owners keep a step-by-step guide in Indonesian outside
+this repo (in their notes folder, `catatan/panduan-railway.md`).
 
 | Runs on Railway | Stays on the studio PC |
 |---|---|
@@ -75,7 +75,10 @@ The fastest way: Variables, Raw Editor, paste the studio PC's `.env.local`, then
 
 **Optional (have defaults)**: `CIRCLE_BLOCKCHAIN` (ARC-TESTNET), `KESUNI_HEARTBEAT_SECONDS` (120; 0 = off),
 `KESUNI_DAILY_REVIEW_HOUR` (21, Jakarta time; `off`), `KESUNI_AGENT_MODE`, `KESUNI_AGENT_MODEL`,
-`KESUNI_MAX_WAKES_PER_HOUR`, `IDR_PER_USDC`, `KESUNI_PRICE_PER_GRAM_IDR`, `KESUNI_COST_PER_GRAM_IDR`,
+`KESUNI_MAX_WAKES_PER_HOUR`, `IDR_PER_USDC`, `DEMO_VIDEO_URL` (the landing page's video; unset hides it),
+`KESUNI_WHATSAPP` (the studio's WhatsApp, digits like 62812…, for the customers' Chat button; unset hides it, so set it
+for the pilot),
+`KESUNI_PRICE_PER_GRAM_IDR`, `KESUNI_COST_PER_GRAM_IDR`,
 `KESUNI_PRICE_PER_GRAM_IDR_PETG`, `KESUNI_COST_PER_GRAM_IDR_PETG` (PLA numbers),
 `KESUNI_PRICE_ROUND_IDR`, `KESUNI_PRINT_MIN_PER_GRAM_SINGLE` (3-5), `KESUNI_PRINT_MIN_PER_GRAM_MULTI` (5-15),
 `KESUNI_HANDLING_HOURS` (1), `KESUNI_PRINTER_COUNT` (3), `KESUNI_MIN_ORDER_IDR`,

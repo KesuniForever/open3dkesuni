@@ -101,7 +101,7 @@ function OrderRow({ o, seen, locale, onForget }: { o: RememberedOrder; seen: See
       <div className="portal-order-top">
         <b>{live && live.quantity > 1 ? `${live.quantity} × ` : ""}{product}</b>
         {seen === "missing" ? <span className="badge bad">{t("Not found")}</span>
-          : live ? <span className={`badge ${live.status.tone}`}>{t(live.status.text, { pct: `${live.status.percent ?? 0}%` })}</span>
+          : live ? <span className={`badge ${live.status.tone}`}>{t(live.status.text, { pct: `${live.status.percent ?? 0}%`, ...live.status.vars })}</span>
             : <span className="badge">…</span>}
       </div>
       {live?.status.percent != null && (
@@ -124,6 +124,9 @@ function OrderRow({ o, seen, locale, onForget }: { o: RememberedOrder; seen: See
   );
 }
 
+/** What to paste, when the text holds no order link. */
+export const NOT_A_LINK = "Paste the whole link Kesuni sent you (it starts with https://).";
+
 /** Paste an order link from WhatsApp: the order is checked, kept in this list, then opened. */
 function OpenByLink() {
   const t = useT();
@@ -136,7 +139,7 @@ function OpenByLink() {
     e.preventDefault();
     setError(null);
     const link = orderLinkFrom(text);
-    if (!link) return setError("This is not an order link. An order link contains /c/ and a code.");
+    if (!link) return setError(NOT_A_LINK);
     setBusy(true);
     const x = await readOrder(link);
     setBusy(false);
@@ -150,7 +153,7 @@ function OpenByLink() {
     <section className="card">
       <form className="portal-open" onSubmit={open}>
         <label>{t("Have an order link? Paste it here")}
-          <input value={text} onChange={(e) => setText(e.target.value)} placeholder="https://…/c/…" inputMode="url" autoComplete="off" required maxLength={500} />
+          <input value={text} onChange={(e) => setText(e.target.value)} placeholder={t("Paste the link here")} inputMode="url" autoComplete="off" required maxLength={500} />
         </label>
         <button className="primary" disabled={busy || !text.trim()}>{busy ? t("Opening…") : t("Open")}</button>
       </form>

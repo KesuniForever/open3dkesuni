@@ -26,29 +26,30 @@ const card = (d: CustomerDesignView, locale: Locale = "en", quantity = 3) => ren
 );
 
 describe("\"Your design\" on the order page", () => {
-  it("weighed: the model, its size, weight, print time for one and for all, the spool and the estimate", () => {
+  it("weighed: the model, its size, weight, print time for one and for all, and the estimate in rupiah", () => {
     const html = card(WEIGHED);
     expect(text(html)).toBe([
-      "Your design", "Your own file, shown in your browser: drag to turn it. The studio's slicer weighs it with standard settings to set the price. The colour does not change the weight.", "Weighed",
+      "Your design", "Drag to turn your model. Kesuni weighs it to set the price.", "Weighed",
       "Reading your model…", "Clip (v2).stl 40 × 20 × 10.5 mm",
-      "Weight 16.4 g per piece", "Print time (estimate) 25 min per piece 1 h 15 min for 3 pieces", "Weighed with PLA Yellow",
-      "Estimated price Rp75.000 Rp25.000 per piece · ≈ 4.545454 USDC", "Estimate · the final price comes with your agreement",
+      "Weight 16.4 g per piece", "Print time (estimate) 25 min per piece 1 h 15 min for 3 pieces",
+      "Estimated price Rp75.000 Rp25.000 per piece", "Estimate · the final price comes with your agreement",
     ].join(" "));
     expect(html).toContain('class="badge ok"');
-    expect(html).toContain("background:#FEC600");
-    expect(text(html)).not.toMatch(/cost|margin|printer|tray|gcode/i);
+    // No spool, no slicer word and no USDC: the colour it was weighed with is not the customer's choice.
+    expect(text(html)).not.toMatch(/cost|margin|printer|tray|gcode|slicer|Weighed with|Yellow|USDC/i);
   });
 
   it("in Indonesian, with the decimal comma", () => {
     const t = text(card(WEIGHED, "id"));
-    for (const s of ["Desain Anda", "Sudah ditimbang", "Membaca model Anda…", "40 × 20 × 10,5 mm", "Berat 16,4 g per buah", "Ditimbang dengan PLA Kuning",
-      "Perkiraan harga Rp75.000 Rp25.000 per buah", "Warna tidak mengubah berat.", "Perkiraan · harga akhir ada di kesepakatan Anda"]) expect(t).toContain(s);
+    for (const s of ["Desain Anda", "Sudah ditimbang", "Membaca model Anda…", "40 × 20 × 10,5 mm", "Berat 16,4 g per buah",
+      "Perkiraan harga Rp75.000 Rp25.000 per buah", "Geser untuk memutar model. Kesuni menimbangnya untuk menentukan harga.",
+      "Perkiraan · harga akhir ada di kesepakatan Anda"]) expect(t).toContain(s);
+    expect(t).not.toMatch(/Ditimbang dengan|Kuning/);
   });
 
   it("one piece: no per-piece repeat; still weighing or Kesuni checks it: the badge only", () => {
     const one = text(card({ ...WEIGHED, estimate: { unitIdr: 25_000, totalIdr: 25_000, usdc: "1.515151" } }, "en", 1));
-    expect(one).toContain("Print time (estimate) 25 min per piece Weighed with");
-    expect(one).toContain("Estimated price Rp25.000 ≈ 1.515151 USDC");
+    expect(one).toContain("Print time (estimate) 25 min per piece Estimated price Rp25.000 Estimate");
     const empty = { ...WEIGHED, gramsPerPiece: null, printMinutesPerPiece: null, material: null, colourName: null, colourHex: null, estimate: null };
     const weighing = card({ ...empty, state: "weighing" });
     expect(text(weighing)).toMatch(/Weighing… Reading your model… Clip \(v2\)\.stl 40 × 20 × 10\.5 mm$/);
@@ -59,7 +60,7 @@ describe("\"Your design\" on the order page", () => {
 
   it("once priced: short (small model, name and size), no badge, no weight and no second price", () => {
     const html = card({ ...WEIGHED, estimate: null, priced: true });
-    expect(text(html)).toBe("Your design Your own file, shown in your browser: drag to turn it. The studio's slicer weighs it with standard settings to set the price. The colour does not change the weight. Reading your model… Clip (v2).stl 40 × 20 × 10.5 mm");
+    expect(text(html)).toBe("Your design Drag to turn your model. Kesuni weighs it to set the price. Reading your model… Clip (v2).stl 40 × 20 × 10.5 mm");
     expect(html).toContain('class="mp compact"');
   });
 });
@@ -101,7 +102,7 @@ describe("the 3D preview", () => {
   it("the colour: the customer's spool, black lifted so the shading shows, a soft default without one", () => {
     expect(tintOf("#000000")).toEqual([0.18, 0.18, 0.18]);
     expect(tintOf("#FFFFFF").map((c) => Math.round(c * 100))).toEqual([100, 100, 100]);
-    expect(tintOf(null)).toEqual(tintOf("#8FAE9B"));
+    expect(tintOf(null)).toEqual(tintOf("#A7ADB4")); // no colour chosen: a neutral grey
     expect(tintOf("red")).toEqual(tintOf(null));
     expect(sizeText([40, 20, 10.5], "en")).toBe("40 × 20 × 10.5 mm");
     expect(sizeText([1234.5, 2, 0.1], "id")).toBe("1.234,5 × 2 × 0,1 mm");
@@ -163,11 +164,10 @@ describe("drawing on any phone", () => {
     expect(spoiled.asked).toEqual(["webgl", "2d"]);
   });
 
-  it("the model shows in the colour the customer chose, not the spool it was weighed with", () => {
-    const view = { design: WEIGHED, choice: { material: "PLA" as const, colors: [{ type: "PLA" as const, color: "#C12E1F" }], canChange: true, materialLocked: false } };
+  it("the model shows in the colour the customer chose, never the spool it was weighed with: no choice is grey", () => {
+    const view = { choice: { material: "PLA" as const, colors: [{ type: "PLA" as const, color: "#C12E1F" }], canChange: true, materialLocked: false } };
     expect(designColour(view)).toBe("#C12E1F");
-    expect(designColour({ ...view, choice: { ...view.choice, colors: [] } })).toBe("#FEC600"); // no choice: the spool's colour
-    expect(designColour({ design: { ...WEIGHED, colourHex: null }, choice: { ...view.choice, colors: [] } })).toBeNull();
+    expect(designColour({ choice: { ...view.choice, colors: [] } })).toBeNull(); // the yellow spool it was weighed with is not shown
   });
 });
 

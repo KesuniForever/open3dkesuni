@@ -8,7 +8,7 @@ const id: Record<string, string> = {
   "An AI agent runs the order desk of a real 3D-print studio in Padang; the customer's USDC waits in escrow on Arc until they accept the part.":
     "Agen AI mengurus meja pesanan studio cetak 3D sungguhan di Padang; USDC pelanggan menunggu di escrow di Arc sampai mereka menerima hasilnya.",
 
-  "Dashboard": "Dasbor",
+  "Team login": "Login tim",
 
   // ---------- hero ----------
   "About the studio": "Tentang studio",
@@ -30,10 +30,9 @@ const id: Record<string, string> = {
   "Accepts": "Menerima",
   "Paid only after acceptance": "Dibayar hanya setelah diterima",
   "Live numbers": "Angka live",
-  "Orders handled": "Pesanan ditangani",
-  "Arc transfers verified": "Transfer Arc terverifikasi",
-  "Live from the studio. Includes practice orders and test USDC on Arc Testnet; the live page labels each one.":
-    "Langsung dari studio. Termasuk pesanan latihan dan USDC uji di Arc Testnet; halaman live menandai masing-masing.",
+  "Escrow deposits verified on Arc": "Setoran escrow terverifikasi di Arc",
+  "Live from the studio. Real orders only: the team's own tests are never counted. The deposits are test USDC on Arc Testnet.":
+    "Langsung dari studio. Hanya pesanan nyata: uji coba tim sendiri tidak pernah dihitung. Setorannya berupa USDC uji di Arc Testnet.",
 
   // ---------- the problem ----------
   "The problem": "Masalahnya",
@@ -53,7 +52,7 @@ const id: Record<string, string> = {
   "We are the studio owners.": "Kami pemilik studionya.",
   "Routine decisions done by an agent.": "Keputusan rutin dikerjakan oleh agen.",
   "The business rules in code that cannot be talked around.": "Aturan bisnis di kode yang tidak bisa dibujuk.",
-  "Money held fairly in the middle.": "Uang ditahan secara adil di tengah.",
+  "Money held apart, released only by rule.": "Uang ditahan terpisah, dicairkan hanya sesuai aturan.",
 
   // ---------- how it works ----------
   "How it works": "Cara kerjanya",
@@ -101,11 +100,10 @@ const id: Record<string, string> = {
   "Demo": "Demo",
   "See it work": "Lihat cara kerjanya",
   "Open3DKesuni demo video": "Video demo Open3DKesuni",
-  "Demo video coming soon": "Video demo segera hadir",
-  "Meanwhile, the studio is live:": "Sementara itu, studionya live:",
-  "Try the rules": "Coba aturannya",
-  "Each scenario runs the real rules engine on a practice order; practice orders are labelled simulated and never counted.":
-    "Setiap skenario menjalankan mesin aturan yang sebenarnya pada pesanan latihan; pesanan latihan diberi label simulasi dan tidak pernah dihitung.",
+  "{n} scenarios we test": "{n} skenario yang kami uji",
+  "(shown in the video)": "(ditampilkan di video)",
+  "Each one runs the real rules engine on a practice order, labelled simulated and never counted.":
+    "Masing-masing menjalankan mesin aturan yang sebenarnya pada pesanan latihan, diberi label simulasi dan tidak pernah dihitung.",
   "Priced and planned": "Harga dan rencana jadi",
   "Waits for the owner's yes": "Menunggu persetujuan pemilik",
   "Owner exception, logged": "Pengecualian pemilik, tercatat",
@@ -120,8 +118,8 @@ const id: Record<string, string> = {
   "An accessories shop (50 lighter cases)": "Toko aksesori (50 casing korek)",
   "A graphic designer (modular lamps)": "Desainer grafis (lampu modular)",
   "A boarding-house owner who sells accessories": "Pemilik kos yang juga menjual aksesori",
-  "Pilot orders are starting this week; no customer has paid through the app yet.":
-    "Pesanan pilot dimulai minggu ini; belum ada pelanggan yang membayar lewat aplikasi.",
+  "Pilot orders are running now. Payment is in rupiah, outside the app; the escrow deposits on Arc are test USDC from Kesuni's demo wallet, not customer money.":
+    "Pesanan pilot sedang berjalan. Pembayaran dalam rupiah, di luar aplikasi; setoran escrow di Arc berupa USDC uji dari dompet demo Kesuni, bukan uang pelanggan.",
   "It also helps": "Juga membantu",
   "Print studios that juggle many small orders": "Studio cetak yang mengurus banyak pesanan kecil",
   "Maker networks that share jobs between printers": "Jaringan maker yang berbagi pekerjaan antar printer",

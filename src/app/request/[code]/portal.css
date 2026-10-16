@@ -1,8 +1,9 @@
-/* Customer portal (/request/<code>): the customer layout (customer.css) with a menu under the top bar. Phone first:
-   one column, 16px gutters from .cust, nothing wider than the screen. */
+/* Customer portal (/customer, which shows /request/<code>): the customer layout (customer.css) with a menu under the top
+   bar. Phone first: one column, 16px gutters from .cust, nothing wider than the screen. */
 .portal > .tabs { margin: 0 0 16px; }
-/* The menu on a phone: five tabs wrap to two rows, each big enough for a thumb. */
+/* The menu on a phone: four tabs, each big enough for a thumb (they wrap only on the narrowest screens). */
 .portal > .tabs .tab { min-height: 40px; padding: 8px 13px; font-size: 14px; }
+@media (max-width: 400px) { .portal > .tabs .tab { padding: 8px 10px; font-size: 13.5px; } }
 .portal-main { min-width: 0; }
 /* 16px text in fields: iOS Safari zooms the page into any field with smaller text. */
 .portal input, .portal select, .portal textarea { font-size: 16px; }
@@ -11,6 +12,8 @@
 .portal-head h2 { display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 650; letter-spacing: -0.4px; margin: 0; }
 .portal-head > .muted { font-size: 12.5px; }
 .portal-alert { margin: 0 0 12px; }
+/* A quiet line (the printers not reporting, the calculator's "Don't know the weight?"): information, not an alarm. */
+.portal-quiet { margin: 0 0 12px; }
 .portal-empty { margin: 0; display: grid; gap: 12px; justify-items: start; }
 .portal-empty > p { margin: 0; }
 
@@ -22,7 +25,7 @@
 .portal-printer-top > div { min-width: 0; }
 .portal-printer-top h3 { font-size: 17px; font-weight: 650; letter-spacing: -0.3px; margin: 0; overflow-wrap: anywhere; }
 .portal-printer-top p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); display: flex; align-items: center; }
-.portal-printer.offline .portal-printer-top p { color: var(--bad); }
+.portal-printer.offline .portal-printer-top p { color: var(--muted); }
 .portal-printer .mach-pill { flex: none; max-width: 60%; white-space: normal; text-align: right; }
 /* A person at Kesuni has to act (change filament, clear the bed): the printer waits. */
 .portal-stage { margin: 0; padding: 8px 11px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: 13.5px; font-weight: 600; }
@@ -60,8 +63,9 @@
 .portal-total { margin-top: 16px; }
 .portal-total .big { overflow-wrap: anywhere; }
 .portal-note { margin-top: 12px; }
+.portal-order-now { margin-top: 14px; }
 
-/* ---------- Token research ---------- */
+/* ---------- Token research (TokenTab: shown on the Live studio page) ---------- */
 .portal-research {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: 0 0 12px; padding: 9px 12px; border-radius: 9px;
   background: var(--blue-bg); color: var(--blue); font-size: 13.5px; font-weight: 500; line-height: 1.4;

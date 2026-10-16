@@ -55,28 +55,33 @@ export function keepOffered(choice: Choice, swatches: StudioColor[]): Choice {
 
 const same = (a: Pick<ColorChoice, "type" | "color">, b: Pick<ColorChoice, "type" | "color">) => a.type === b.type && a.color === b.color;
 
-export default function ColorPicker({ value, onChange, palette, materialLocked = false, disabled = false }: {
+export default function ColorPicker({ value, onChange, palette, materialLocked = false, disabled = false, live = true }: {
   value: Choice; onChange: (c: Choice) => void;
   /** From useStudioColors(). */
   palette: StudioColor[] | null;
   /** Kesuni already priced the order in this material: only colours of it may be picked. */
   materialLocked?: boolean;
   disabled?: boolean;
+  /** A printer reports now. Without one the colours are the ones last seen, and the title says so. */
+  live?: boolean;
 }) {
   const t = useT();
   const id = useId();
   const [mode, setMode] = useState<ColorMode>(value.colors.length > 1 ? "multi" : "single");
+  // A colour of the other material replaced the colours picked so far: said once, until the next pick.
+  const [switched, setSwitched] = useState<Material | null>(null);
   const multi = mode === "multi";
   const swatches = palette ? swatchesFor(palette) : null;
   const full = value.colors.length >= MAX_COLOR_CHOICES;
 
-  const pickMaterial = (m: Material) => { if (m !== value.material) onChange({ material: m, colors: [] }); };
+  const pickMaterial = (m: Material) => { setSwitched(null); if (m !== value.material) onChange({ material: m, colors: [] }); };
   const pickMode = (m: ColorMode) => {
     setMode(m);
     if (m === "single" && value.colors.length > 1) onChange({ ...value, colors: value.colors.slice(0, 1) });
   };
   const toggle = (c: StudioColor) => {
     const pick: ColorChoice = { type: c.type, color: c.color, name: c.name };
+    setSwitched(c.type !== value.material && value.colors.length > 0 ? c.type : null);
     if (c.type !== value.material) return onChange({ material: c.type, colors: [pick] });
     if (value.colors.some((x) => same(x, c))) return onChange({ ...value, colors: value.colors.filter((x) => !same(x, c)) });
     if (!multi) return onChange({ ...value, colors: [pick] });
@@ -102,8 +107,10 @@ export default function ColorPicker({ value, onChange, palette, materialLocked =
 
       <div className="cc-palette" aria-labelledby={`${id}-a`} role="group">
         <span className="field-label" id={`${id}-a`}>
-          {t("Available colours")}{" "}
-          <Info>{t("The spools loaded in Kesuni's printers right now. A dashed circle means Kesuni still checks that colour.")}</Info>
+          {live ? t("Available colours") : t("Colours Kesuni usually has")}{" "}
+          <Info>{live
+            ? t("The spools loaded in Kesuni's printers right now. A dashed circle means Kesuni still checks that colour.")
+            : t("The printers are not reporting right now: these are the colours they had loaded last.")}</Info>
         </span>
         {swatches === null ? <p className="cust-note">{t("Loading colours…")}</p>
           : swatches.length === 0 ? <p className="cust-note">{t("No colours to show right now. Write the colour you want in the notes.")}</p>
@@ -132,9 +139,10 @@ export default function ColorPicker({ value, onChange, palette, materialLocked =
             })}
       </div>
 
+      {switched && <p className="cust-note" role="status">{t("Switched to {material}: one material per order.", { material: switched })}</p>}
       {multi && (
         <p className="cust-note">
-          {t("Multi-colour needs a 3MF file from Bambu Studio. Send it to Kesuni on WhatsApp.")}{" "}
+          {t("More than one colour? Kesuni will help you set the colours on WhatsApp.")}{" "}
           <Info>{t("An STL file has no colours. Paint the colours in Bambu Studio, then save the project as a 3MF file.")}</Info>
         </p>
       )}

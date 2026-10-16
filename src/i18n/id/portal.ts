@@ -17,7 +17,6 @@ const id: Record<string, string> = {
   "Open": "Buka",
   "Opening…": "Membuka…",
   "Have an order link? Paste it here": "Punya link pesanan? Tempel di sini",
-  "This is not an order link. An order link contains /c/ and a code.": "Ini bukan link pesanan. Link pesanan berisi /c/ dan sebuah kode.",
   // an order's status ("Done", "Refunded", "Printing {pct}" and "Quality check" are already translated)
   "Weighing your design": "Desain sedang ditimbang",
   "Preparing your price": "Harga sedang disiapkan",
@@ -25,13 +24,14 @@ const id: Record<string, string> = {
   "Processing payment": "Pembayaran diproses",
   "Waiting for a printer": "Menunggu printer",
   "Print paused": "Cetak dijeda",
-  "Ready to check": "Siap dicek",
+  "Your turn: check the item": "Giliran Anda: cek barang",
   "Refunding": "Sedang dikembalikan",
+  "Paste the whole link Kesuni sent you (it starts with https://).": "Tempel seluruh link dari Kesuni (diawali https://).",
+  "Paste the link here": "Tempel link di sini",
 
   // Machines
-  "Kesuni's printers right now, straight from the studio. Read only: nothing here can move a printer. The page updates by itself.":
-    "Printer Kesuni saat ini, langsung dari studio. Hanya untuk dilihat: dari sini tidak ada yang bisa menggerakkan printer. Halaman ini diperbarui sendiri.",
-  "The studio connection is offline. Last report {ago}.": "Koneksi studio sedang offline. Laporan terakhir {ago}.",
+  "Kesuni's printers right now.": "Printer Kesuni saat ini.",
+  "Printer status is not updating right now. You can still order as usual.": "Status printer belum ter-update. Anda tetap bisa pesan seperti biasa.",
   "Waiting for a person at Kesuni": "Menunggu tim Kesuni",
   "Colours loaded": "Warna yang terpasang",
 
@@ -46,6 +46,12 @@ const id: Record<string, string> = {
   "Enter the grams per piece as a number, for example 16": "Isi gram per buah dengan angka, misalnya 16",
   "Orders under {min} need Kesuni's approval first, so the price can take longer.":
     "Pesanan di bawah {min} perlu persetujuan Kesuni dulu, jadi harganya bisa lebih lama keluar.",
+  "Orders above {max} are also checked by the owner first, so the price can take longer.":
+    "Pesanan di atas {max} juga dicek pemilik dulu, jadi harganya bisa lebih lama keluar.",
+  "Don't know the weight? Send your 3D file in New order and Kesuni weighs it.":
+    "Tidak tahu beratnya? Kirim file 3D di Pesanan baru, Kesuni yang menimbang.",
+  "for example 16": "misalnya 16",
+  "Order now": "Pesan sekarang",
 
   // Token research
   "Research only. No token exists and nothing is sold.": "Hanya riset. Tidak ada token dan tidak ada yang dijual.",

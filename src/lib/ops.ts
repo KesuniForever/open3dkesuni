@@ -209,6 +209,9 @@ export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
     case "clear_bed": return { title: t("Bed confirmed empty by {name}", { name: str(i.by) }), line: str(o.printer) || undefined };
     // "Done (debug)" on a test order (src/lib/printer/done-debug.ts): a person, never the Chief; nothing was printed.
     case "print_done_debug": return { title: t("Print marked done for testing by {name}", { name: str(i.by) }), line: t("No real print: a test order") };
+    // The order page's real / simulated switch (src/lib/order-label.ts): a person, never the Chief.
+    case "order_label":
+      return { title: t("Marked {label} by {name}", { label: t(str(i.label)), name: str(i.by) }), line: `${t(str(o.from))} → ${t(str(o.to))}` };
     case "request_dispatch": return { title: t("Asked the dispatcher to look"), line: oneLine(str(o.thisOrder)) || undefined };
     case "agent_start": return { title: triggerTitle(str(i.trigger), t), ...detail(str(i.trigger)) };
     case "agent_thought": case "agent_summary": return { title: t("Chief summary"), ...detail(str(o.text)) };

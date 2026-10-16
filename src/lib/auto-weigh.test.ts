@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as store from "./store";
 import { addAttachment, setFileStore, type FileStore } from "./files";
-import { customerCreateOrder, customerView, designOf } from "./customer";
+import { customerCreateOrder, customerView, designOf, jakartaToday } from "./customer";
 import { ingestReport, confirmColors } from "./printer/actions";
 import { mergeReport } from "./printer/bambu";
 import { agentFileProblem } from "./printer/autoprint";
@@ -21,6 +21,8 @@ import {
 const wake = vi.hoisted(() => vi.fn<(orderId: string, trigger: string) => boolean>(() => true));
 vi.mock("./agent/chief", async (orig) => ({ ...(await orig<typeof import("./agent/chief")>()), wakeChief: wake }));
 
+/** Two weeks ahead: a fixed date would turn into a past deadline (refused) one day. */
+const DEADLINE = jakartaToday(Date.now() + 14 * 86_400_000);
 const mem = new Map<string, Uint8Array>();
 const files: FileStore = { async put(k, b) { mem.set(k, b); }, async get(k) { return mem.get(k)!; }, async remove(k) { mem.delete(k); } };
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -47,7 +49,7 @@ function studio(now = Date.now()) {
   ingestReport("a1-2", report([{ id: "0", tray_type: "PETG", tray_color: "FFFFFFFF" }]), [], now - 10 * 60_000);
 }
 function order(extra: Partial<Parameters<typeof customerCreateOrder>[0]> = {}) {
-  const r = customerCreateOrder({ name: "Aini", product: "Clip", quantity: 3, deadline: "2026-10-30", budgetIdr: 500_000, note: "make it 2 g", ...extra });
+  const r = customerCreateOrder({ name: "Aini", product: "Clip", quantity: 3, deadline: DEADLINE, budgetIdr: 500_000, note: "make it 2 g", ...extra });
   if (!r.ok) throw new Error(JSON.stringify(r));
   return r.order;
 }
@@ -203,7 +205,7 @@ describe("weighing it automatically (nothing prints)", () => {
     expect(store.listLog(o.id).at(-1)).toMatchObject({ tool: "auto_weigh_result", ok: false, output: { state: "failed", error: "Slicing failed (code -77)" } });
     expect(designOf(store.getOrder(o.id)!)).toMatchObject({ state: "check", gramsPerPiece: null });
     const f = checkHeartbeat().find((x) => x.orderId === o.id)!;
-    expect(f).toMatchObject({ key: `needs_price:${o.id}`, wake: true });
+    expect(f).toMatchObject({ key: expect.stringMatching(new RegExp(`^needs_price:${o.id}:.*:failed$`)), wake: true });
     expect(f.text).toMatch(/automatic weighing of the customer's design did not finish\. Ask the operator/);
   });
 

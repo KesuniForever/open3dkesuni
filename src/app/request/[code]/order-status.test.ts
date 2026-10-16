@@ -43,8 +43,14 @@ describe("order status in My orders", () => {
     expect(orderStatus(view("PLAN_CHOSEN", { budgetRaised: { toIdr: 2_500_000 } })).stage).toBe("price");
   });
 
-  it("an unpaid order is waiting for payment before anything else, as on the order page", () => {
-    expect(orderStatus(view("EVIDENCE_SUBMITTED"))).toMatchObject({ stage: "price", yourTurn: true });
+  it("printed before it was paid: the stage follows the order, the payment stays the customer's turn", () => {
+    expect(orderStatus(view("EVIDENCE_SUBMITTED"))).toEqual({ stage: "unpaid", text: "Payment still open", tone: "warn", yourTurn: true, percent: null });
+    expect(orderStatus(view("IN_PRODUCTION"))).toMatchObject({ stage: "unpaid", text: "Payment still open", yourTurn: true });
+    expect(orderStatus(view("IN_PRODUCTION", { printing: printing("RUNNING") }))).toMatchObject({ stage: "printing", percent: 46, yourTurn: true });
+    expect(orderStatus(view("IN_PRODUCTION", { printedOn: "A1 Combo #1" }))).toMatchObject({ stage: "checking", yourTurn: true });
+    // Paying: processing, whatever the order does; the price itself is only "Price ready" before production.
+    expect(orderStatus(view("IN_PRODUCTION", { escrow: escrow("AWAITING_DEPOSIT"), paying: true })).stage).toBe("paying");
+    expect(orderStatus(view("PLAN_CHOSEN")).text).toBe("Price ready");
   });
 
   it("gives the words, the colour, the percent while printing, and when it is the customer's turn", () => {
@@ -52,11 +58,22 @@ describe("order status in My orders", () => {
     expect(orderStatus(view("PLAN_CHOSEN"))).toEqual({ stage: "price", text: "Price ready", tone: "warn", yourTurn: true, percent: null });
     expect(orderStatus(view("IN_PRODUCTION", { escrow: escrow("FUNDED"), printing: printing("RUNNING") })))
       .toEqual({ stage: "printing", text: "Printing {pct}", tone: "testnet", yourTurn: false, percent: 46 });
-    expect(orderStatus(view("EVIDENCE_SUBMITTED", { escrow: escrow("FUNDED") }))).toMatchObject({ text: "Ready to check", tone: "warn", yourTurn: true });
+    // The customer's turn to check reads differently from Kesuni's own check ("Quality check", blue).
+    expect(orderStatus(view("EVIDENCE_SUBMITTED", { escrow: escrow("FUNDED") }))).toMatchObject({ text: "Your turn: check the item", tone: "warn", yourTurn: true });
+    expect(orderStatus(view("IN_PRODUCTION", { escrow: escrow("FUNDED"), printedOn: "A1 Combo #1" }))).toMatchObject({ text: "Quality check", tone: "testnet", yourTurn: false });
     expect(orderStatus(view("PAID", { escrow: escrow("RELEASED") }))).toMatchObject({ text: "Done", tone: "ok", yourTurn: false });
     expect(orderStatus(view("REJECTED", { escrow: escrow("REFUNDED") }))).toMatchObject({ text: "Refunded", tone: "", yourTurn: false });
     // A finished print still marked running reads 100%, never more.
     expect(orderStatus(view("IN_PRODUCTION", { escrow: escrow("FUNDED"), printing: printing("RUNNING", 100.4) })).percent).toBe(100);
+  });
+
+  it("an order printed piece by piece: still printing between its runs, with the pieces done so far", () => {
+    const pieces = { printed: 1, total: 3 };
+    expect(orderStatus(view("IN_PRODUCTION", { escrow: escrow("FUNDED"), pieces })))
+      .toEqual({ stage: "printing", text: "Printed {printed} of {total}", tone: "testnet", yourTurn: false, percent: null, vars: pieces });
+    expect(orderStatus(view("IN_PRODUCTION", { pieces }))).toMatchObject({ stage: "printing", yourTurn: true }); // unpaid
+    expect(orderStatus(view("IN_PRODUCTION", { escrow: escrow("FUNDED"), pieces: { printed: 0, total: 3 } })).stage).toBe("waiting");
+    expect(orderStatus(view("IN_PRODUCTION", { escrow: escrow("FUNDED"), pieces, printing: printing("RUNNING") })).text).toBe("Printing {pct}");
   });
 });
 

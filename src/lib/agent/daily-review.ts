@@ -74,6 +74,8 @@ export interface DailyFacts {
     runs: number; heartbeatWakeups: number; heartbeatFindings: number; toolCalls: number; decisions: number;
     escalations: number; refusals: number; refusalReasons: string[]; messagesToCustomers: number; messagesByPeople: number;
     claudeUnavailable: number;
+    /** Steps code took by itself (printer reports' tasks, the heartbeat, the rule planner): not the Chief's decisions. */
+    codeActions: number;
   };
   deadlines: { next3Days: (OrderRef & { deadline: string; status: Order["status"] })[]; overdue: (OrderRef & { deadline: string; status: Order["status"] })[] };
   printersNow: { online: number; total: number };
@@ -86,8 +88,14 @@ const META = ["agent_start", "agent_thought", "agent_summary", "llm_unavailable"
 const DECIDING = ["choose_plan", "price_by_weight", "choose_printer", "create_operator_task"];
 
 /** The Chief's own steps among log rows: agent rows without the bookkeeping, one row per action (see countableRows).
+ *  Rows code wrote (a printer report's task, the heartbeat, the rule planner) or a person's button are not the Chief's:
+ *  they carry by "code" or "person" (older rows have no mark and count as before).
  *  The daily review, the Chief page and the public /live overview count decisions and questions to people from these. */
-export const chiefSteps = <R extends AgentLogEntry>(log: R[]): R[] => countableRows(log.filter((e) => e.actor === "agent" && !META.includes(e.tool)));
+export const chiefSteps = <R extends AgentLogEntry>(log: R[]): R[] =>
+  countableRows(log.filter((e) => e.actor === "agent" && (e.by === undefined || e.by === "chief") && !META.includes(e.tool)));
+/** Rows of the agent that code wrote (not Claude): printer reports' tasks, the heartbeat, the rule planner, the dispatcher. */
+export const codeSteps = <R extends AgentLogEntry>(log: R[]): R[] =>
+  countableRows(log.filter((e) => e.actor === "agent" && e.by === "code" && !META.includes(e.tool)));
 /** A plan, price, printer or task the Chief decided itself. */
 export const isDecision = (e: Pick<AgentLogEntry, "ok" | "tool">): boolean => e.ok && DECIDING.includes(e.tool);
 /** A question the Chief handed to a person instead of guessing. */
@@ -219,6 +227,7 @@ export function dailyFacts(day: string, now: Date = new Date()): DailyFacts {
       messagesToCustomers: messages.filter((m) => m.by === "agent").length,
       messagesByPeople: messages.filter((m) => m.by === "human").length,
       claudeUnavailable: log.filter((e) => e.tool === "llm_unavailable").length,
+      codeActions: codeSteps(log).length,
     },
     deadlines: {
       next3Days: unfinished.filter((o) => o.deadline >= day && o.deadline <= addDays(day, 3)).sort((a, b) => a.deadline.localeCompare(b.deadline)).map(withDeadline),
@@ -258,7 +267,7 @@ export function templateReview(f: DailyFacts): string {
     `${f.plans.byAgent + f.plans.byHuman} plans chosen (${f.plans.byAgent} by the Chief, ${f.plans.byHuman} by a person); ${f.agreements.count} prices approved by customers.`,
     ...(f.money.length ? f.money.map(moneyText) : ["No money went into or out of escrow today."]),
     `The Chief worked ${c.runs} times (${c.heartbeatWakeups} woken by the heartbeat): ${c.decisions} decisions, ${c.escalations} questions to people, ` +
-      `${c.refusals} steps refused by the rules, ${c.messagesToCustomers} messages to customers.`,
+      `${c.refusals} steps refused by the rules, ${c.messagesToCustomers} messages to customers. Code alone took ${c.codeActions ?? 0} steps (tasks from printer reports, checks).`,
     `Operator tasks: ${f.tasks.opened} opened, ${f.tasks.done} done, ${f.tasks.openNow} still open. Printers online now: ${f.printersNow.online} of ${f.printersNow.total}.`,
   ];
 
@@ -317,8 +326,9 @@ Rules:
   start with "- ":
 ${SECTIONS.map((s) => `  ## ${s}`).join("\n")}
 - "Chief's advice": at most 5 suggestions, each concrete and tied to a fact (an order id or a number).
-- "Needs your decision": questions the owner must answer (start from the open questions in the facts), or
-  "- No decisions waiting."
+- "Needs your decision": only the questions still open now (tasks.questions in the facts), or
+  "- No decisions waiting." Refusals earlier in the day (chief.refusalReasons) are history: they may be solved already,
+  so never ask the owner to decide one of them.
 - The whole review stays under about 350 words.`;
 }
 

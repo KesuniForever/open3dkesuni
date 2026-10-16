@@ -27,11 +27,11 @@ const id: Record<string, string> = {
   "{time} left": "sisa {time}",
   "Done around {time} WIB": "Selesai sekitar {time} WIB",
   "tomorrow {time}": "besok {time}",
-  "Every order on this site, by id only: no customer names or product titles. In progress: not paid out or rejected yet.":
-    "Semua pesanan di situs ini, hanya ID-nya: tanpa nama pelanggan atau judul produk. Berjalan: belum dibayarkan dan belum ditolak.",
+  "Every order on this site, by id only: no customer names or product titles. In progress: not paid out or rejected yet. The next deadline is a real order's.":
+    "Semua pesanan di situs ini, hanya ID-nya: tanpa nama pelanggan atau judul produk. Berjalan: belum dibayarkan dan belum ditolak. Tenggat berikutnya diambil dari pesanan nyata.",
   "Transactions on Arc": "Transaksi di Arc",
-  "Completed escrow transfers on Arc. Only the transfers of real orders count; the team's tests are shown apart.":
-    "Transfer escrow yang selesai di Arc. Hanya transfer pesanan nyata yang dihitung; uji coba tim ditampilkan terpisah.",
+  "Completed escrow transfers of real orders on Arc. The team's tests and the demo top-ups are shown apart and never counted.":
+    "Transfer escrow pesanan nyata yang selesai di Arc. Uji coba tim dan top-up demo ditampilkan terpisah dan tidak pernah dihitung.",
   "Volume": "Volume",
   "Tests, not counted": "Uji coba, tidak dihitung",
   "Agent today": "Agen hari ini",
@@ -46,6 +46,7 @@ const id: Record<string, string> = {
     "Tiga printer Bambu Lab A1 Combo di studio. Sebuah bridge di jaringan studio membacanya dan melapor ke sini. Teks tahap dan gangguan adalah kata-kata Bambu sendiri.",
   "Holds a part to collect": "Ada hasil yang perlu diambil",
   "No status yet": "Belum ada status",
+  "In use": "Sedang dipakai",
 
   // ---------- the agent at work ----------
   "The agent at work": "Agen sedang bekerja",
@@ -61,6 +62,11 @@ const id: Record<string, string> = {
   "Chief run · after slicer grams": "Chief berjalan · setelah gram slicer diisi",
   "Agent opened a task for a person": "Agen membuat tugas untuk orang",
   "A person started a print on {printer}": "Seseorang memulai cetak di {printer}",
+  "Waiting on": "Menunggu",
+  "A task for {order} is open for more than 6 h": "Ada tugas untuk {order} yang terbuka lebih dari 6 jam",
+  "Last nightly report": "Laporan malam terakhir",
+  "Every night the Chief writes the owner a short report. Code counts the facts; Claude writes them up with no tools. Only its summary shows here.":
+    "Setiap malam Chief menulis laporan singkat untuk pemilik. Kode menghitung faktanya; Claude merangkumnya tanpa alat apa pun. Di sini hanya ringkasannya yang tampil.",
 
   // ---------- money on Arc ----------
   "Money on Arc": "Uang di Arc",
@@ -79,6 +85,28 @@ const id: Record<string, string> = {
   "No Arc transfers yet.": "Belum ada transfer Arc.",
   "in progress": "sedang diproses",
   "View on the Arc explorer": "Lihat di explorer Arc",
+  "internal · not counted": "internal · tidak dihitung",
+  "How the money works: Circle + Arc": "Cara kerja uangnya: Circle + Arc",
+  "Two Circle wallets per order: the customer's and the escrow.": "Dua dompet Circle per pesanan: milik pelanggan dan escrow.",
+  "Developer-controlled smart-contract wallets (SCA) on Arc, made through Circle's API. Circle keeps the keys; Kesuni's server asks for each transfer.":
+    "Dompet smart contract (SCA) yang dikendalikan developer di Arc, dibuat lewat API Circle. Circle menyimpan kuncinya; server Kesuni meminta setiap transfer.",
+  "Each transfer gets an idempotency key, saved before Circle is called.": "Setiap transfer mendapat idempotency key yang disimpan sebelum Circle dipanggil.",
+  "A UUID stored with the transfer first: after a timeout or a restart the same key goes again, so a transfer never happens twice.":
+    "UUID disimpan bersama transfernya lebih dulu: setelah timeout atau restart, key yang sama dikirim lagi, jadi satu transfer tidak pernah terjadi dua kali.",
+  "Circle's Gas Station pays the gas.": "Gas Station Circle membayar biaya gas.",
+  "The wallets are ERC-4337 smart accounts, so the Arc explorer shows a transfer as a Bundler call to the EntryPoint contract. The USDC moved is under “Tokens transferred”.":
+    "Dompetnya smart account ERC-4337, jadi explorer Arc menampilkan transfer sebagai panggilan Bundler ke kontrak EntryPoint. USDC yang berpindah ada di bagian “Tokens transferred”.",
+  "Every transfer is re-checked on Arc.": "Setiap transfer diperiksa ulang di Arc.",
+  "This site reads each transaction back from Arc over RPC: it must have succeeded, with the right sender, recipient and amount. Then it shows “Verified on Arc”.":
+    "Situs ini membaca ulang setiap transaksi dari Arc lewat RPC: transaksinya harus berhasil, dengan pengirim, penerima, dan jumlah yang benar. Baru setelah itu tampil “Terverifikasi di Arc”.",
+  "Payment is in rupiah, outside the app; the deposits are test USDC, not customer money.": "Pembayaran dalam rupiah, di luar aplikasi; setorannya berupa USDC uji, bukan uang pelanggan.",
+  "On Arc Testnet, Kesuni's demo wallet tops up the customer's wallet with test USDC before the deposit. That top-up is internal and never counted.":
+    "Di Arc Testnet, dompet demo Kesuni mengisi dompet pelanggan dengan USDC uji sebelum setoran. Top-up itu internal dan tidak pernah dihitung.",
+  "Kesuni holds these wallets. Release and refund are guarded by the policy engine in our code, not by a smart contract.":
+    "Kesuni yang memegang dompet-dompet ini. Pencairan dan pengembalian dijaga oleh policy engine di kode kami, bukan oleh smart contract.",
+
+  // ---------- token research (the customer portal's tab, read-only; its words are in portal.ts and demo-token-arc.ts) ----------
+  "The token research could not be read right now.": "Riset token tidak bisa dibaca saat ini.",
 
   // ---------- footer ----------
   "Simulated orders are the team's own tests. They are never counted as real business.":

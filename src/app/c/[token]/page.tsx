@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { getT } from "@/i18n/server";
+import { whatsappNumber } from "../whatsapp";
 import CustomerView from "./CustomerView";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -9,5 +10,6 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function CustomerPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  return <CustomerView token={token} />;
+  // The studio's WhatsApp for "Chat Kesuni on WhatsApp" (no number: no button).
+  return <CustomerView token={token} whatsapp={whatsappNumber(process.env.KESUNI_WHATSAPP)} />;
 }

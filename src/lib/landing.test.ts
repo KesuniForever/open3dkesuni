@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEMO_SCENARIOS } from "./demo";
-import { DEMO_VIDEO_URL, SCENARIO_OUTCOMES, videoEmbed } from "./landing";
+import { DEMO_VIDEO_URL, SCENARIO_OUTCOMES, demoVideoUrl, videoEmbed } from "./landing";
 
 describe("videoEmbed", () => {
   it("turns YouTube watch, share and shorts links into the embed player", () => {
@@ -30,6 +30,12 @@ describe("videoEmbed", () => {
 
   it("the configured link is empty or one the page can show", () => {
     expect(DEMO_VIDEO_URL === "" || videoEmbed(DEMO_VIDEO_URL) !== null).toBe(true);
+  });
+
+  it("the DEMO_VIDEO_URL env var sets the link without a code change; empty or blank falls back to the one in the code", () => {
+    expect(demoVideoUrl({ DEMO_VIDEO_URL: " https://youtu.be/dQw4w9WgXcQ " })).toBe("https://youtu.be/dQw4w9WgXcQ");
+    expect(demoVideoUrl({ DEMO_VIDEO_URL: "  " })).toBe(DEMO_VIDEO_URL);
+    expect(demoVideoUrl({})).toBe(DEMO_VIDEO_URL);
   });
 
   it("every practice scenario has an outcome line", () => {

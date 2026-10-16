@@ -30,9 +30,15 @@
 .lp-btn.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
 .lp-btn.primary:hover { background: var(--primary-hover); }
 .lp-btn.ghost { color: var(--text-2); font-weight: 500; }
-/* The small "Dashboard" link in the top bar, next to EN | ID. */
-.lp-btn.lp-top-dash { padding: 6px 12px; font-size: 13px; gap: 6px; }
-@media (max-width: 420px) { .lp-btn.lp-top-dash { padding: 6px 10px; } }
+/* The small "Team login" link in the top bar, next to EN | ID (TeamLogin.tsx). On a phone the lock alone: the words
+   would push into the Open3DKesuni name. The label stays for screen readers. */
+.lp-btn.lp-top-dash { padding: 6px 12px; font-size: 13px; gap: 6px; min-height: 36px; white-space: nowrap; }
+@media (max-width: 419.98px) {
+  .lp-btn.lp-top-dash { padding: 6px; min-width: 36px; }
+  .lp-top-dash .lp-top-label {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+}
 .lp-btn .live-dot { margin-right: 0; background: var(--lime); }
 
 /* The hero picture: four rows, one per actor, ending in "paid only after acceptance". */
@@ -56,7 +62,8 @@
 }
 
 /* ---------- live numbers ---------- */
-.lp-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 22px 0 0; }
+.lp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 22px 0 0; }
+@media (max-width: 640px) { .lp-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .lp-stats > div { padding: 12px 14px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); min-width: 0; }
 .lp-stats dt { font-size: 12px; color: var(--muted); line-height: 1.35; }
 .lp-stats dd { margin: 4px 0 0; font-size: 26px; font-weight: 700; letter-spacing: -0.6px; font-variant-numeric: tabular-nums; }
@@ -144,22 +151,13 @@
   position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: var(--navy);
   border: 1px solid var(--navy-line);
 }
-/* No video yet: a short card, not an empty 16:9 screen. */
-.lp-video.empty { aspect-ratio: auto; min-height: 230px; }
-@media (min-width: 900px) { .lp-video:not(.empty) { max-width: 960px; } }
+/* Shown only once DEMO_VIDEO_URL is set (src/lib/landing.ts); until then the scenarios follow the heading. */
+@media (min-width: 900px) { .lp-video { max-width: 960px; } }
 @media (max-width: 639px) { .lp-card > .lp-icon { width: 36px; height: 36px; } }
 .lp-video iframe, .lp-video video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
-.lp-video-empty {
-  position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 16px;
-  text-align: center; color: var(--navy-muted); font-size: 14px;
-}
-.lp-video-empty b { color: #fff; font-size: 18px; font-weight: 650; }
-.lp-video-empty a { color: var(--lime); font-weight: 600; }
-.lp-play {
-  display: grid; place-items: center; width: 60px; height: 60px; border-radius: 50%; background: var(--lime); color: var(--lime-text);
-  margin-bottom: 4px;
-}
 .lp-sub { margin: 28px 0 4px; font-size: 18px; font-weight: 650; letter-spacing: -0.3px; }
+.lp-section > h2 + .lp-sub { margin-top: 0; }
+.lp-sub small { font-size: 14px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
 .lp-small { margin: 0 0 14px; font-size: 14px; line-height: 1.55; color: var(--muted); max-width: 70ch; }
 .lp-outcome { display: flex; align-items: center; gap: 4px; margin-top: 2px !important; font-weight: 600; color: var(--ok) !important; }
 .lp-outcome svg { flex: none; }

@@ -21,10 +21,14 @@ const START = { yaw: -0.6, pitch: -1.1 };
 const SPIN_PER_MS = 0.00035;
 /** Arrow keys turn it too: [yaw, pitch] in radians. */
 const KEYS: Record<string, [number, number]> = { ArrowLeft: [-0.2, 0], ArrowRight: [0.2, 0], ArrowUp: [0, -0.2], ArrowDown: [0, 0.2] };
-/** The model's colour when the customer chose none: a soft grey-green. */
-const DEFAULT_TINT = "#8FAE9B";
+/** The model's colour when the customer chose none: a neutral grey, so no colour looks chosen. */
+const DEFAULT_TINT = "#A7ADB4";
 
-export type ModelState = { state: "ask" } | { state: "reading" } | { state: "ready"; mesh: Mesh; sizeMm: Vec3 } | { state: "failed" };
+/** failed + unreadable: a picked file that is not a readable model (src/lib/mesh.ts gave UNREADABLE), so it is not sent. */
+export type ModelState = { state: "ask" } | { state: "reading" } | { state: "ready"; mesh: Mesh; sizeMm: Vec3 } | { state: "failed"; unreadable?: boolean };
+/** src/lib/mesh.ts's reason for a file with no triangles or impossible numbers (a broken export). Too big to show, the
+ *  network or a phone that cannot draw are not that: such a file may still be sent. */
+export const UNREADABLE = "The model could not be read";
 
 /** "40 × 20 × 10.5 mm", with the visitor's decimal comma or point. */
 export const sizeText = (s: Vec3, locale: Locale): string =>
@@ -47,7 +51,7 @@ function useModel(source: File | string | null, name: string): ModelState {
         })
         : await source.arrayBuffer();
       const r = await readMeshAsync(name, new Uint8Array(bytes), stop.signal);
-      if (!r.ok) return { state: "failed" };
+      if (!r.ok) return { state: "failed", unreadable: typeof source !== "string" && r.reason === UNREADABLE };
       return { state: "ready", mesh: await runAsync(decimateSteps(r.mesh, DRAW_MAX), stop.signal), sizeMm: sizeOf(r.mesh) };
     };
     read().then(
@@ -64,13 +68,17 @@ function useModel(source: File | string | null, name: string): ModelState {
  * The preview. `source`: a picked File (the order form) or the link to the customer's design (the order page; with
  * `bytes` above AUTO_LOAD_BYTES it waits for a tap). `sizeMm` from the server when known, else measured here.
  * `color` "#RRGGBB" tints the model (the customer's colour); `compact` is the small version beside the name.
+ * `onUnreadable` hears whether a picked file turned out not to be a readable model (the form then does not send it).
  */
-export default function ModelPreview({ source, name, sizeMm = null, bytes = 0, color = null, compact = false }: {
+export default function ModelPreview({ source, name, sizeMm = null, bytes = 0, color = null, compact = false, onUnreadable }: {
   source: File | string; name: string; sizeMm?: Vec3 | null; bytes?: number; color?: string | null; compact?: boolean;
+  onUnreadable?: (unreadable: boolean) => void;
 }) {
   const [asked, setAsked] = useState(false);
   const wait = typeof source === "string" && bytes > AUTO_LOAD_BYTES && !asked;
   const model = useModel(wait ? null : source, name);
+  const unreadable = model.state === "failed" && model.unreadable === true;
+  useEffect(() => { onUnreadable?.(unreadable); }, [unreadable, onUnreadable]);
   return <ModelBox model={model} name={name} sizeMm={sizeMm} color={color} compact={compact} onAsk={() => setAsked(true)} />;
 }
 
@@ -83,11 +91,14 @@ export function ModelBox({ model, name, sizeMm = null, color = null, compact = f
   // The model that was read but could not be drawn here (no way to draw, or the drawing was lost for good).
   const [undrawn, setUndrawn] = useState<Mesh | null>(null);
   const size = sizeMm ?? (model.state === "ready" ? model.sizeMm : null);
-  // A file this page cannot draw: one quiet line. The server still decides whether it can be used.
+  // A file this page cannot draw: one quiet line. The server still decides whether it can be used. A picked file that
+  // is no readable model at all says what to do instead.
   if (model.state === "failed" || (model.state === "ready" && model.mesh === undrawn)) {
+    const unreadable = model.state === "failed" && model.unreadable === true;
     return (
-      <p className="mp-failed" role="status">
-        <b>{name}</b>{size && <> · {sizeText(size, locale)}</>}<br />{t("No 3D preview for this file.")}
+      <p className={unreadable ? "alert bad" : "mp-failed"} role="status" style={unreadable ? { margin: "10px 0 0" } : undefined}>
+        <b>{name}</b>{size && <> · {sizeText(size, locale)}</>}<br />
+        {unreadable ? t("This file can't be opened. Ask your designer for a new STL.") : t("No 3D preview for this file.")}
       </p>
     );
   }

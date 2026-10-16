@@ -3,17 +3,20 @@
 // a whole DB row, never a customer's name, phone, address, note, message, token or link, a person's name, a file
 // name, a product title, a printer's IP, serial or access code, a wallet id or address, or anything from env.
 // liveView() is pure (rows in, view out), so the tests feed it the same way the page does; loadLive() reads the store.
+// Every free text (the Chief's lines, its limits, the nightly report's summary) goes through safeLine below.
 // The printer helpers live with My machines (src/app/machines): they are pure, and the same words show there.
 import * as store from "./store";
-import { allLog, chiefFeed, oneLine, wib, type FeedItem } from "./ops";
+import { allLog, chiefFeed, collapseRepeats, oneLine, plain, wib, type FeedItem } from "./ops";
 import { ago, machineStats, machineView } from "./machines";
 import { microToUsdc } from "./policy";
 import { DAY, daysUntil, formatters } from "./capacity";
 import { deadlineEnd } from "./owner-rules";
 import { explorerTxBase, isTestnetChain, publicNetwork } from "./network";
 import { traction, type Traction } from "./traction";
+import { idrPerUsdc } from "./costing";
 import { autoPrintSetting } from "./printer/autoprint";
 import { heartbeatStatus } from "./agent/heartbeat";
+import { chiefAuthority, type ChiefAuthority } from "./agent/authority";
 import { chiefSteps, isDecision, isEscalation, jakartaDay } from "./agent/daily-review";
 import { agentText, redactNote } from "./agent/tools";
 import { ACTION_TOOLS, type Skill } from "./agent/skills";
@@ -21,7 +24,7 @@ import { nameOf } from "./colors";
 import { tLib } from "./lib-text";
 import { amsSlots, issueViews, stageText, taskText, type IssueTexts } from "@/app/machines/printer-details";
 import { issueTexts } from "@/app/machines/issue-texts";
-import type { AgentLogEntry, ChainTx, Escrow, OperatorTask, Order, Printer, PrintJob } from "./types";
+import type { AgentLogEntry, ChainTx, DailyReview, Escrow, OperatorTask, Order, Printer, PrintJob } from "./types";
 import type { Tone } from "./machines";
 import { makeT, type Locale, type T } from "../i18n/core";
 
@@ -98,6 +101,9 @@ export interface LiveAgentItem {
   order: LiveOrder | null;
   refused: number;
   asked: boolean;
+  /** A Claude run's "Waiting on: …" (who or what the order waits on now), names hidden. "" when the run gave none. */
+  waiting: string;
+  /** Back-to-back runs on the same order that came to the same are one row: this many runs. */
   repeats: number;
 }
 
@@ -110,6 +116,8 @@ export interface LiveTransfer {
   at: string;
   when: string;
   order: LiveOrder;
+  /** A deposit, release or refund of a real order. Demo top-ups (internal test funds) and the tests' transfers are not counted. */
+  counted: boolean;
   state: "complete" | "pending" | "failed";
   /** Only for a complete transfer: checked on Arc and it matches, does not match, or not checked yet. */
   check: "verified" | "mismatch" | "unchecked" | null;
@@ -169,18 +177,42 @@ export interface LiveOverview {
     finished: number;
     real: number;
     simulated: number;
-    /** The earliest deadline of an order still to be made: "in 4 d", "today", "2 d late", and the day. */
+    /** The earliest deadline of a real order still to be made: "in 4 d", "today", "2 d late", and the day. The team's tests have none here. */
     next: { order: LiveOrder; due: string; day: string; late: boolean } | null;
   };
-  /** Completed Arc transfers, as the Money on Arc tab counts them: real orders (counted) and tests (not counted). */
-  money: LiveMoneyPart & { real: LiveMoneyPart; test: LiveMoneyPart };
+  /**
+   * Completed Arc transfers as the Money on Arc tab counts them. The headline (transfers, verified, volume) is real
+   * orders only; `test` holds what is not counted (the team's tests and the demo top-ups), never added to it.
+   * depositsVerified: real orders' escrow deposits that this site read back from Arc and that match.
+   */
+  money: LiveMoneyPart & { test: LiveMoneyPart; depositsVerified: number };
   /** Today in Jakarta, counted the same way as the Chief page. */
   agent: { decisions: number; handedToPerson: number; claudeRuns: number };
 }
 
+/**
+ * What the Chief may do on its own and what stays with a person: the Chief page's "Authority limits", read-only, from
+ * the live config. Each item has a short label and the live text (with the owner's numbers) behind it.
+ */
+export interface LiveChief {
+  /** How many tools Claude gets, and whether one of them looks like it could move money (must be false). */
+  tools: number;
+  paymentTool: boolean;
+  /** byCode: done by code (heartbeat, Arc checks, release and refund after the customer decided), not by Claude. */
+  decides: { label: string; text: string; byCode: boolean }[];
+  /** byCode: kept with a person by code (a refusal or a missing tool), else only by the Chief's instructions. */
+  handed: { label: string; text: string; byCode: boolean }[];
+  limits: string[];
+}
+
+/** The latest nightly report to the owner: its Summary only, names hidden. byClaude: Claude wrote it, else the code template. */
+export interface LiveReport { day: string; when: string; byClaude: boolean; text: string }
+
 export interface LiveView {
   at: string;
   network: { name: string; isTestnet: boolean };
+  /** Rupiah per USDC, for the "≈ Rp" next to an amount (display only: the escrow moves USDC). */
+  idrPerUsdc: number;
   printers: LivePrinter[];
   /** The newest printer report ("12 s ago"), null before the first: when no printer is online, the bridge may be down. */
   lastReport: string | null;
@@ -189,10 +221,16 @@ export interface LiveView {
   /** The heartbeat's last round (code checks; Claude woken when an order needs a decision). */
   agentCheck: { at: string; ago: string; mode: "claude" | "rules" } | null;
   agent: LiveAgentItem[];
+  /** null when the config could not be read. */
+  chief: LiveChief | null;
+  report: LiveReport | null;
   transfers: LiveTransfer[];
   usage: LiveUsage;
   overview: LiveOverview;
 }
+
+/** "Rp1.650": a USDC amount in rupiah at the app's rate, as id-ID writes it. */
+export const rupiah = (usdc: string, rate: number): string => `Rp${Math.round(Number(usdc) * rate).toLocaleString("id-ID")}`;
 
 // ---------- hiding what must never show ----------
 
@@ -240,7 +278,7 @@ function productForms(p: string): string[] {
 
 /** Dates ("2026-10-20") and Bambu's print_error codes ("0700-8011") are not phone numbers: redactNote must not hide them.
  *  A code with more digits around it ("0812-3456 7890") is part of a phone number: not kept. */
-const KEEP = /\b\d{4}-\d{2}-\d{2}\b|(?<![\d+][\s().-]*)(?<![\w-])0[0-9A-F]{3}-[0-9A-F]{4}(?![\w-])(?![\s().-]*\d)/g;
+const KEEP = /\b\d{4}-\d{2}-\d{2}(?=T\d|\b)|(?<![\d+][\s().-]*)(?<![\w-])0[0-9A-F]{3}-[0-9A-F]{4}(?![\w-])(?![\s().-]*\d)/g;
 const FILE = /[^\s"'()[\]<>]+\.(?:gcode\.3mf|3mf|stl|obj|step|stp|gcode|png|jpe?g|webp|heic|gif|pdf|zip)\b/gi;
 /** Bambu's guide links in a fault task: the printer card links the guide itself. */
 const BAMBU_LINK = /\s*\bhttps:\/\/(?:e|wiki)\.bambulab\.com\/\S*/gi;
@@ -361,15 +399,55 @@ function liveTitle(f: FeedItem, main: FeedItem["steps"][number] | undefined, t: 
   return f.title;
 }
 
+/** The "Waiting on: …" line the Chief ends its summary with (src/lib/agent/chief.ts), as plain text. */
+const WAITING = /^[ \t]*(?:[-•*][ \t]*)?Waiting on[ \t]*:[ \t]*(.*)$/im;
+/** The heartbeat's stale-task finding quotes the task's own words (src/lib/agent/heartbeat.ts): here only that it is open. */
+const STALE_TASK = /^Task for (ORD-[\w-]+) has been open for more than 6 hours:[\s\S]*$/;
+
+/** What a run came to: refused or not, a question to a person or not, and the actions it took. */
+function outcome(f: FeedItem): string {
+  const acts = [...new Set(f.steps.filter((s) => s.ok && ACTION_TOOLS.includes(s.tool)).map((s) => s.tool))].sort().join(",");
+  const asked = f.questions.length > 0 || f.steps.some((s) => s.tool === "request_human_decision");
+  return [f.mode, f.refused > 0, asked, Boolean(f.down), f.unfinished, acts].join("|");
+}
+
+/**
+ * Runs on one order that came to the same as that order's newer run are folded into it ("×3"), also with a heartbeat
+ * row or a code action between them: a Chief asking the same question again shows once. A different outcome in between
+ * starts a new row. Then back-to-back rows that say the same thing (a heartbeat finding each round) fold too. Newest first.
+ */
+export function foldRuns(items: FeedItem[]): FeedItem[] {
+  const out: FeedItem[] = [];
+  const newest = new Map<string, FeedItem>();
+  for (const it of items) {
+    if (it.kind !== "run") { out.push(it); continue; }
+    const kept = newest.get(it.order.id);
+    if (kept && outcome(kept) === outcome(it)) {
+      kept.repeats += it.repeats;
+      kept.firstAt = it.firstAt ?? it.at;
+      continue;
+    }
+    const copy = { ...it };
+    newest.set(it.order.id, copy);
+    out.push(copy);
+  }
+  return collapseRepeats(out);
+}
+
 function liveAgentItem(f: FeedItem, orderOf: (id: string) => LiveOrder, hide: Hide, texts: IssueTexts, t: T, locale: Locale): LiveAgentItem {
   const main = f.steps.find((s) => ACTION_TOOLS.includes(s.tool)) ?? f.steps.find((s) => !s.tool.startsWith("get_")) ?? f.steps[0];
   const lineOk = f.kind === "run" || f.steps.every((s) => LINE_OK.has(s.tool));
   let full = lineOk ? fullLine(f) : "";
+  // A Claude run: its summary without the "Waiting on" line, which shows on its own row.
+  const claude = f.kind === "run" && f.mode === "claude" && f.text ? f.text : "";
+  const waiting = claude ? WAITING.exec(claude)?.[1]?.trim() ?? "" : "";
+  if (claude && waiting) full = plain(claude.replace(WAITING, "")) || full;
   // Tasks code wrote in English: in the page's language when the dictionary knows them (a fault task with Bambu's words).
   if (full && f.kind === "action" && main?.tool === "create_operator_task") {
     const code = FAULT_CODE.exec(full)?.[1];
     full = code ? taskText({ text: full, errorCode: code }, t, texts) : tLib(t, full);
   }
+  if (full && f.kind === "heartbeat") full = full.replace(STALE_TASK, (_, id: string) => t("A task for {order} is open for more than 6 h", { order: id }));
   // A run Claude could not finish: the API's error text stays on the operator pages.
   const line = f.down ? t("Claude could not be reached. The rules carried on.") : full ? safeLine(full, hide) : "";
   return {
@@ -384,6 +462,7 @@ function liveAgentItem(f: FeedItem, orderOf: (id: string) => LiveOrder, hide: Hi
     order: f.order.tag === "studio" ? null : orderOf(f.order.id),
     refused: f.refused,
     asked: f.questions.length > 0 || f.steps.some((s) => s.tool === "request_human_decision"),
+    waiting: waiting && !f.down ? safeLine(waiting, hide) : "",
     repeats: f.repeats,
   };
 }
@@ -398,7 +477,7 @@ function personPrints(log: AgentLogEntry[], orderOf: (id: string) => LiveOrder, 
       return {
         id: `person-${e.id}`, at: e.at, when: wib(e.at, locale), kind: "person", mode: null,
         title: safeLine(t("A person started a print on {printer}", { printer }), hide, 90), line: "", skill: "Machines",
-        order: e.orderId === "studio" || e.orderId.startsWith("printer:") ? null : orderOf(e.orderId), refused: 0, asked: false, repeats: 1,
+        order: e.orderId === "studio" || e.orderId.startsWith("printer:") ? null : orderOf(e.orderId), refused: 0, asked: false, waiting: "", repeats: 1,
       };
     });
 }
@@ -425,6 +504,7 @@ function liveTransfers(escrows: Escrow[], byId: Map<string, Order>, locale: Loca
         at: x.at,
         when: wib(x.at, locale),
         order: { id: o.id, label: tagOf(o) },
+        counted: o.label === "real" && x.kind !== "customer_topup",
         state: complete ? "complete" : FAILED.includes(x.state) ? "failed" : "pending",
         check: complete ? (x.verified ? (x.verified.ok ? "verified" : "mismatch") : "unchecked") : null,
         explorerUrl: hash ? `${explorerTxBase(e.network)}${hash}` : null,
@@ -493,7 +573,8 @@ function liveOverview(rows: LiveRows, printers: LivePrinter[], byId: Map<string,
   const raw = new Map(rows.printers.map((p) => [p.id, p]));
 
   const fmt = formatters(locale, t);
-  const next = rows.orders.filter((o) => TO_MAKE.includes(o.status)).map((o) => ({ o, due: deadlineEnd(o) }))
+  // Real orders only: a test order's old deadline ("9 d late") is not a deadline the studio has to meet.
+  const next = rows.orders.filter((o) => o.label === "real" && TO_MAKE.includes(o.status)).map((o) => ({ o, due: deadlineEnd(o) }))
     .filter((x) => Number.isFinite(x.due)).sort((a, b) => a.due - b.due || a.o.id.localeCompare(b.o.id))[0];
   const real = rows.orders.filter((o) => o.label === "real").length;
   const inProgress = rows.orders.filter((o) => IN_PROGRESS.includes(o.status)).length;
@@ -510,6 +591,9 @@ function liveOverview(rows: LiveRows, printers: LivePrinter[], byId: Map<string,
     transfers: tests.length, verified: tests.filter((x) => x.verified).length,
     volume: { testUsdc: microToUsdc(testMicro.test), usdc: microToUsdc(testMicro.main) },
   };
+  // Counted as traction() counts a transfer: COMPLETE, with an Arc tx hash; and read back from Arc with a match.
+  const depositsVerified = rows.escrows.filter((e) => byId.get(e.orderId)?.label === "real").flatMap((e) => e.txs)
+    .filter((x) => x.kind === "deposit" && x.state === "COMPLETE" && x.txHash && x.verified?.ok).length;
 
   // Today in Jakarta, from the same log the agent tab reads; counted as the Chief page counts.
   const start = Date.parse(`${jakartaDay(now)}T00:00:00+07:00`);
@@ -529,11 +613,7 @@ function liveOverview(rows: LiveRows, printers: LivePrinter[], byId: Map<string,
       total: rows.orders.length, inProgress, finished: rows.orders.length - inProgress, real, simulated: rows.orders.length - real,
       next: next ? { order: orderOf(next.o.id), due: fmt.dueIn(next.due, ms), day: fmt.day(next.due), late: next.due < ms } : null,
     },
-    money: {
-      transfers: realPart.transfers + testPart.transfers, verified: realPart.verified + testPart.verified,
-      volume: { testUsdc: microToUsdc(realMicro.test + testMicro.test), usdc: microToUsdc(realMicro.main + testMicro.main) },
-      real: realPart, test: testPart,
-    },
+    money: { ...realPart, test: testPart, depositsVerified },
     agent: {
       decisions: steps.filter(isDecision).length,
       handedToPerson: steps.filter(isEscalation).length,
@@ -559,6 +639,51 @@ export interface LiveRows {
   issueTexts: IssueTexts;
   /** Everyone in a "by" field elsewhere (tasks, printers, print jobs, files, the switch): hidden as "a person". */
   people: string[];
+  /** Rupiah per USDC (costing.ts idrPerUsdc). Default 16.500. */
+  idrPerUsdc?: number;
+  /** The Chief page's card (src/lib/agent/authority.ts) and the latest nightly report. */
+  authority?: ChiefAuthority | null;
+  review?: DailyReview | null;
+}
+
+/** The Chief page's short labels (src/app/chief/page.tsx). An id not here shows its live text, so a new rule is never hidden. */
+const ALONE: Record<string, string> = {
+  price_by_weight: "Price by weight", choose_plan: "Choose the production plan", choose_printer: "Choose a ready printer",
+  create_operator_task: "Ask the operator for tasks", message_customer: "Message the customer",
+  request_human_decision: "Ask a person when unsure", qc_task: "Ask for collect and QC", heartbeat: "Run heartbeat checks",
+  request_dispatch: "Ask the dispatcher to look", auto_print: "Prints after a person empties the bed",
+  arc_verify: "Check transfers on Arc", release: "Release escrow after acceptance", refund: "Refund after rejection",
+};
+const PERSON: Record<string, string> = {
+  qc: "Does not approve QC or reprints", printability: "Does not judge printability", material: "No materials beyond PLA and PETG",
+  machines: "No machines Kesuni does not run", price_change: "Does not change prices or rules", money: "Does not send funds",
+  unknown: "Does not act on missing data", disputes: "Does not settle disputes", printers: "Does not run the printers",
+  auto_switch: "Does not turn agent prints on",
+};
+
+/** The authority card in the page's language, every text through safeLine. Today's counts are on the Overview already. */
+function liveChief(a: ChiefAuthority, hide: Hide, t: T): LiveChief {
+  const line = (s: string) => safeLine(t(s), hide, 240);
+  return {
+    tools: a.tools.length,
+    paymentTool: a.hasPaymentTool,
+    decides: a.decidesAlone.map((d) => ({ label: line(ALONE[d.id] ?? d.text), text: line(d.text), byCode: d.by === "code" })),
+    handed: a.handedToPerson.map((h) => ({ label: line(PERSON[h.id] ?? h.text), text: safeLine(`${t(h.text)}: ${t(h.how)}`, hide, 240), byCode: h.enforcedBy === "code" })),
+    limits: a.limitedByCode.map((l) => line(l.text)),
+  };
+}
+
+/** The "## Summary" section of a nightly report on one line (the first paragraph when it has no such heading). */
+function reportSummary(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const at = lines.findIndex((l) => /^##\s*Summary\b/i.test(l.trim()));
+  if (at < 0) return text;
+  const body: string[] = [];
+  for (const l of lines.slice(at + 1)) {
+    if (/^##\s/.test(l.trim())) break;
+    body.push(l.replace(/^\s*[-*]\s+/, ""));
+  }
+  return body.join(" ");
 }
 
 /** Everything /live shows, shaped from store rows. Pure. Pass the page's t and locale for the visitor's language. */
@@ -580,20 +705,26 @@ export function liveView(rows: LiveRows, now: Date, t: T = EN, locale: Locale = 
     // The product as typed, and as the Chief's texts quote it (name, phone and address already hidden).
     products: rows.orders.flatMap((o) => [o.product, agentText(o.product, o)]),
   };
-  const feed = chiefFeed(rows.log, rows.orders, LIVE_AGENT_ITEMS, t).map((f) => liveAgentItem(f, orderOf, hide, rows.issueTexts, t, locale));
+  // More of the feed than the page shows: folding repeated runs makes it shorter.
+  const feed = foldRuns(chiefFeed(rows.log, rows.orders, LIVE_AGENT_ITEMS * 5, t)).map((f) => liveAgentItem(f, orderOf, hide, rows.issueTexts, t, locale));
   const agent = [...feed, ...personPrints(rows.log, orderOf, hide, t, locale)]
     .sort((a, b) => b.at.localeCompare(a.at)).slice(0, LIVE_AGENT_ITEMS);
   const seen = rows.printers.map((p) => p.lastSeen).filter((x): x is string => Boolean(x)).sort().pop();
   const hb = rows.heartbeat;
   const printers = rows.printers.map((p) => livePrinter(p, now.getTime(), orderOf, rows.issueTexts, t));
+  const rv = rows.review;
+  const summary = rv ? safeLine(plain(reportSummary(rv.text)).replace(/\s+/g, " "), hide, 320) : "";
   return {
     at: now.toISOString(),
     network: { name: rows.network.name, isTestnet: rows.network.isTestnet },
+    idrPerUsdc: rows.idrPerUsdc && rows.idrPerUsdc > 0 ? rows.idrPerUsdc : 16_500,
     printers,
     lastReport: seen ? ago(seen, now.getTime(), t) : null,
     agentPrints: { on: rows.agentPrints.on, locked: Boolean(rows.agentPrints.locked), started: rows.agentPrints.started ?? 0 },
     agentCheck: hb && Number.isFinite(Date.parse(hb.at)) ? { at: hb.at, ago: ago(hb.at, now.getTime(), t), mode: hb.mode === "claude" ? "claude" : "rules" } : null,
     agent,
+    chief: rows.authority ? liveChief(rows.authority, hide, t) : null,
+    report: rv && summary ? { day: rv.day, when: wib(rv.at, locale), byClaude: rv.mode === "claude", text: summary } : null,
     transfers: liveTransfers(rows.escrows, byId, locale),
     usage: liveUsage(rows.usage, rows.escrows, byId),
     overview: liveOverview(rows, printers, byId, orderOf, now, t, locale),
@@ -623,6 +754,13 @@ export function loadLive(t: T = EN, locale: Locale = "en", now: Date = new Date(
   const setting = autoPrintSetting();
   const net = publicNetwork();
   const last = heartbeatStatus().last;
+  // The Chief's card reads the config and today's log; the page still shows without it.
+  let authority: ChiefAuthority | null = null;
+  try {
+    authority = chiefAuthority(now);
+  } catch {
+    authority = null;
+  }
   return liveView({
     printers,
     orders,
@@ -633,6 +771,9 @@ export function loadLive(t: T = EN, locale: Locale = "en", now: Date = new Date(
     heartbeat: last ? { at: last.at, mode: last.mode } : null,
     network: { name: net.name, isTestnet: net.isTestnet },
     issueTexts: issueTexts(printers, locale),
+    idrPerUsdc: idrPerUsdc(),
+    authority,
+    review: store.listDailyReviews()[0] ?? null,
     people: peopleIn({
       tasks: store.listAllTasks(), printers, jobs,
       extra: [

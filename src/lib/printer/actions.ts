@@ -3,6 +3,10 @@
 // reroute when one fails. Nothing here moves money: "print finished" only asks a person to
 // collect and QC the part. Nothing here controls a printer either (that is src/lib/printer/jobs.ts: people, and the
 // agent dispatcher only after a person's "Bed is empty", which clearBed records here).
+// An order of N units needs N runs while only the agent prints it, unless a person set its runs (autoprint.ts
+// runsNeeded; one run once a person printed it): each finished run asks a person to take the part off the bed; only the
+// last one opens the collect-and-QC task. The Chief (Claude) is woken
+// when all runs finished, when a print failed or a fault paused it (never for a person's own pause or stop).
 import * as store from "../store";
 import { addEvidence, type Fail } from "../actions";
 import {
@@ -10,8 +14,14 @@ import {
 } from "./bambu";
 import { issueText } from "./errors";
 import { isPersonName, ONLINE_MS, PREPARE_WAIT_MS } from "./control";
-import { amsKey } from "../colors";
-import type { BedCheck, OperatorTask, Printer, PrintJob, PrintJobState } from "../types";
+import { orderGate, runsNeeded } from "./autoprint";
+import { amsKey, deltaE, MATCH_MAX_DELTA_E, nameOf, normalizeHex } from "../colors";
+import { orderMaterial, toMaterial } from "../pricing";
+import { wakeChief } from "../agent/chief";
+import type { AgentLogEntry, BedCheck, Material, OperatorTask, Order, Printer, PrintJob, PrintJobState } from "../types";
+
+/** Who did a step, for the decision log: the Chief (Claude in a run), code (reports, rules, the heartbeat) or a person. */
+export type StepBy = NonNullable<AgentLogEntry["by"]>;
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
 const PRINTING_STATUSES = ["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"];
@@ -121,47 +131,93 @@ export function clearBed(
   return { ok: true, printer, ...(bedCheck ? { bedCheck } : {}) };
 }
 
-/** The agent picks a ready printer for the order and links it, or explains why none is ready. */
-export function choosePrinter(orderId: string): { ok: true; printer: Printer; reasons: string[] } | Fail {
+/** The spool an order asks for: its first colour (material and colour) or its material. Null when it names neither. */
+export function wantedSpool(o: Pick<Order, "material" | "spec" | "preferredColors">): { type: Material | null; color: string | null } | null {
+  const first = o.preferredColors?.[0];
+  const type = (first ? toMaterial(first.type) : null) ?? orderMaterial(o);
+  const color = first ? normalizeHex(first.color) : null;
+  return type || color ? { type, color } : null;
+}
+
+/** The printer has that spool loaded (AMS or the external spool): same material, colour within the colour limit. */
+export function holdsSpool(p: Printer, want: { type: Material | null; color: string | null }): boolean {
+  const s = p.snapshot;
+  const spools = [...(s?.ams?.trays ?? []).filter((t) => !t.empty), ...(s?.externalSpool ? [s.externalSpool] : [])];
+  return spools.some((t) => (!want.type || toMaterial(t.type) === want.type)
+    && (!want.color || Boolean(t.color && deltaE(want.color, t.color) <= MATCH_MAX_DELTA_E)));
+}
+
+/**
+ * Pick a ready printer for the order and link it, or explain why none is ready. A printer with the order's spool loaded
+ * (its material and first colour) comes first; when no ready printer has it, one change_filament task asks a person to
+ * load it and nothing is linked. by: the Chief's tool, or a person's button on the order page (the default).
+ */
+export function choosePrinter(orderId: string, by: StepBy = "person"): { ok: true; printer: Printer; reasons: string[] } | Fail {
   const order = store.getOrder(orderId);
   if (!order) return fail(404, "Order not found");
   if (!PRINTING_STATUSES.includes(order.status)) return fail(409, `Order is ${order.status}; choose a plan before printing`);
   const at = new Date().toISOString();
+  const actor = by === "person" ? "human" : "agent";
   const printers = store.listPrinters();
   const reasons = printers.map((p) => `${p.name}: ${notReadyReason(p) ?? "ready"}`);
   const ready = printers.filter((p) => notReadyReason(p) === null);
   if (ready.length === 0) {
-    store.addLog({ orderId, actor: "agent", tool: "choose_printer", input: {}, ok: false, output: { reasons }, at });
-    createTask(orderId, "check_printer", `No printer is ready for ${orderId}. ${reasons.join("; ")}.`);
+    store.addLog({ orderId, actor, by, tool: "choose_printer", input: {}, ok: false, output: { reasons }, at });
+    createTask(orderId, "check_printer", `No printer is ready for ${orderId}. ${reasons.join("; ")}.`, undefined, undefined, undefined, by);
     return fail(409, "No printer is ready", reasons);
   }
-  const pick = ready[0];
-  const r = linkPrinter(pick.id, orderId, "agent");
+  const want = wantedSpool(order);
+  const pick = want ? ready.find((p) => holdsSpool(p, want)) : ready[0];
+  if (!pick) {
+    const spool = `${want!.type ?? ""} ${want!.color ? `${nameOf(want!.color)} (${want!.color})` : ""}`.replace(/\s+/g, " ").trim();
+    const why = `No ready printer has ${spool} loaded`;
+    store.addLog({ orderId, actor, by, tool: "choose_printer", input: {}, ok: false, output: { error: why, reasons }, at });
+    const key = `choose_printer:load:${orderId}:${want!.type ?? ""}:${want!.color ?? ""}`;
+    if (!store.listTasks(orderId).some((t) => t.status === "open" && t.key === key)) {
+      createTask(orderId, "change_filament", `Load ${spool} on a ready printer for ${orderId} (not loaded on ${ready.map((p) => p.name).join(", ")}).`,
+        undefined, undefined, key, by);
+    }
+    return fail(409, why, reasons);
+  }
+  const r = linkPrinter(pick.id, orderId, by === "person" ? "human" : "agent");
   if (!r.ok) return r;
-  store.addLog({ orderId, actor: "agent", tool: "choose_printer", input: {}, ok: true, output: { chose: pick.name, reasons }, at });
+  store.addLog({ orderId, actor, by, tool: "choose_printer", input: {}, ok: true, output: { chose: pick.name, reasons }, at });
   return { ok: true, printer: r.printer, reasons };
+}
+
+/** An order's runs: finished prints (print jobs done, or collect tasks a printer raised) and how many it needs. */
+export function runCount(o: Order): { done: number; needed: number } {
+  const g = orderGate(o);
+  return { done: g.runsDone, needed: g.runsNeeded };
 }
 
 /**
  * The order's print has finished and now waits for collection and QC: its last collect_and_qc task is newer
- * than its last reprint task. A failed print (reprint task last) does need a new production run. A test order a person
- * marked printed without a print ("Done (debug)", src/lib/printer/done-debug.ts) counts as finished too.
+ * than its last reprint task, and every run it needs is printed. A failed print (reprint task last) does need a new
+ * production run. A test order a person marked printed without a print ("Done (debug)", src/lib/printer/done-debug.ts)
+ * counts as finished too.
  */
 export function printFinished(orderId: string): boolean {
-  if (store.getOrder(orderId)?.printDoneDebug) return true;
+  const o = store.getOrder(orderId);
+  if (o?.printDoneDebug) return true;
   const last = store.listTasks(orderId).filter((t) => t.kind === "collect_and_qc" || t.kind === "reprint").at(-1);
-  return last?.kind === "collect_and_qc";
+  if (last?.kind !== "collect_and_qc") return false;
+  if (!o || runsNeeded(o) <= 1) return true;
+  const runs = runCount(o);
+  return runs.done >= runs.needed;
 }
 
+/** An operator task, logged. by: code (printer reports, the heartbeat, the dispatcher: the default), the Chief or a person. */
 export function createTask(
-  orderId: string, kind: OperatorTask["kind"], text: string, printerId?: string, errorCode?: string, key?: string,
+  orderId: string, kind: OperatorTask["kind"], text: string, printerId?: string, errorCode?: string, key?: string, by: StepBy = "code",
 ): OperatorTask {
+  const actor = by === "person" ? "human" : "agent";
   const task: OperatorTask = {
-    id: store.nextTaskId(), orderId, kind, printerId, text, status: "open", createdBy: "agent", at: new Date().toISOString(),
+    id: store.nextTaskId(), orderId, kind, printerId, text, status: "open", createdBy: actor, by, at: new Date().toISOString(),
     ...(errorCode ? { errorCode } : {}), ...(key ? { key } : {}),
   };
   store.saveTask(task);
-  store.addLog({ orderId, actor: "agent", tool: "create_operator_task", input: { kind, printerId, text }, ok: true, output: { taskId: task.id }, at: task.at });
+  store.addLog({ orderId, actor, by, tool: "create_operator_task", input: { kind, printerId, text }, ok: true, output: { taskId: task.id }, at: task.at });
   return task;
 }
 
@@ -248,6 +304,47 @@ function alternative(exceptId: string): Printer | undefined {
   return store.listPrinters().find((p) => p.id !== exceptId && notReadyReason(p) === null);
 }
 
+const WAKES_META = "printerWakes";
+/**
+ * Wake the Chief about a print's trouble once per order, print (its start) and fault: a printer that pauses again and
+ * again (a recurring AMS fault, flapping reports) costs one Claude run, not one per pause. A wake the hourly cap skipped
+ * may come again. Remembered for a week.
+ */
+function wakeOncePerPrint(printer: Printer, orderId: string, what: string, trigger: string): void {
+  const key = `${orderId}|${printer.id}|${printer.lastPrintStartAt ?? ""}|${what}`;
+  const seen = store.getMeta<Record<string, string>>(WAKES_META) ?? {};
+  if (seen[key]) return;
+  if (!wakeChief(orderId, trigger)) return;
+  const now = Date.now();
+  const kept = Object.entries(seen).filter(([, at]) => now - Date.parse(at) < 7 * 86_400_000);
+  store.setMeta(WAKES_META, Object.fromEntries([...kept, [key, new Date(now).toISOString()]]));
+}
+
+/** Deadline tasks the heartbeat opened for an order (key "deadline_risk:…" or "deadline_passed:…"). */
+const isDeadlineTask = (t: OperatorTask) => Boolean(t.key?.startsWith("deadline_"));
+
+/** One run finished: the last one opens the collect-and-QC task and wakes the Chief; an earlier one only frees the bed. */
+function runFinished(printer: Printer, orderId: string, e: PrinterEvent): void {
+  const o = store.getOrder(orderId);
+  // This run's print job is done already (syncJobWithPrinter); a print started outside the website has none, so its
+  // collect task counts it: the tasks raised so far plus this one (finishing).
+  const g = o ? orderGate(o, { finishing: true }) : null;
+  const need = g?.runsNeeded ?? 0;
+  const done = g?.runsDone ?? 1;
+  if (need > 1 && done < need) {
+    createTask(orderId, "collect_and_qc",
+      `Run ${done} of ${need} finished on ${printer.name}${job(e)}. Take the part off the bed and keep it with the order: ` +
+      `QC comes after the last run. Then confirm the bed is empty for the next run.`, printer.id);
+    return;
+  }
+  const all = need > 1 ? ` (all ${need} runs)` : "";
+  const task = createTask(orderId, "collect_and_qc",
+    `Print finished on ${printer.name}${all}. Collect the item, check the quality, then log the QC result with a photo. A finished print does not mean it may be paid yet.`,
+    printer.id);
+  wakeChief(orderId, `Printing finished on ${printer.name}${need > 1 ? `: all ${need} runs of the order are printed` : ""}. ` +
+    `Task ${task.id} asks a person to collect the parts and record QC; the order waits for that.`);
+}
+
 /**
  * The agent's reaction to each printer event for the linked order: record what the printer
  * reported as `device` evidence, track the bed, and create a task when a person must act.
@@ -258,6 +355,10 @@ function react(printer: Printer, orderId: string, e: PrinterEvent): void {
   switch (e.kind) {
     case "started":
       log(`started printing${job(e)}`);
+      // Printing is under way: the deadline tasks the heartbeat opened for this order are answered.
+      for (const t of store.listTasks(orderId)) {
+        if (t.status === "open" && isDeadlineTask(t)) store.saveTask({ ...t, status: "done", doneAt: e.at, doneBy: `${printer.name} (printing started)` });
+      }
       break;
     case "progress":
       log(`progress ${pct(e)}`);
@@ -286,6 +387,9 @@ function react(printer: Printer, orderId: string, e: PrinterEvent): void {
         createTask(orderId, "check_printer",
           `${pauseTaskText(printer)}${pct(e)}${code}${why}. Check the printer screen and fix the cause, then resume the print.`, printer.id);
       }
+      wakeOncePerPrint(printer, orderId, `pause:${err}`,
+        `${printer.name} stopped at ${pct(e)}${code}${runout ? " (out of filament)" : ""} and needs a person; an operator task is open. ` +
+        "If this delays the order, tell the customer once.");
       break;
     }
     case "resumed":
@@ -299,9 +403,7 @@ function react(printer: Printer, orderId: string, e: PrinterEvent): void {
       break;
     case "finished":
       log(`finished printing${job(e)}`);
-      createTask(orderId, "collect_and_qc",
-        `Print finished on ${printer.name}. Collect the item, check the quality, then log the QC result with a photo. A finished print does not mean it may be paid yet.`,
-        printer.id);
+      runFinished(printer, orderId, e);
       break;
     case "error":
       if (e.issue) log(`reports ${e.issue.code}`);
@@ -323,8 +425,11 @@ function react(printer: Printer, orderId: string, e: PrinterEvent): void {
         ? ` Agent suggestion: after clearing the bed, reprint on ${alt.name} (ready, bed empty), or repeat on ${printer.name}.`
         : " No other printer is ready yet.";
       createTask(orderId, "reprint", `Print failed on ${printer.name} (${pct(e)}${code}). Clear the bed and decide on a reprint.${suggestion}`, printer.id);
-      store.addLog({ orderId, actor: "agent", tool: "suggest_reroute", input: { failed: printer.name }, ok: true,
+      store.addLog({ orderId, actor: "agent", by: "code", tool: "suggest_reroute", input: { failed: printer.name }, ok: true,
         output: { suggestion: alt ? alt.name : null }, at: e.at });
+      wakeOncePerPrint(printer, orderId, "failed",
+        `The print failed on ${printer.name} at ${pct(e)}${code}. A person decides on a reprint (task open). ` +
+        "If this delays the order, tell the customer once.");
       break;
     }
   }

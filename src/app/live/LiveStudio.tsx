@@ -1,7 +1,8 @@
 // The body of the public Live studio page (/live): what the printers, the agent and the Arc escrow are doing now.
-// A menu under the header: Overview (opens first: the summary), Printers, Agent, Money on Arc. Read-only: no button,
-// no form, no link into the operator pages (only to this page's own tabs, Bambu's guides and the Arc explorer).
-// Renders only the allow-listed view from src/lib/live.ts. No hooks, so the server renders it and the tests render it the same way.
+// A menu under the header: Overview (opens first: the summary), Printers, Agent, Money on Arc, Token research.
+// Read-only: no button, no form, no link into the operator pages (only to this page's own tabs, Bambu's guides and the
+// Arc explorer). Renders only the allow-listed view from src/lib/live.ts, and the token research the customer portal
+// shows (src/app/request/[code]/Portal.tsx). No hooks, so the server renders it and the tests render it the same way.
 import Link from "next/link";
 import type { ReactNode } from "react";
 import Icon, { type IconName } from "../components/Icon";
@@ -10,10 +11,13 @@ import ColorSwatch from "../components/ColorSwatch";
 import SkillChip from "../components/SkillChip";
 import { TabNav, pickTab, type Tab } from "../components/Tabs";
 import LineMore from "../chief/LineMore";
-import { Lock } from "../chief/marks";
+import { Lock, Tick } from "../chief/marks";
+import { TokenTab } from "../request/[code]/Portal";
+import { rupiah } from "@/lib/live";
 import type {
-  LiveAgentItem, LiveMoneyPart, LiveOrder, LivePrinter, LiveRunning, LiveTransfer, LiveTxKind, LiveView, LiveVolume,
+  LiveAgentItem, LiveChief, LiveMoneyPart, LiveOrder, LivePrinter, LiveReport, LiveRunning, LiveTransfer, LiveTxKind, LiveView, LiveVolume,
 } from "@/lib/live";
+import type { PortalToken } from "@/lib/portal";
 import { dateLocale, type Locale, type T } from "@/i18n/core";
 import "../machines/machines.css";
 import "../chief/chief.css";
@@ -143,7 +147,8 @@ function PrinterCard({ p, t }: { p: LivePrinter; t: T }) {
         <div>
           <dt>{t("Bed")}</dt>
           <dd>
-            {!p.bedHolds ? <span className="muted">{t("Empty")}</span> : (
+            {/* The printer cannot see its bed: while it prints (or is paused) the bed holds that print, not "Empty". */}
+            {!p.bedHolds ? (p.progress ? <span>{t("In use")}</span> : <span className="muted">{t("Empty")}</span>) : (
               <span className="live-bed">
                 <span className="mach-warn">{t("Holds a part to collect")}</span>
                 {p.bedHolds.order && <OrderTag o={p.bedHolds.order} t={t} />}
@@ -169,6 +174,7 @@ function AgentRow({ a, t }: { a: LiveAgentItem; t: T }) {
           <time className="chief-when" dateTime={a.at}>{a.when} WIB</time>
         </div>
         {a.line && <LineMore className="chief-line" line={a.line} />}
+        {a.waiting && <p className="live-wait"><b>{t("Waiting on")}</b> {a.waiting}</p>}
         <div className="chief-meta">
           <SkillChip skill={a.skill} />
           {DONE_BY[kind] && <span className={`badge live-by ${kind}`}>{t(DONE_BY[kind])}</span>}
@@ -192,16 +198,19 @@ function Check({ x, t }: { x: LiveTransfer; t: T }) {
   return <span className={`badge ${tone}`}>{t(checkText(x))}</span>;
 }
 
-function TransferRow({ x, t }: { x: LiveTransfer; t: T }) {
+function TransferRow({ x, rate, t }: { x: LiveTransfer; rate: number; t: T }) {
   return (
     <li className="live-tx">
       <div className="live-tx-top">
         <b>{t(TX_KIND[x.kind])}</b>
-        <span className="live-amt">{x.amount} {t(x.testnet ? "test USDC" : "USDC")}</span>
+        <span className="live-amt">{x.amount} {t(x.testnet ? "test USDC" : "USDC")}<small> ≈ {rupiah(x.amount, rate)}</small></span>
       </div>
       <div className="live-tx-meta">
         <time dateTime={x.at}>{x.when} WIB</time>
-        <OrderTag o={x.order} t={t} />
+        {/* A demo top-up moves Kesuni's own test funds into the customer's wallet: never a real order's payment. */}
+        {x.kind === "topup"
+          ? <span className="live-order"><span className="mono">{x.order.id}</span><span className="badge">{t("internal · not counted")}</span></span>
+          : <OrderTag o={x.order} t={t} />}
         <Check x={x} t={t} />
         {x.explorerUrl && (
           <a href={x.explorerUrl} target="_blank" rel="noreferrer" title={t("View on the Arc explorer")}>
@@ -215,9 +224,12 @@ function TransferRow({ x, t }: { x: LiveTransfer; t: T }) {
 
 // ---------- the overview (the tab /live opens on) ----------
 
-/** "0.3 test USDC", "1 USDC + 0.3 test USDC"; real and test money are never added together. */
-function volumeText(x: LiveVolume, testnet: boolean, t: T): string {
-  const parts = [x.usdc !== "0" ? `${x.usdc} USDC` : "", x.testUsdc !== "0" ? `${x.testUsdc} ${t("test USDC")}` : ""].filter(Boolean);
+/** "0.3 test USDC ≈ Rp4.950", "1 USDC ≈ Rp16.500 + 0.3 test USDC ≈ Rp4.950"; real and test money are never added together. */
+function volumeText(x: LiveVolume, testnet: boolean, rate: number, t: T): string {
+  const parts = [
+    x.usdc !== "0" ? `${x.usdc} USDC ≈ ${rupiah(x.usdc, rate)}` : "",
+    x.testUsdc !== "0" ? `${x.testUsdc} ${t("test USDC")} ≈ ${rupiah(x.testUsdc, rate)}` : "",
+  ].filter(Boolean);
   return parts.length ? parts.join(" + ") : `0 ${t(testnet ? "test USDC" : "USDC")}`;
 }
 
@@ -261,7 +273,7 @@ function Overview({ v, t }: { v: LiveView; t: T }) {
   const ap = v.agentPrints;
   const part = (x: LiveMoneyPart) => [
     t(x.transfers === 1 ? "{n} transfer" : "{n} transfers", { n: x.transfers }),
-    volumeText(x.volume, v.network.isTestnet, t),
+    volumeText(x.volume, v.network.isTestnet, v.idrPerUsdc, t),
     ...(x.transfers ? [t("{n} verified", { n: x.verified })] : []),
   ].join(" · ");
   return (
@@ -295,7 +307,7 @@ function Overview({ v, t }: { v: LiveView; t: T }) {
       <div className="live-ov-grid">
         <section className="card live-ov-card">
           <CardHead icon="orders" title={t("Orders")} to="money" t={t}
-            info={t("Every order on this site, by id only: no customer names or product titles. In progress: not paid out or rejected yet.")} />
+            info={t("Every order on this site, by id only: no customer names or product titles. In progress: not paid out or rejected yet. The next deadline is a real order's.")} />
           <dl className="live-glance live-ov-stats three">
             <div><dt>{t("All")}</dt><dd>{o.total}</dd></div>
             <div><dt>{t("In progress")}</dt><dd>{o.inProgress}</dd></div>
@@ -325,16 +337,15 @@ function Overview({ v, t }: { v: LiveView; t: T }) {
         <section className="card money live-money live-ov-card">
           <CardHead icon="wallet" title={t("Transactions on Arc")} to="money" t={t}
             info={<>
-              {t("Completed escrow transfers on Arc. Only the transfers of real orders count; the team's tests are shown apart.")}
+              {t("Completed escrow transfers of real orders on Arc. The team's tests and the demo top-ups are shown apart and never counted.")}
               {v.network.isTestnet && <>{" "}{t("All money here is test USDC on Arc Testnet.")}</>}
             </>} />
           <dl className="live-usage">
-            <div><dt>{t("Arc transfers")}</dt><dd>{m.transfers}</dd></div>
+            <div><dt>{t("Transfers on real orders")}</dt><dd>{m.transfers}</dd></div>
             <div><dt>{t("Verified on Arc")}</dt><dd>{m.verified}<small> / {m.transfers}</small></dd></div>
-            <div className="wide"><dt>{t("Volume")}</dt><dd className="live-usage-text">{volumeText(m.volume, v.network.isTestnet, t)}</dd></div>
+            <div className="wide"><dt>{t("Volume")}</dt><dd className="live-usage-text">{volumeText(m.volume, v.network.isTestnet, v.idrPerUsdc, t)}</dd></div>
           </dl>
           <dl className="kv-rows live-ov-rows">
-            <div><dt>{t("Real orders")}</dt><dd>{part(m.real)}</dd></div>
             <div><dt>{t("Tests, not counted")}</dt><dd>{part(m.test)}</dd></div>
           </dl>
         </section>
@@ -357,6 +368,96 @@ function Overview({ v, t }: { v: LiveView; t: T }) {
   );
 }
 
+// ---------- the agent tab: its limits and the nightly report ----------
+
+/** The Chief page's "Authority limits", read-only: short labels, the live text behind each ⓘ, the code limits in a fold. */
+function ChiefCard({ c, t }: { c: LiveChief; t: T }) {
+  return (
+    <section className="card live-chief chief-limits">
+      <h2>
+        <Icon name="shield" size={19} />{t("Authority limits")}
+        <Info>{t("Built from the live config: the Chief's tools, the owner's rules and the network switch.")}</Info>
+      </h2>
+      {c.paymentTool
+        ? <p className="alert bad" style={{ marginTop: 0 }}>{t("WARNING: a tool that looks like a payment tool is in the agent's tool list")}</p>
+        : <p className="chief-safe"><Icon name="shield" size={16} /><span>{t("No payment tool: {n} tools, none moves money.", { n: c.tools })}</span></p>}
+      <ul className="chief-checks">
+        {c.decides.map((d) => (
+          <li key={d.label}>
+            <span className="chief-mark ok"><Tick /></span>
+            <span>{d.label}{d.byCode && <span className="chief-by">{t("code")}</span>} <Info>{d.text}</Info></span>
+          </li>
+        ))}
+      </ul>
+      <ul className="chief-checks locked">
+        {c.handed.map((h) => (
+          <li key={h.label}>
+            <span className="chief-mark"><Lock /></span>
+            <span>{h.label}{!h.byCode && <span className="chief-by warn">{t("prompt only")}</span>} <Info>{h.text}</Info></span>
+          </li>
+        ))}
+      </ul>
+      <details className="fold chief-fold">
+        <summary>{t("Limited by code ({n})", { n: c.limits.length })}</summary>
+        <ul className="chief-plain">{c.limits.map((l) => <li key={l}>{l}</li>)}</ul>
+      </details>
+    </section>
+  );
+}
+
+/** The latest nightly report's Summary, as the owner reads it on the team's Review page (names hidden). */
+function ReportCard({ r, t }: { r: LiveReport; t: T }) {
+  return (
+    <section className="card live-report">
+      <h2>
+        <Icon name="review" size={19} />{t("Last nightly report")}
+        <Info>{t("Every night the Chief writes the owner a short report. Code counts the facts; Claude writes them up with no tools. Only its summary shows here.")}</Info>
+      </h2>
+      <p className="live-report-meta muted">
+        <time>{r.when} WIB</time> · <span className={`badge ${r.byClaude ? "ok" : ""}`}>{r.byClaude ? "Claude" : t("code template")}</span>
+      </p>
+      <p className="live-report-text">{r.text}</p>
+    </section>
+  );
+}
+
+// ---------- the money tab: how the escrow is built ----------
+
+/** Circle and Arc in five short lines, the details behind each ⓘ, and who holds the wallets, said plainly. */
+function MoneyHow({ testnet, t }: { testnet: boolean; t: T }) {
+  const rows: { icon: IconName; text: string; info: string }[] = [
+    {
+      icon: "wallet", text: "Two Circle wallets per order: the customer's and the escrow.",
+      info: "Developer-controlled smart-contract wallets (SCA) on Arc, made through Circle's API. Circle keeps the keys; Kesuni's server asks for each transfer.",
+    },
+    {
+      icon: "receipt", text: "Each transfer gets an idempotency key, saved before Circle is called.",
+      info: "A UUID stored with the transfer first: after a timeout or a restart the same key goes again, so a transfer never happens twice.",
+    },
+    {
+      icon: "pulse", text: "Circle's Gas Station pays the gas.",
+      info: "The wallets are ERC-4337 smart accounts, so the Arc explorer shows a transfer as a Bundler call to the EntryPoint contract. The USDC moved is under “Tokens transferred”.",
+    },
+    {
+      icon: "chain", text: "Every transfer is re-checked on Arc.",
+      info: "This site reads each transaction back from Arc over RPC: it must have succeeded, with the right sender, recipient and amount. Then it shows “Verified on Arc”.",
+    },
+    ...(testnet ? [{
+      icon: "flask" as const, text: "Payment is in rupiah, outside the app; the deposits are test USDC, not customer money.",
+      info: "On Arc Testnet, Kesuni's demo wallet tops up the customer's wallet with test USDC before the deposit. That top-up is internal and never counted.",
+    }] : []),
+  ];
+  return (
+    <section className="live-how" aria-labelledby="live-how">
+      <h3 className="live-sub" id="live-how">{t("How the money works: Circle + Arc")}</h3>
+      <ul className="live-how-list">
+        {rows.map((r) => <li key={r.text}><Icon name={r.icon} size={16} /><span>{t(r.text)} <Info>{t(r.info)}</Info></span></li>)}
+      </ul>
+      <p className="live-how-honest"><Lock size={14} />{t("Kesuni holds these wallets. Release and refund are guarded by the policy engine in our code, not by a smart contract.")}</p>
+    </section>
+  );
+}
+
 // ---------- the page ----------
 
 /** The menu under the header. Overview first: /live without ?tab opens it. */
@@ -365,19 +466,27 @@ export const LIVE_TABS: Tab[] = [
   { id: "printers", label: "Printers" },
   { id: "agent", label: "Agent" },
   { id: "money", label: "Money on Arc" },
+  { id: "token", label: "Token research" },
 ];
-export type LiveTab = "overview" | "printers" | "agent" | "money";
+export type LiveTab = "overview" | "printers" | "agent" | "money" | "token";
 /** ?tab= as given; anything else (missing, unknown, repeated) opens the Overview. */
 export const liveTab = (wanted: string | string[] | undefined): LiveTab => pickTab(LIVE_TABS, wanted) as LiveTab;
 
-/** The whole page below the top bar. `tab`: the open tab. `seconds`: how often the page refreshes itself. */
-export default function LiveStudio({ v, t, locale, seconds, tab = "overview" }: { v: LiveView; t: T; locale: Locale; seconds: number; tab?: LiveTab }) {
+/**
+ * The whole page below the top bar. `tab`: the open tab. `seconds`: how often the page refreshes itself. `token`: the
+ * token research gates (read from the store by the page only when that tab is open).
+ */
+export default function LiveStudio({ v, t, locale, seconds, tab = "overview", token = null }: {
+  v: LiveView; t: T; locale: Locale; seconds: number; tab?: LiveTab; token?: PortalToken | null;
+}) {
   const online = v.printers.filter((p) => p.online).length;
   // No printer online: the studio's bridge (or its network) is down. Then the page does not claim to be live.
   const bridgeDown = v.printers.length > 0 && online === 0;
   const clock = new Date(v.at).toLocaleTimeString(dateLocale(locale), { timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const u = v.usage;
-  const lastTx = v.transfers.find((x) => x.state === "complete" && x.explorerUrl);
+  // The last counted transfer (a real order's deposit, release or refund); else the last one at all.
+  const done = v.transfers.filter((x) => x.state === "complete" && x.explorerUrl);
+  const lastTx = done.find((x) => x.counted) ?? done[0];
   const ap = v.agentPrints;
 
   return (
@@ -444,6 +553,8 @@ export default function LiveStudio({ v, t, locale, seconds, tab = "overview" }: 
             : <ul className="chief-feed">{v.agent.map((a) => <AgentRow key={a.id} a={a} t={t} />)}</ul>}
         </section>
       )}
+      {tab === "agent" && v.report && <ReportCard r={v.report} t={t} />}
+      {tab === "agent" && v.chief && <ChiefCard c={v.chief} t={t} />}
 
       {tab === "money" && (
         <section className="card money live-money live-money-tab">
@@ -466,15 +577,20 @@ export default function LiveStudio({ v, t, locale, seconds, tab = "overview" }: 
             {" · "}{t(u.testTransfers === 1 ? "{n} test transfer" : "{n} test transfers", { n: u.testTransfers })}
             {" "}<Info>{t(u.rule)}</Info>
           </p>
+          <MoneyHow testnet={v.network.isTestnet} t={t} />
           <h3 className="live-sub">{t("Latest transfers")}</h3>
-          {v.network.isTestnet && v.transfers.some((x) => x.order.label !== "real") && (
+          {v.network.isTestnet && v.transfers.some((x) => !x.counted) && (
             <p className="live-note">{t("Test transfers are real Arc Testnet transactions too, but they are not counted above.")}</p>
           )}
           {v.transfers.length === 0
             ? <p className="muted" style={{ margin: 0, fontSize: 13 }}>{t("No Arc transfers yet.")}</p>
-            : <ul className="live-txs">{v.transfers.map((x) => <TransferRow key={x.id} x={x} t={t} />)}</ul>}
+            : <ul className="live-txs">{v.transfers.map((x) => <TransferRow key={x.id} x={x} rate={v.idrPerUsdc} t={t} />)}</ul>}
         </section>
       )}
+
+      {tab === "token" && (token
+        ? <TokenTab k={token} t={t} />
+        : <section className="card"><p className="muted" style={{ margin: 0 }}>{t("The token research could not be read right now.")}</p></section>)}
 
       <footer className="cust-foot live-foot">
         <p><Icon name="flask" size={15} />{t("Simulated orders are the team's own tests. They are never counted as real business.")}</p>

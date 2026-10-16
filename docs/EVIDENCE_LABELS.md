@@ -13,3 +13,9 @@ Every piece of evidence in the UI and README must carry exactly one label:
 | `mainnet` | Real transaction with real funds. |
 
 A transaction hash proves a transaction, not lamp quality. "Print complete" is not "OK to pay".
+
+Orders from the public customer form start `real`. A practice order (a judge's or the team's) is marked `simulated` on
+the operator order page (`POST /api/orders/:id/label`, with the person's name in the decision log). Not while the
+escrow holds money or a transfer is in progress (it counts until its release or refund), never with an escrow on
+mainnet, and on mainnet not while the customer can still pay; a demo practice order or one marked printed for testing
+never becomes `real`.

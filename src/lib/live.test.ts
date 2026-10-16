@@ -131,13 +131,15 @@ describe("live view: nothing private leaks", () => {
 
   it("each printer, agent entry and transfer carries only its allow-listed fields", () => {
     const v = liveView(rows(), NOW);
-    expect(Object.keys(v).sort()).toEqual(["agent", "agentCheck", "agentPrints", "at", "lastReport", "network", "overview", "printers", "transfers", "usage"]);
+    expect(Object.keys(v).sort()).toEqual([
+      "agent", "agentCheck", "agentPrints", "at", "chief", "idrPerUsdc", "lastReport", "network", "overview", "printers", "report", "transfers", "usage",
+    ]);
     expect(Object.keys(v.printers[0]).sort()).toEqual([
       "ams", "bed", "bedHolds", "bedTarget", "external", "faults", "id", "lastReport", "layer", "name", "nozzle", "nozzleTarget", "online",
       "order", "pill", "progress", "remaining", "stage",
     ]);
-    expect(Object.keys(v.agent[0]).sort()).toEqual(["asked", "at", "id", "kind", "line", "mode", "order", "refused", "repeats", "skill", "title", "when"]);
-    expect(Object.keys(v.transfers[0]).sort()).toEqual(["amount", "at", "check", "explorerUrl", "hash", "id", "kind", "order", "state", "testnet", "when"]);
+    expect(Object.keys(v.agent[0]).sort()).toEqual(["asked", "at", "id", "kind", "line", "mode", "order", "refused", "repeats", "skill", "title", "waiting", "when"]);
+    expect(Object.keys(v.transfers[0]).sort()).toEqual(["amount", "at", "check", "counted", "explorerUrl", "hash", "id", "kind", "order", "state", "testnet", "when"]);
     expect(Object.keys(v.usage).sort()).toEqual(["arcTransfers", "mismatch", "realCustomers", "realOrders", "rule", "simulatedOrders", "testTransfers", "unchecked", "verified"]);
     expect(v.printers[0].ams?.slots.map((s) => Object.keys(s).sort().join())).toEqual(Array(4).fill("active,color,colors,empty,name,slot,type"));
     const o = v.overview;
@@ -147,7 +149,7 @@ describe("live view: nothing private leaks", () => {
     expect(Object.keys(o.printers.toCollect[0]).sort()).toEqual(["name", "order"]);
     expect(Object.keys(o.orders).sort()).toEqual(["finished", "inProgress", "next", "real", "simulated", "total"]);
     expect(Object.keys(o.orders.next!).sort()).toEqual(["day", "due", "late", "order"]);
-    expect(Object.keys(o.money).sort()).toEqual(["real", "test", "transfers", "verified", "volume"]);
+    expect(Object.keys(o.money).sort()).toEqual(["depositsVerified", "test", "transfers", "verified", "volume"]);
     expect(Object.keys(o.agent).sort()).toEqual(["claudeRuns", "decisions", "handedToPerson"]);
   });
 });
@@ -192,7 +194,7 @@ describe("live view: the overview", () => {
     });
   });
 
-  it("orders: in progress and finished as the Orders page counts, real vs simulated, and the next deadline by id and label only", () => {
+  it("orders: in progress and finished as the Orders page counts, real vs simulated, and the next real deadline by id and label only", () => {
     const o = liveView(rows(), NOW).overview.orders;
     // Both IN_PRODUCTION, due 20 Oct: the lower id first.
     expect(o).toEqual({
@@ -207,11 +209,15 @@ describe("live view: the overview", () => {
       order("ORD-015", "real", { status: "PAID" }),
       order("ORD-016", "simulated", { status: "REJECTED" }),
     ];
+    // A test order's old deadline is not the studio's next one: ORD-012 (simulated, 2 d late) is left out.
     expect(liveView(rows({ orders: more }), NOW).overview.orders).toEqual({
       total: 7, inProgress: 5, finished: 2, real: 4, simulated: 3,
-      next: { order: { id: "ORD-012", label: "simulated" }, due: "2 d late", day: "Wed 14 Oct", late: true },
+      next: { order: { id: "ORD-010", label: "real" }, due: "in 4 d", day: "Tue 20 Oct", late: false },
     });
-    expect(liveView(rows({ orders: more }, "id"), NOW, makeT("id", ID), "id").overview.orders.next).toMatchObject({ due: "telat 2 hari", day: "Rab 14 Okt" });
+    const late = [...more, order("ORD-019", "real", { status: "PLAN_CHOSEN", deadline: "2026-10-14" })];
+    expect(liveView(rows({ orders: late }), NOW).overview.orders.next).toEqual({ order: { id: "ORD-019", label: "real" }, due: "2 d late", day: "Wed 14 Oct", late: true });
+    expect(liveView(rows({ orders: late }, "id"), NOW, makeT("id", ID), "id").overview.orders.next).toMatchObject({ due: "telat 2 hari", day: "Rab 14 Okt" });
+    expect(liveView(rows({ orders: [sim] }), NOW).overview.orders.next).toBeNull();
     const today = order("ORD-017", "real", { deadline: "2026-10-16" });
     expect(liveView(rows({ orders: [today] }), NOW).overview.orders.next).toMatchObject({ due: "today", late: false });
     expect(liveView(rows({ orders: [order("ORD-018", "real", { status: "PAID" })] }), NOW).overview.orders.next).toBeNull();
@@ -220,26 +226,29 @@ describe("live view: the overview", () => {
 
   it("Arc transfers: real orders as counted, the tests apart, never added across networks; the Money tab's numbers", () => {
     const v = liveView(rows(), NOW);
-    // Real: the usage's 2 counted transfers (1 verified, 0.2 test USDC). Tests: the simulated order's deposit (Arc did not
-    // match), the removed order's deposit (not checked) and the real order's demo top-up (verified): 3, 0.3 test USDC.
+    // The headline is real orders only: the usage's 2 counted transfers (1 verified, 0.2 test USDC). Tests, apart: the
+    // simulated order's deposit (Arc did not match), the removed order's deposit (not checked) and the real order's demo
+    // top-up (verified): 3, 0.3 test USDC. Deposits verified: the real order's one deposit (its top-up is not a deposit).
     expect(v.overview.money).toEqual({
-      transfers: 5, verified: 2, volume: { testUsdc: "0.5", usdc: "0" },
-      real: { transfers: 2, verified: 1, volume: { testUsdc: "0.2", usdc: "0" } },
+      transfers: 2, verified: 1, volume: { testUsdc: "0.2", usdc: "0" },
       test: { transfers: 3, verified: 1, volume: { testUsdc: "0.3", usdc: "0" } },
+      depositsVerified: 1,
     });
-    expect(v.overview.money.real.transfers).toBe(v.usage.arcTransfers);
-    expect(v.overview.money.real.verified).toBe(v.usage.verified);
+    expect(v.overview.money.transfers).toBe(v.usage.arcTransfers);
+    expect(v.overview.money.verified).toBe(v.usage.verified);
     expect(v.overview.money.test.transfers).toBe(v.usage.testTransfers);
-    // A mainnet transfer is real USDC: never added to test USDC.
+    // A mainnet transfer is real USDC: never added to test USDC. On a simulated order it is a test: not in the headline.
     const main: Escrow = { ...escrowsBase("ORD-011"), network: "ARC", txs: [tx("deposit", "COMPLETE", 70, { amountMicro: 2_500_000, txHash: HASH })] };
     expect(liveView(rows({ escrows: [...escrows, main] }), NOW).overview.money).toMatchObject({
-      transfers: 6, volume: { testUsdc: "0.5", usdc: "2.5" }, test: { transfers: 4, volume: { testUsdc: "0.3", usdc: "2.5" } },
+      transfers: 2, volume: { testUsdc: "0.2", usdc: "0" }, test: { transfers: 4, volume: { testUsdc: "0.3", usdc: "2.5" } }, depositsVerified: 1,
     });
+    // A deposit not read back from Arc yet is not a verified deposit.
+    const unverified = escrows.map((e) => ({ ...e, txs: e.txs.map((x) => (x.kind === "deposit" ? { ...x, verified: undefined } : x)) }));
+    expect(liveView(rows({ escrows: unverified }), NOW).overview.money.depositsVerified).toBe(0);
     // No transfer at all: zeros, not missing.
     const none = { ...usage, arcTxs: { ...usage.arcTxs, count: 0, verifiedOnArc: 0, notCheckedYet: 0, volume: { testnet: { micro: 0, usdc: "0" }, mainnet: { micro: 0, usdc: "0" } } } };
     expect(liveView(rows({ usage: none, escrows: [] }), NOW).overview.money).toEqual({
-      transfers: 0, verified: 0, volume: { testUsdc: "0", usdc: "0" },
-      real: { transfers: 0, verified: 0, volume: { testUsdc: "0", usdc: "0" } }, test: { transfers: 0, verified: 0, volume: { testUsdc: "0", usdc: "0" } },
+      transfers: 0, verified: 0, volume: { testUsdc: "0", usdc: "0" }, test: { transfers: 0, verified: 0, volume: { testUsdc: "0", usdc: "0" } }, depositsVerified: 0,
     });
   });
 
@@ -336,6 +345,77 @@ describe("live view: the agent at work", () => {
     expect(liveView(rows({ agentPrints: { on: true } }), NOW).agentPrints).toEqual({ on: true, locked: false, started: 0 });
     expect(liveView(rows({ agentPrints: { on: false, started: 2 } }), NOW).agentPrints).toEqual({ on: false, locked: false, started: 2 });
   });
+
+  it("a Claude run's 'Waiting on' line shows on its own row, names hidden; the summary line leaves it out", () => {
+    const run = [
+      row({ tool: "agent_start", sec: 0, input: { trigger: "The operator pressed Run agent." } }),
+      row({ tool: "agent_summary", sec: 5, output: {
+        text: "**Decision:** priced ORD-010 at Rp16.500 for Lia Kusuma.\n**Waiting on:** Lia Kusuma to approve the price; then Khelda picks a printer.",
+      } }),
+    ];
+    const [a] = liveView(rows({ log: run }), NOW).agent;
+    expect(a.line).toBe("Decision: priced ORD-010 at Rp16.500 for [customer name].");
+    expect(a.waiting).toBe("[customer name] to approve the price; then a person picks a printer.");
+    // A summary in paragraphs, the "Waiting on" last.
+    const long = [run[0], row({ tool: "agent_summary", sec: 6, output: { text: "ORD-010 is paid.\n\n- Printer: none ready.\n\nDecision: no action.\nWaiting on: the operator to empty the bed." } })];
+    expect(liveView(rows({ log: long }), NOW).agent[0]).toMatchObject({ line: "ORD-010 is paid.", waiting: "the operator to empty the bed." });
+    // No such line, a rule-planner run, a code row: nothing.
+    expect(liveView(rows(), NOW).agent.map((x) => x.waiting)).toEqual(["", "", "", "", ""]);
+  });
+
+  it("runs on one order that came to the same fold into one row ×N, also with heartbeat rows between them", () => {
+    const loop = (sec: number, refused: boolean) => [
+      row({ tool: "agent_start", sec, orderId: "ORD-011", input: { trigger: "Heartbeat check (timer) found: ORD-011 has quotes but no plan yet." } }),
+      row({ tool: "check_vendor_policy", sec: sec + 1, orderId: "ORD-011", ok: !refused, input: { quoteId: "Q-1" }, output: { reasons: ["Quote 35 USDC exceeds mandate 32 USDC"] } }),
+      row({ tool: "request_human_decision", sec: sec + 2, orderId: "ORD-011", input: { question: "Raise the budget?" } }),
+      row({ tool: "agent_summary", sec: sec + 3, orderId: "ORD-011", output: { text: `I asked the owner again (${sec}).` } }),
+      row({ tool: "heartbeat", sec: sec + 30, orderId: "ORD-011", output: { findings: [{ text: "ORD-011 has quotes but no plan yet." }] } }),
+    ];
+    const agent = liveView(rows({ log: [...loop(0, true), ...loop(100, true), ...loop(200, true)] }), NOW).agent;
+    // Newest first: the heartbeat after the last run, then that run ×3 (the older runs fold into it), then the folded
+    // heartbeat rows that now sit back to back.
+    expect(agent.map((a) => [a.kind, a.repeats, a.line])).toEqual([
+      ["heartbeat", 1, "ORD-011 has quotes but no plan yet."],
+      ["run", 3, "I asked the owner again (200)."],
+      ["heartbeat", 2, "ORD-011 has quotes but no plan yet."],
+    ]);
+    expect(agent[1]).toMatchObject({ refused: 1, asked: true });
+    // A run with another outcome in between starts a new row: the oldest run does not fold across it.
+    const mixed = liveView(rows({ log: [...loop(0, true), ...loop(100, false), ...loop(200, true)] }), NOW).agent;
+    expect(mixed.filter((a) => a.kind === "run").map((a) => [a.repeats, a.refused])).toEqual([[1, 1], [1, 0], [1, 1]]);
+  });
+});
+
+describe("live view: the Chief's limits and the nightly report", () => {
+  beforeEach(() => store.resetDb());
+
+  it("the Chief page's authority card, read-only: short labels, the live text through safeLine, no payment tool", () => {
+    const a = chiefAuthority(NOW);
+    const c = liveView(rows({ authority: a }), NOW).chief!;
+    expect(c).toMatchObject({ tools: a.tools.length, paymentTool: false });
+    expect(c.decides.map((d) => d.label)).toEqual(expect.arrayContaining(["Price by weight", "Choose the production plan", "Release escrow after acceptance"]));
+    expect(c.decides.find((d) => d.label === "Release escrow after acceptance")).toMatchObject({ byCode: true });
+    expect(c.decides.find((d) => d.label === "Price by weight")).toMatchObject({ byCode: false, text: expect.stringMatching(/^Price PLA and PETG by weight/) });
+    expect(c.handed.find((h) => h.label === "Does not send funds")).toMatchObject({ byCode: true, text: expect.stringMatching(/^Moving money: no payment tool/) });
+    expect(c.handed.find((h) => h.label === "Does not settle disputes")).toMatchObject({ byCode: false });
+    expect(c.limits.some((l) => /^No payment tool: \d+ tools, none moves money/.test(l))).toBe(true);
+    expect(liveView(rows({ authority: a }, "id"), NOW, makeT("id", ID), "id").chief!.decides[0].label).toBe("Harga dari berat");
+    expect(liveView(rows(), NOW).chief).toBeNull();
+  });
+
+  it("the latest nightly report: its Summary only, on one line, names, products and files hidden", () => {
+    const review = {
+      day: "2026-10-15", facts: {}, mode: "claude" as const, model: "claude-x", at: "2026-10-15T14:05:00.000Z", trigger: "schedule" as const,
+      text: "## Summary\n- ORD-010 (lia: keychain for Lia) for Lia Kusuma is printing; Khelda loads white PETG.\n- lia_keychain.stl is sliced.\n\n## Needs your decision\n- Call 0812-3456-7890.",
+    };
+    const v = liveView(rows({ review }), NOW);
+    expect(v.report).toEqual({
+      day: "2026-10-15", when: "15 Oct, 21:05", byClaude: true, text: "ORD-010 for [customer name] is printing; a person loads white PETG. [file] is sliced.",
+    });
+    expect(JSON.stringify(v.report)).not.toMatch(/Lia|keychain|Khelda|0812|Needs your decision/);
+    expect(liveView(rows({ review: { ...review, mode: "template", text: "No heading, one line." } }), NOW).report).toMatchObject({ byClaude: false, text: "No heading, one line." });
+    expect(liveView(rows(), NOW).report).toBeNull();
+  });
 });
 
 describe("live view: money on Arc", () => {
@@ -350,6 +430,8 @@ describe("live view: money on Arc", () => {
     ]);
     expect(t[3]).toMatchObject({ amount: "0.1", testnet: true, explorerUrl: `${explorerTxBase("ARC-TESTNET")}${HASH}`, hash: "0xab12ab…ab12" });
     expect(t[0]).toMatchObject({ explorerUrl: null, hash: null });
+    // Counted: a real order's deposit, release or refund. Not: the demo top-up (internal test funds) and every test transfer.
+    expect(t.map((x) => x.counted)).toEqual([false, false, true, true, false]);
   });
 
   it("the real-usage counts, zeros included", () => {
@@ -364,6 +446,7 @@ describe("safeLine", () => {
   const hide: Hide = { customers: ["Lia Kusuma"], people: ["Khelda"], products: ["lia: keychain for Lia"] };
   it("hides what a summary must not show and keeps the rest", () => {
     expect(safeLine("Deadline 2026-10-20 for ORD-010 (lia: keychain for Lia); Khelda checks it.", hide)).toBe("Deadline 2026-10-20 for ORD-010; a person checks it.");
+    expect(safeLine("Facts as of 2026-10-15T14:00 UTC.", hide)).toBe("Facts as of 2026-10-15T14:00 UTC.");
     expect(safeLine("Mail lia@example.com, WA +62 812 3456 7890", hide)).toBe("Mail [email hidden], WA [number hidden]");
     expect(safeLine("See https://x.example/c/abc and /c/abcdef, tx 0xabcdef0123456789abcdef", hide)).toBe("See [link hidden] and [link hidden], tx [hidden]");
     expect(safeLine("HMS_0510_0400_0001_0044 on A1 Combo #3, error 0700-8011", hide)).toBe("HMS_0510_0400_0001_0044 on A1 Combo #3, error 0700-8011");
@@ -401,10 +484,12 @@ describe("product titles never show, also when the stored text was cut inside on
       row({ tool: "heartbeat", sec: 20, orderId: "ORD-012", output: { findings: [{ text: `Task for ORD-012 has been open for more than 6 hours: "${stale.slice(0, 140)}…"` }] } }),
     ];
     const agent = liveView(rows({ orders: [wedding], log: log2 }), NOW).agent;
+    // The stale task's own words stay on the operator pages: here only that it is open.
     expect(agent.map((a) => a.line)).toEqual([
-      "Task for ORD-012 has been open for more than 6 hours: “…”",
+      "A task for ORD-012 is open for more than 6 h",
       "ORD-012 is paid into escrow but has no printer yet. Start production.",
     ]);
+    expect(liveView(rows({ orders: [wedding], log: [log2[1]] }, "id"), NOW, makeT("id", ID), "id").agent[0].line).toBe("Ada tugas untuk ORD-012 yang terbuka lebih dari 6 jam");
     expect(JSON.stringify(agent)).not.toMatch(/wedding|Budi|Hartono|Sari|Wulandari|keychain|gold PLA/i);
   });
 

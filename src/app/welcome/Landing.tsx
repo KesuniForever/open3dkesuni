@@ -3,8 +3,11 @@ import { DEMO_SCENARIOS } from "@/lib/demo";
 import { SCENARIO_OUTCOMES, type VideoEmbed } from "@/lib/landing";
 import type { T } from "@/i18n/core";
 
-/** Three live numbers from the Live studio view; null when they could not be read (the strip is left out). */
-export interface LandingStats { printersOnline: number; printersTotal: number; orders: number; arcVerified: number }
+/**
+ * Live numbers from the Live studio view, real business only (the team's tests are never counted); null when they could
+ * not be read (the strip is left out). depositsVerified: real orders' escrow deposits read back from Arc with a match.
+ */
+export interface LandingStats { printersOnline: number; printersTotal: number; realOrders: number; realCustomers: number; depositsVerified: number }
 
 type Actor = "agent" | "person" | "code" | "chain";
 const ACTORS: { id: Actor; label: string }[] = [
@@ -48,7 +51,10 @@ const PILOTS = [
   "A boarding-house owner who sells accessories",
 ];
 
-/** The landing page body, below the top bar: what Open3DKesuni is, for someone who has never seen it. Links only. */
+/**
+ * The landing page body, below the top bar: what Open3DKesuni is, for someone who has never seen it. Links only.
+ * Without a demo video (DEMO_VIDEO_URL) there is no "Watch the demo" button and no video card.
+ */
 export default function Landing({ t, stats, video }: { t: T; stats: LandingStats | null; video: VideoEmbed | null }) {
   return (
     <>
@@ -66,7 +72,7 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
           <div className="lp-actions">
             <a className="lp-btn primary" href="/live"><span className="live-dot" aria-hidden="true" />{t("See the studio live")}</a>
             <a className="lp-btn" href="/customer"><Icon name="box" size={15} />{t("Continue as customer")}</a>
-            <a className="lp-btn" href="#demo"><Icon name="play" size={15} />{t("Watch the demo")}</a>
+            {video && <a className="lp-btn" href="#demo"><Icon name="play" size={15} />{t("Watch the demo")}</a>}
           </div>
         </div>
         <HeroVisual t={t} />
@@ -75,13 +81,14 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
       {stats && (
         <dl className="lp-stats" aria-label={t("Live numbers")}>
           <div><dt>{t("Printers online")}</dt><dd>{stats.printersOnline}<small>/{stats.printersTotal}</small></dd></div>
-          <div><dt>{t("Orders handled")}</dt><dd>{stats.orders}</dd></div>
-          <div><dt>{t("Arc transfers verified")}</dt><dd>{stats.arcVerified}</dd></div>
+          <div><dt>{t("Real orders")}</dt><dd>{stats.realOrders}</dd></div>
+          <div><dt>{t("Real customers")}</dt><dd>{stats.realCustomers}</dd></div>
+          <div><dt>{t("Escrow deposits verified on Arc")}</dt><dd>{stats.depositsVerified}</dd></div>
         </dl>
       )}
       {stats && (
         <p className="lp-stats-note">
-          {t("Live from the studio. Includes practice orders and test USDC on Arc Testnet; the live page labels each one.")}
+          {t("Live from the studio. Real orders only: the team's own tests are never counted. The deposits are test USDC on Arc Testnet.")}
         </p>
       )}
 
@@ -105,7 +112,7 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
         <ul>
           <li><Icon name="bot" size={18} />{t("Routine decisions done by an agent.")}</li>
           <li><Icon name="shield" size={18} />{t("The business rules in code that cannot be talked around.")}</li>
-          <li><Icon name="wallet" size={18} />{t("Money held fairly in the middle.")}</li>
+          <li><Icon name="wallet" size={18} />{t("Money held apart, released only by rule.")}</li>
         </ul>
       </section>
 
@@ -170,23 +177,22 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
       <section className="lp-section" id="demo" aria-labelledby="lp-demo">
         <p className="eyebrow">{t("Demo")}</p>
         <h2 id="lp-demo">{t("See it work")}</h2>
-        <div className={`lp-video${video ? "" : " empty"}`}>
-          {video?.kind === "iframe" ? (
-            <iframe src={video.src} title={t("Open3DKesuni demo video")} loading="lazy"
-              allow="encrypted-media; picture-in-picture; fullscreen" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
-          ) : video?.kind === "video" ? (
-            <video src={video.src} controls preload="metadata" playsInline />
-          ) : (
-            <div className="lp-video-empty">
-              <span className="lp-play" aria-hidden="true"><Icon name="play" size={26} /></span>
-              <b>{t("Demo video coming soon")}</b>
-              <span>{t("Meanwhile, the studio is live:")} <a href="/live">{t("See the studio live")}</a></span>
-            </div>
-          )}
-        </div>
+        {video && (
+          <div className="lp-video">
+            {video.kind === "iframe" ? (
+              <iframe src={video.src} title={t("Open3DKesuni demo video")} loading="lazy"
+                allow="encrypted-media; picture-in-picture; fullscreen" allowFullScreen referrerPolicy="strict-origin-when-cross-origin" />
+            ) : (
+              <video src={video.src} controls preload="metadata" playsInline />
+            )}
+          </div>
+        )}
 
-        <h3 className="lp-sub">{t("Try the rules")}</h3>
-        <p className="lp-small">{t("Each scenario runs the real rules engine on a practice order; practice orders are labelled simulated and never counted.")}</p>
+        {/* The practice page itself is for the team (/demo needs the operator password): here only what each one shows. */}
+        <h3 className="lp-sub">
+          {t("{n} scenarios we test", { n: DEMO_SCENARIOS.length })}{video && <small> {t("(shown in the video)")}</small>}
+        </h3>
+        <p className="lp-small">{t("Each one runs the real rules engine on a practice order, labelled simulated and never counted.")}</p>
         <ul className="lp-grid three lp-scenarios">
           {DEMO_SCENARIOS.map((s) => (
             <li key={s.id} className="lp-card">
@@ -208,7 +214,7 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
             <ul className="lp-list">
               {PILOTS.map((p) => <li key={p}><Icon name="check" size={16} />{t(p)}</li>)}
             </ul>
-            <p className="lp-honest">{t("Pilot orders are starting this week; no customer has paid through the app yet.")}</p>
+            <p className="lp-honest">{t("Pilot orders are running now. Payment is in rupiah, outside the app; the escrow deposits on Arc are test USDC from Kesuni's demo wallet, not customer money.")}</p>
           </div>
           <div className="lp-card">
             <h3>{t("It also helps")}</h3>

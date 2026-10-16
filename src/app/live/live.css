@@ -119,6 +119,15 @@
 .live-asked svg { margin-right: 1px; }
 .live-by { font-size: 10px; padding: 0 6px; }
 .live-by.claude { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+/* A run's "Waiting on: …", under its summary line. */
+.live-wait { margin: 2px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+.live-wait b { font-weight: 600; color: var(--text); margin-right: 2px; }
+.live-wait b::after { content: ":"; }
+
+/* The nightly report's summary and the Chief's limits, under the feed. */
+.live-report, .live-chief { margin-top: 16px; }
+.live-report-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 12.5px; }
+.live-report-text { margin: 0; font-size: 14px; line-height: 1.55; color: var(--text-2); overflow-wrap: anywhere; }
 
 /* ---------- money on Arc (navy panel) ---------- */
 .live-usage { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0 0 12px; }
@@ -148,6 +157,18 @@
 .card.money .info:hover, .card.money .info:focus { color: #fff; }
 .live-money .info-pop { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
 .live-money .info-pop b { color: var(--text); }
+.live-amt small { font-weight: 500; color: var(--navy-muted); }
+.card.money .badge:not(.real):not(.simulated):not(.ok):not(.bad) { background: rgba(255, 255, 255, 0.08); color: var(--navy-text); border-color: transparent; }
+
+/* How the money works: Circle + Arc, one short line each, the details behind the ⓘ. */
+.live-how-list { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 7px; }
+.live-how-list li { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; line-height: 1.45; color: var(--navy-text); min-width: 0; }
+.live-how-list li > svg { flex: none; margin-top: 2px; color: var(--lime); }
+.live-how-honest {
+  display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; padding: 10px 12px; border-radius: 10px;
+  background: var(--navy-2); border: 1px solid var(--navy-line); font-size: 13px; line-height: 1.45; color: var(--navy-text);
+}
+.live-how-honest svg { flex: none; margin-top: 2px; color: var(--lime); }
 
 /* ---------- footer ---------- */
 .live-foot { display: grid; gap: 8px; color: var(--muted); margin-top: 28px; }

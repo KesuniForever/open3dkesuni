@@ -8,6 +8,33 @@
 }
 /* A phone has no room for the label next to a link (the Live studio's "Dashboard"): the page itself names it. */
 @media (max-width: 480px) { .cust-top-right.has-action > .muted { display: none; } }
+/* The brand is a link home and never shrinks or wraps; on a 360-375 px phone a link beside it keeps only its icon (its
+   word stays for screen readers), so it never covers "Open3DKesuni". */
+.cust-top > .brand { flex: none; white-space: nowrap; }
+.cust-top > a.brand:hover { text-decoration: none; }
+@media (max-width: 420px) { .cust-top-right.has-action > a { font-size: 0; gap: 0; padding: 8px; } }
+
+/* The order page (/c/<token>): small additions to the customer layout in globals.css. */
+.cust-late, .cust-open {
+  margin: 12px 0 0; padding: 8px 11px; border-radius: 9px; background: var(--warn-bg); color: var(--warn); font-size: 14px; font-weight: 600;
+}
+.cust-pay > .cust-open { margin: 0; }
+.cust-saved { display: grid; gap: 10px; margin: 0 0 16px; }
+.cust-saved > p { margin: 0; }
+.cust-saved-actions, .cust-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cust-saved-actions > *, .cust-actions > * { flex: 1 1 150px; min-height: 44px; justify-content: center; text-align: center; }
+.cust-saved-link { font-size: 13px; overflow-wrap: anywhere; user-select: all; }
+.cust-check { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 10px; font-size: 14px; font-weight: 400; color: var(--text); }
+.cust-check > input { flex: none; width: 18px; height: 18px; margin: 2px 0 0; }
+.cust-steps li.open { color: var(--text); }
+.cust-steps li.open .dot { background: var(--warn-bg); color: var(--warn); }
+.cust-steps li.bad { color: var(--text); }
+.cust-steps li.bad .dot { background: var(--bad-bg); color: var(--bad); }
+.cust-proof > summary { cursor: pointer; font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cust-proof[open] > summary { margin-bottom: 12px; }
+.cust-links { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.cust-foot .cust-wa { display: inline-flex; margin: 0 0 12px; }
+.cust-hero .cust-actions { margin-top: 14px; }
 
 /* Material and colour picker (ColorPicker.tsx): the spools loaded in the studio right now. */
 .cc { display: grid; gap: 14px; min-width: 0; }

@@ -25,10 +25,10 @@ const view = (extra: Partial<CustomerView>) =>
   ({ order: { status: "CREATED" }, escrow: null, paying: false, printing: null, printedOn: null, overBudget: null, budgetRaised: null, ...extra }) as unknown as CustomerView;
 
 describe("\"Your price is above your budget\" on the order page", () => {
-  it("English: the price, per piece and in USDC, the budget, the name and one button", () => {
+  it("English: the price, per piece and in USDC (2 decimals at most), the budget, the name and one button", () => {
     const html = card("en");
     expect(text(html)).toBe([
-      "Rp2.500.000", "Rp500.000 per piece · ≈ 151.515152 USDC",
+      "Rp2.500.000", "Rp500.000 per piece · ≈ 151.52 USDC",
       "Your budget", "Kesuni can only charge up to the budget you set. Raising it lets Kesuni prepare your agreement at this price. Above Rp1.000.000 Kesuni's owner also approves.",
       "Rp1.500.000", "Your name", "Raise my budget to Rp2.500.000",
       "You do not pay yet: you agree to the final price first. Or message Kesuni to change the order.",
@@ -41,7 +41,7 @@ describe("\"Your price is above your budget\" on the order page", () => {
   it("Indonesian", () => {
     const t = text(card("id"));
     for (const s of [
-      "Rp500.000 per buah · ≈ 151.515152 USDC", "Anggaran Anda", "Kesuni hanya bisa menagih sampai anggaran yang Anda tetapkan.",
+      "Rp500.000 per buah · ≈ 151,52 USDC", "Anggaran Anda", "Kesuni hanya bisa menagih sampai anggaran yang Anda tetapkan.",
       "Di atas Rp1.000.000, pemilik Kesuni juga ikut menyetujui.", "Nama Anda", "Naikkan anggaran saya menjadi Rp2.500.000",
       "Anda belum membayar: Anda menyetujui harga akhir dulu. Atau hubungi Kesuni untuk mengubah pesanan.",
     ]) expect(t).toContain(s);
@@ -49,7 +49,7 @@ describe("\"Your price is above your budget\" on the order page", () => {
 
   it("one piece: no per-piece line; no name: the button waits for it", () => {
     const html = card("en", { ...OVER, quantity: 1, unitIdr: 2_500_000 }, "");
-    expect(text(html)).toContain("Rp2.500.000 ≈ 151.515152 USDC Your budget");
+    expect(text(html)).toContain("Rp2.500.000 ≈ 151.52 USDC Your budget");
     expect(html).toMatch(/<button class="primary cust-cta" disabled="">/);
   });
 
@@ -66,7 +66,10 @@ describe("\"Your price is above your budget\" on the order page", () => {
     expect(headline(view({ overBudget: OVER }), id).title).toBe("Harga melebihi anggaran Anda");
     expect(headline(view({ budgetRaised: { toIdr: 2_500_000 } }), en)).toEqual({ title: "Kesuni is preparing your agreement", sub: "" });
     expect(headline(view({ budgetRaised: { toIdr: 2_500_000 } }), id).title).toBe("Kesuni sedang menyiapkan kesepakatan Anda");
-    expect(headline(view({}), en).title).toBe("Kesuni is preparing your price");
+    expect(headline(view({}), en)).toEqual({
+      title: "Kesuni is preparing your price",
+      sub: "Kesuni is checking your order. The price will appear on this page. You can close it and open the link again later.",
+    });
   });
 });
 

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { customerCreateOrder } from "@/lib/customer";
 import { clientIp, fail, failWith, str } from "@/lib/http";
 import { wakeChief } from "@/lib/agent/chief";
-import { addCustomerDesign, customerDesignContentProblem, newOrderWake, type CustomerDesign } from "@/lib/auto-weigh";
+import { addCustomerDesign, customerDesignContentProblem, newOrderWake, weighingNow, type CustomerDesign } from "@/lib/auto-weigh";
 import { MAX_CUSTOMER_DESIGN_BYTES } from "@/lib/file-rules";
 import { inviteValid } from "@/lib/invite";
 import { mediaType, readFormCapped, readJsonCapped } from "@/lib/request-body";
@@ -117,6 +117,7 @@ async function place(req: Request, ip: string): Promise<Response> {
   byIp.set(ip, [...recentFor(byIp, ip, at), at]);
   all.push(at);
   const stored: CustomerDesign | null = design ? await addCustomerDesign(r.order.id, design) : null;
-  wakeChief(r.order.id, newOrderWake(stored));
+  // While the studio's slicer weighs the design, its grams wake the Chief (src/lib/auto-weigh.ts): no run to only wait.
+  if (!weighingNow(stored)) wakeChief(r.order.id, newOrderWake(stored));
   return NextResponse.json({ link: `/c/${r.order.customerToken}`, ...(stored ? { design: { stored: stored.stored, weighing: Boolean(stored.weighing?.ok) } } : {}) }, { status: 201 });
 }

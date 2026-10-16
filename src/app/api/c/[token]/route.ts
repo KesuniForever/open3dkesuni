@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { customerDecide, customerPay, customerSetColors, customerView, orderForToken, refreshPayment } from "@/lib/customer";
+import { customerDecide, customerFailure, customerPay, customerSetColors, customerView, orderForToken, refreshPayment } from "@/lib/customer";
 import { clientIp, fail, failWith, str } from "@/lib/http";
 import { readJsonCapped } from "@/lib/request-body";
 import { customerAgree } from "@/lib/agreement";
@@ -25,6 +25,9 @@ export async function GET(_req: Request, ctx: Ctx) {
 //    | { action: "raise-budget", quoteId, by }: Kesuni's price is above the budget and the customer raises their budget to
 //      exactly that quote's price (src/lib/budget-raise.ts). Any amount in the body is ignored: the price is Kesuni's.
 //      Counted with the tries of the order form and "Add your design" (src/lib/customer-limits.ts).
+// A pay, accept or reject that fails for a reason the customer cannot fix answers one plain sentence; the reason goes
+// to the decision log and a task for the team (customerFailure). A decision whose money the policy held answers
+// settled: false without the policy's reasons (the page's headline says Kesuni finishes it).
 export async function POST(req: Request, ctx: Ctx) {
   const { token } = await ctx.params;
   const order = orderForToken(token);
@@ -35,7 +38,7 @@ export async function POST(req: Request, ctx: Ctx) {
   const action = str(b?.action);
   if (action === "agree" || (action === "pay" && b?.agree === true)) {
     const a = customerAgree(order.id, str(b?.by));
-    if (!a.ok) return failWith(a);
+    if (!a.ok) return failWith(action === "pay" ? customerFailure(order.id, "pay", a) : a);
     if (action === "agree") return NextResponse.json({ ok: true, agreement: a.agreement });
   }
   if (action === "colors") {
@@ -54,13 +57,13 @@ export async function POST(req: Request, ctx: Ctx) {
   }
   if (action === "pay") {
     const r = await customerPay(order.id);
-    return r.ok ? NextResponse.json({ ok: true }) : failWith(r);
+    return r.ok ? NextResponse.json({ ok: true }) : failWith(customerFailure(order.id, "pay", r));
   }
   if (action === "accept" || action === "reject") {
     const r = await customerDecide(order.id, {
       accepted: action === "accept", by: str(b?.by), note: str(b?.note).slice(0, 500), checked: b?.checked === true,
     });
-    return r.ok ? NextResponse.json(r) : failWith(r);
+    return r.ok ? NextResponse.json({ ok: true, settled: r.settled }) : failWith(customerFailure(order.id, action, r));
   }
   return fail(400, 'Expected { action: "agree" | "pay" | "accept" | "reject" | "review" | "colors" | "raise-budget" }');
 }

@@ -22,9 +22,10 @@ Data is stored in SQLite (`src/lib/store.ts`, file `data/local/kesuni.db`, git-i
 
 | `GET /api/orders/:id/escrow` | none | Asks Circle once about pending transfers, then `{ escrow }` |
 | `POST /api/orders/:id/escrow` | `{ action: "open" \| "topup" \| "deposit" \| "release" \| "refund" }` | `{ ok, escrow }` (+ `intent` on release), or **422** with policy reasons |
+| `POST /api/orders/:id/label` | `{ label: "real"\|"simulated", by }` (a person's name; operator only, no agent tool) | 200 `{ order, changed }` (`changed: false` when it already had that label). Marks a practice order from the public form `simulated` (it stops counting as traction), or undoes a mistaken mark. Writes a decision-log row (`order_label`, actor `human`, `{ label, by }` → `{ from, to }`). **409** with reasons while the escrow holds money (`FUNDED`) or a transfer is in progress, for an order with an escrow on mainnet, or one the customer can still pay while the app runs on mainnet (they stay real), and for a demo practice order or one marked printed for testing (they never become real). `src/lib/order-label.ts` |
 | `POST /api/reset` | none | Resets the `simulated` demo order. `real` orders are never touched |
 
-### The Chief (operator only; `src/proxy.ts` guards everything except `/c`, `/api/c`, `/pesan` and the printer bridge)
+### The Chief (operator only; `src/proxy.ts` guards everything except the customer pages `/c`, `/api/c`, `/request`, `/customer`, the public pages `/`, `/welcome` and `/live` (GET only), and the printer bridge)
 
 | Method & path | Body | Result |
 |---|---|---|
@@ -38,7 +39,7 @@ Data is stored in SQLite (`src/lib/store.ts`, file `data/local/kesuni.db`, git-i
 | `POST /api/arc/verify` | `{ txHash, from, to, amountUsdc }` | `{ check, explorerUrl }`: checks any USDC transfer on Arc, saves nothing. `check.status` = `verified` (+ `logId` = `chainId:txHash:logIndex`, `logIndex`, `blockNumber`) \| `mismatch` \| `not_found` (+ `reason`). **400** bad input, **502** RPC unreachable |
 | `POST /api/arc/verify` | `{ orderId, idempotencyKey }` | Re-checks one stored escrow transfer (COMPLETE, with hash) and saves a definite result on it as `verified`; `{ check, saved, explorerUrl }`. 404 unknown tx, 409 not checkable |
 | `GET /api/health/chain` | none (`?fresh=1` skips the ~60 s cache) | Always 200: `{ at, network, arc: { status: "ok"\|"stale"\|"wrong_chain"\|"bad_token"\|"unreachable"\|"not_configured", chainId, expectedChainId, blockNumber, blockAgeSec, usdcDecimals, reason? }, circle: { status: "ok"\|"unreachable"\|"not_configured", walletSet, wallet: { address (shortened), blockchain, state, usdc } \| null, reason? }, cached }`. Never returns the RPC URL or a key |
-| `GET /api/traction` | none | Real usage for the submission (`src/lib/traction.ts`, read-only): `{ computedAt, rule, realCustomers, realOrders, realOrdersByStatus, arcTxs: { count, byKind: { deposit, release, refund }, verifiedOnArc, mismatchOnArc, notCheckedYet, volume: { testnet: { micro, usdc }, mainnet: { micro, usdc } }, last: [{ orderId, kind, amountMicro, amountUsdc, network, networkLabel, txHash, explorerUrl, verifiedOnArc: true\|false\|null, at }] }, excluded: { simulatedOrders, demoTopups } }`. Counts only `real` orders; a transfer counts when it is a deposit, release or refund, `COMPLETE`, with an Arc tx hash. Simulated orders, demo top-ups (`customer_topup` from the demo-funds wallet) and internal transfers are not counted. Volume is the sum of those transfers per network (a deposit and its release are two transfers). Customers are counted by name (the same name twice = one customer), never returned. Same numbers as the "Real usage" card on `/` |
+| `GET /api/traction` | none | Real usage for the submission (`src/lib/traction.ts`, read-only): `{ computedAt, rule, realCustomers, realOrders, realOrdersByStatus, arcTxs: { count, byKind: { deposit, release, refund }, verifiedOnArc, mismatchOnArc, notCheckedYet, volume: { testnet: { micro, usdc }, mainnet: { micro, usdc } }, last: [{ orderId, kind, amountMicro, amountUsdc, network, networkLabel, txHash, explorerUrl, verifiedOnArc: true\|false\|null, at }] }, excluded: { simulatedOrders, demoTopups } }`. Counts only `real` orders; a transfer counts when it is a deposit, release or refund, `COMPLETE`, with an Arc tx hash. Simulated orders, demo top-ups (`customer_topup` from the demo-funds wallet) and internal transfers are not counted. Volume is the sum of those transfers per network (a deposit and its release are two transfers). Customers are counted by name (the same name twice = one customer), never returned. Same numbers as the Money on Arc tab of the public Live studio page (`/live?tab=money`) and the landing page's tiles (which add `depositsVerified`: real orders' deposits read back from Arc with a match) |
 
 `review` = `{ day, facts, text, mode: "claude" | "template", model, at, trigger: "schedule" | "button", error?, usage? }`.
 `facts` are counted by code (`dailyFacts` in `src/lib/agent/daily-review.ts`): orders, plans (agent vs human), agreements,
@@ -249,6 +250,7 @@ never sees the customer's name, phone, address or email. Writes go through `src/
 routes use, so an agent cannot bypass policy. Every call is stored in `agentLog` (returned by `GET /api/orders/:id`).
 
 ## Not built yet
-Circle webhooks, vendor
-management, and hosted storage for the live link. Customer payment on mainnet: a customer cannot fund their wallet or
-see its deposit address in the app (on testnet Kesuni sends test USDC).
+Circle webhooks (the app asks Circle about pending transfers and re-checks each one on Arc instead), vendor management,
+and an on-chain escrow contract (the escrow is a Circle wallet Kesuni holds; release and refund are guarded by the policy
+engine in code). Customer payment on mainnet: a customer cannot fund their wallet or see its deposit address in the app
+(on testnet Kesuni sends test USDC). The live link runs on Railway with SQLite on a volume (`docs/DEPLOY-RAILWAY.md`).

@@ -4,7 +4,8 @@
 import type { CustomerView } from "@/lib/customer";
 
 export type OrderStage =
-  | "weighing" | "preparing" | "budget" | "price" | "paying" | "waiting" | "printing" | "paused" | "checking" | "check" | "done" | "refunding" | "refunded";
+  | "weighing" | "preparing" | "budget" | "price" | "paying" | "unpaid" | "waiting" | "printing" | "paused" | "checking" | "check" | "done"
+  | "refunding" | "refunded";
 
 export interface OrderStatus {
   stage: OrderStage;
@@ -12,10 +13,13 @@ export interface OrderStatus {
   text: string;
   /** The badge colour. */
   tone: "" | "ok" | "warn" | "testnet";
-  /** The customer has something to do on the order page: raise their budget to Kesuni's price, pay, or accept or reject. */
+  /** The customer has something to do on the order page: raise their budget to Kesuni's price, pay (also once production
+   *  started before the payment), or accept or reject. */
   yourTurn: boolean;
   /** Only while printing. */
   percent: number | null;
+  /** The text's other {placeholders} ("Printed {printed} of {total}"). */
+  vars?: Record<string, number>;
 }
 
 const PRINTING = ["RUNNING", "PREPARE", "SLICING"];
@@ -24,7 +28,7 @@ const status = (stage: OrderStage, text: string, tone: OrderStatus["tone"], your
 
 export function orderStatus(
   v: Pick<CustomerView, "order" | "escrow" | "paying" | "printing" | "printedOn"> & { design?: Pick<NonNullable<CustomerView["design"]>, "state"> | null }
-    & Partial<Pick<CustomerView, "overBudget" | "budgetRaised">>,
+    & Partial<Pick<CustomerView, "overBudget" | "budgetRaised" | "pieces">>,
 ): OrderStatus {
   const s = v.order.status;
   const funded = Boolean(v.escrow && v.escrow.state !== "AWAITING_DEPOSIT");
@@ -36,14 +40,20 @@ export function orderStatus(
   if (s === "CREATED" && v.budgetRaised) return status("preparing", "Preparing your agreement", "");
   // The customer's own design is being weighed for the price (the order page says the same).
   if (s === "CREATED") return v.design?.state === "weighing" ? status("weighing", "Weighing your design", "") : status("preparing", "Preparing your price", "");
-  if (!funded) return v.paying ? status("paying", "Processing payment", "testnet") : status("price", "Price ready", "warn", true);
-  if (s === "EVIDENCE_SUBMITTED") return status("check", "Ready to check", "warn", true);
+  if (v.paying && !funded) return status("paying", "Processing payment", "testnet");
+  if (!funded && s === "PLAN_CHOSEN") return status("price", "Price ready", "warn", true);
+  // Production may start before the payment (a person can print an unpaid order): the stage follows the order, and the
+  // payment stays the customer's turn. Accepting waits for it, so an unpaid finished item reads "Payment still open".
+  const pay = !funded;
+  if (s === "EVIDENCE_SUBMITTED") return pay ? status("unpaid", "Payment still open", "warn", true) : status("check", "Your turn: check the item", "warn", true);
   if (v.printing && PRINTING.includes(v.printing.state)) {
-    return { ...status("printing", "Printing {pct}", "testnet"), percent: Math.max(0, Math.min(100, Math.round(v.printing.percent))) };
+    return { ...status("printing", "Printing {pct}", "testnet", pay), percent: Math.max(0, Math.min(100, Math.round(v.printing.percent))) };
   }
-  if (v.printing?.state === "PAUSE") return status("paused", "Print paused", "warn");
-  if (v.printedOn) return status("checking", "Quality check", "testnet");
-  return status("waiting", "Waiting for a printer", "testnet");
+  if (v.printing?.state === "PAUSE") return status("paused", "Print paused", "warn", pay);
+  // Between two runs of an order printed piece by piece: still printing (printedOn waits for the last run).
+  if (v.pieces && v.pieces.printed > 0) return { ...status("printing", "Printed {printed} of {total}", "testnet", pay), vars: v.pieces };
+  if (v.printedOn) return status("checking", "Quality check", "testnet", pay);
+  return pay ? status("unpaid", "Payment still open", "warn", true) : status("waiting", "Waiting for a printer", "testnet");
 }
 
 /** "/c/<token>" from a pasted order link (the whole address, or only its path), or null when it holds none. */

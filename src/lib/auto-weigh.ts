@@ -152,6 +152,12 @@ export async function addCustomerDesign(orderId: string, design: { filename: str
 }
 
 /**
+ * The studio's slicer is weighing the design now (asked, no grams yet): afterAutoWeigh wakes the Chief with them, so the
+ * order form and "Add your design" do not wake it just to wait (that run would only cost money).
+ */
+export const weighingNow = (design: CustomerDesign | null): boolean => Boolean(design?.weighing?.ok && !design.weighing.grams);
+
+/**
  * What the Chief is told when a customer's order arrives, with or without their own design, or when the customer adds
  * their design later on their order page (POST /api/c/<token>/design): the same instructions either way.
  */

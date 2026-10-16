@@ -2,10 +2,13 @@
 import type { ScenarioId } from "./demo";
 
 /**
- * The demo video. Empty: the page shows a "coming soon" card. A YouTube or Vimeo watch/share link is shown in an
- * embedded player; a link to an .mp4 (or .webm) file in a plain video player.
+ * The demo video. Empty: the page shows no "Watch the demo" button and no video card. A YouTube or Vimeo watch/share
+ * link is shown in an embedded player; a link to an .mp4 (or .webm) file in a plain video player.
  */
 export const DEMO_VIDEO_URL = "";
+
+/** The video link the page uses: the DEMO_VIDEO_URL env var (set on the server, no code change), else the one above. */
+export const demoVideoUrl = (env: Record<string, string | undefined> = process.env): string => env.DEMO_VIDEO_URL?.trim() || DEMO_VIDEO_URL;
 
 export type VideoEmbed = { kind: "iframe"; src: string; host: string } | { kind: "video"; src: string; host: string };
 

@@ -28,6 +28,7 @@ const PATHS = {
   flask: "M9.5 3h5M10.5 3v6L5 19a1.5 1.5 0 0 0 1.3 2h11.4a1.5 1.5 0 0 0 1.3-2l-5.5-10V3M7.5 15h9",
   network: "M12 3v5M12 8H6.5a1.5 1.5 0 0 0-1.5 1.5V13M12 8h5.5a1.5 1.5 0 0 1 1.5 1.5V13M10 3h4M3 13h4v4H3zM17 13h4v4h-4zM10 16h4v4h-4zM12 8v8",
   receipt: "M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3",
+  lock: "M6.5 11h11a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.5v-7A1.5 1.5 0 0 1 6.5 11zM8.5 11V7.5a3.5 3.5 0 0 1 7 0V11",
 } as const;
 
 export type IconName = keyof typeof PATHS;

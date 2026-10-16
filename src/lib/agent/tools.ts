@@ -19,12 +19,18 @@ import { issueText } from "../printer/errors";
 import { colorsCheckedNow, nameOf } from "../colors";
 import { postCustomerMessage } from "../messages";
 import { safeDispatch, safePlan } from "../printer/dispatch";
+import { orderGate, unitsPerRun } from "../printer/autoprint";
 import { whyText } from "../printer/autoprint-rules";
 import { autoWeighState } from "../slicing";
+import { raiseOffer } from "../budget-raise";
 import type { AgentLogEntry, Order, OperatorTask, Printer } from "../types";
 
 type Json = Record<string, unknown>;
 type ToolResult = { ok: boolean; data: unknown };
+type By = NonNullable<AgentLogEntry["by"]>;
+
+/** Who calls a tool right now: set by callTool around the (synchronous) run. The Chief, the rule planner (code) or a person. */
+let caller: By = "chief";
 
 interface Tool {
   name: string;
@@ -88,12 +94,35 @@ function orderForAgent(o: Order) {
     // Set when the Chief may not price this order itself (not PLA or PETG): then a person prices it.
     pricingBlockedBy: materialConcern(o),
     agreementCurrent: agreementCurrent(o),
-    ownerApproval: o.ownerApproval ? { quoteId: o.ownerApproval.quoteId, note: o.ownerApproval.note } : null,
+    // The owner's note may name the customer too.
+    ownerApproval: o.ownerApproval ? { quoteId: o.ownerApproval.quoteId, note: agentText(o.ownerApproval.note, o) } : null,
     hasActualReport: Boolean(o.actual), idrPerUsdc: idrPerUsdc(), ownerRules: ownerRules(),
     files: store.listAttachments(o.id).map((a) => ({ kind: a.kind, filename: agentText(a.filename, o) })),
     // What the customer was already told, so the Chief does not repeat an event. A person may have used the name.
     customerMessages: store.listMessages(o.id).slice(-5).map((m) => ({ by: m.by, at: m.at, text: agentText(m.text, o) })),
+    // The questions to people on this order, also answered ones, so the Chief does not ask the same thing again. No names.
+    earlierQuestions: store.listTasks(o.id).filter((t) => t.kind === "needs_info").slice(-5).map((t) => ({
+      taskId: t.id, text: agentText(t.text, o), status: t.status, at: t.at, doneAt: t.doneAt ?? null,
+    })),
+    // Kesuni's price is above the customer's budget and their page offers to raise it to this price: they decide.
+    customerMayRaiseBudget: budgetOffer(o),
+    // The studio PC's slices of this order's design (weight and slicer time per plate): for checking slicerGrams only,
+    // never the price (price only with slicerGrams).
+    slices: store.listSliceJobs({ orderId: o.id }).filter((j) => j.state === "done" && j.result).slice(-5).map((j) => ({
+      sliceId: j.id, file: agentText(j.sourceName, o), weightG: j.result!.weightG,
+      minutes: j.result!.predictionSec === null ? null : Math.round(j.result!.predictionSec / 60),
+      by: j.actor === "system" ? "automatic weighing" : j.actor === "agent" ? "dispatcher" : "a person",
+    })),
   };
+}
+
+function budgetOffer(o: Order) {
+  try {
+    const r = raiseOffer(o);
+    return r ? { quoteId: r.quote.id, priceIdr: r.priceIdr, budgetIdr: r.budgetIdr, source: r.source } : null;
+  } catch {
+    return null;
+  }
 }
 /** Hide each part of the customer's name (3+ letters) in text the agent reads. */
 export function hideName(text: string, name?: string): string {
@@ -210,14 +239,16 @@ export const TOOLS: Tool[] = [
     },
     run: (i) => {
       const r = chooseQuote(str(i.orderId), str(i.quoteId), "agent", str(i.reason));
-      return r.ok ? { ok: true, data: r.order } : err(r.error, r.reasons);
+      // Never the stored order: it holds the customer's name and the token of their page.
+      return r.ok ? { ok: true, data: { id: r.order.id, status: r.order.status, chosenQuoteId: r.order.chosenQuoteId } } : err(r.error, r.reasons);
     },
   },
   {
     name: "request_human_decision",
     description: "Escalate to a person: the owner (approval of an exception to the owner's rules) or the operator " +
       "(a missing number such as grams or print hours, or anything unclear or outside what you can judge). Creates a " +
-      "task. Write it in English: what you need, why, and what you already know. Put your recommendation, if you have " +
+      "task; while your earlier question on this order is still open, this adds an \"Update:\" line to it instead. " +
+      "Write it in English: what you need, why, and what you already know. Put your recommendation, if you have " +
       "one, in recommendation.",
     inputSchema: {
       type: "object",
@@ -234,9 +265,19 @@ export const TOOLS: Tool[] = [
       const rec = str(i.recommendation).trim().slice(0, 300);
       const text = (str(i.question).trim().slice(0, 600) + (rec ? `\nChief's recommendation: ${rec}` : "")).trim()
         || "The agent needs a human decision.";
-      const question = (t: string) => t.split("\nChief's recommendation:")[0].trim();
-      const open = store.listTasks(orderId).find((t) => t.status === "open" && t.kind === "needs_info" && question(t.text) === question(text));
-      const task = open ?? createTask(orderId, "needs_info", text);
+      const question = (t: string) => t.split("\nChief's recommendation:")[0].split("\nUpdate: ")[0].trim();
+      const open = store.listTasks(orderId).filter((t) => t.status === "open" && t.kind === "needs_info");
+      const same = open.find((t) => question(t.text) === question(text) || t.text.split("\nUpdate: ")[1]?.trim() === text);
+      if (same) return { ok: true, data: { escalated: true, taskId: same.id, question: same.text, alreadyAsked: true } };
+      // One open question per order from the Chief (older tasks have no "by"; code's tasks carry a key or are code's):
+      // a new question while it is open becomes its update, never a second task.
+      const mine = open.filter((t) => t.by === "chief" || (!t.by && !t.key && t.createdBy === "agent")).at(-1);
+      if (mine) {
+        const updated = `${mine.text.split("\nUpdate: ")[0]}\nUpdate: ${text}`.slice(0, 1500);
+        store.saveTask({ ...mine, text: updated });
+        return { ok: true, data: { escalated: true, taskId: mine.id, question: updated, updatedOpenQuestion: true } };
+      }
+      const task = createTask(orderId, "needs_info", text, undefined, undefined, undefined, caller);
       return { ok: true, data: { escalated: true, taskId: task.id, question: task.text } };
     },
   },
@@ -359,25 +400,34 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "get_production_status",
-    description: "Has the customer paid into escrow; the printers (read-only): whether each can take a job, what it is doing now, " +
+    description: "Has the customer paid into escrow; production: the order's quantity, the runs (prints) it needs, how many " +
+      "finished and are on their way, and units per run; the printers (read-only): whether each can take a job, what it is doing now, " +
       "faults it reports, the spools loaded in its AMS; this order's print jobs (by a person, or by the code dispatcher); the " +
       "latest evidence; open operator tasks; agentPrints: whether a person turned agent prints on, and why the dispatcher " +
       "waits on this order. You have no printer controls: people at the studio run the printers.",
     inputSchema: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
     run: (i) => {
       const orderId = str(i.orderId);
-      if (!store.getOrder(orderId)) return err("Order not found");
+      const o = store.getOrder(orderId);
+      if (!o) return err("Order not found");
       const e = store.getEscrow(orderId);
       const plan = safePlan();
       const line = plan?.orders[orderId];
+      const g = orderGate(o);
+      const perRun = unitsPerRun(o);
       return {
         ok: true,
         data: {
           escrow: e ? { state: e.state, amountUsdc: microToUsdc(e.amountMicro), txs: e.txs.map((t) => ({ kind: t.kind, state: t.state })) } : null,
-          agentPrints: {
-            on: plan?.on ?? false, thisOrder: line ? whyText(line.why) : null,
-            runs: line ? { needed: line.runsNeeded, done: line.runsDone, onTheirWay: line.runsActive } : null,
+          // One run is one finished print. Without a person's runs, a real order needs one run per unit while only the agent
+          // prints it (the studio's slice is one unit per plate), and 1 once a person printed it (people print full plates).
+          // Printing is done only when runsDone reaches runsNeeded and that covers the quantity.
+          production: {
+            quantity: o.quantity, runsNeeded: g.runsNeeded, runsDone: g.runsDone, runsOnTheirWay: g.runsActive, unitsPerRun: perRun,
+            unitsPrinted: Math.min(o.quantity, g.runsDone * perRun), runsSetBy: o.autoPrint ? "a person" : "default",
+            printingFinished: printFinished(orderId),
           },
+          agentPrints: { on: plan?.on ?? false, thisOrder: line ? whyText(line.why) : null },
           printers: store.listPrinters().map((p) => {
             const w = plan?.printers[p.id]?.why;
             return printerForAgent(p, w ? whyText(w) : null);
@@ -386,16 +436,17 @@ export const TOOLS: Tool[] = [
             id: j.id, printerId: j.printerId, state: j.state, plate: j.plate, by: j.by, at: j.updatedAt, error: j.error ?? null,
             ...(j.actor === "agent" ? { byCode: true, bedConfirmedBy: j.bedConfirmedBy ?? null } : {}),
           })),
-          evidence: store.listEvidence(orderId).slice(-10).map((x) => ({ kind: x.kind, note: x.note, label: x.label, at: x.at })),
-          openTasks: store.listTasks(orderId).filter((t) => t.status === "open").map((t) => ({ kind: t.kind, text: t.text })),
+          evidence: store.listEvidence(orderId).slice(-10).map((x) => ({ kind: x.kind, note: agentText(x.note, o), label: x.label, at: x.at })),
+          openTasks: store.listTasks(orderId).filter((t) => t.status === "open").map((t) => ({ taskId: t.id, kind: t.kind, text: agentText(t.text, o) })),
         },
       };
     },
   },
   {
     name: "choose_printer",
-    description: "Link the order to a printer that is online, idle and has an empty bed. Only after the customer has paid " +
-      "into escrow. If none is ready, a task for the operator is created.",
+    description: "Link the order to a printer that is online, idle and has an empty bed, one with the order's material and " +
+      "first colour loaded first. Only after the customer has paid into escrow. If none is ready, or no ready printer has " +
+      "that spool, a task for the operator is created and nothing is linked.",
     inputSchema: { type: "object", properties: { orderId: { type: "string" } }, required: ["orderId"] },
     run: (i) => {
       const orderId = str(i.orderId);
@@ -403,7 +454,7 @@ export const TOOLS: Tool[] = [
       if (!e || e.state !== "FUNDED") return err("The customer has not paid into escrow yet; do not start printing");
       if (store.listPrinters().some((p) => p.currentOrderId === orderId)) return err("A printer is already linked to this order");
       if (printFinished(orderId)) return err("This order is already printed: it waits for collection and QC, not a new printer");
-      const r = choosePrinter(orderId);
+      const r = choosePrinter(orderId, caller);
       return r.ok ? { ok: true, data: { printer: r.printer.name, reasons: r.reasons } } : err(r.error, r.reasons);
     },
   },
@@ -454,15 +505,17 @@ export const TOOLS: Tool[] = [
       const text = str(i.text).trim().slice(0, 600);
       if (!text) return err("Task text is required");
       if (store.listTasks(orderId).some((t) => t.status === "open" && t.kind === kind && t.text === text)) return err("The same task is already open");
-      return { ok: true, data: { taskId: createTask(orderId, kind, text).id } };
+      return { ok: true, data: { taskId: createTask(orderId, kind, text, undefined, undefined, undefined, caller).id } };
     },
   },
   {
     name: "message_customer",
     description: "Customer skill: post a short update on the customer's order page. Short (1-3 sentences), polite, " +
-      "simple English, facts only. No prices other than the agreed price, no payment instructions, no links, " +
-      "contacts or addresses. At most one message per event. Code refuses links, wallet addresses, phone numbers, " +
-      "emails, a repeat of the last message, and more than one message per order every 10 minutes.",
+      "simple English, facts only. No payment instructions, no links, contacts or addresses. At most one message per event. " +
+      "Code refuses links, wallet addresses, phone numbers, emails, a repeat of the last message, any rupiah or USDC " +
+      "amount other than the order's price (by weight, or the chosen or owner-approved quote), the words free, gratis, " +
+      "discount, diskon, promo or refund, and more than one message per order every 10 minutes (2 minutes once the " +
+      "order's status or payment changed since your last message).",
     inputSchema: {
       type: "object",
       properties: { orderId: { type: "string" }, text: { type: "string", description: "The message, in English, at most 500 characters" } },
@@ -470,7 +523,8 @@ export const TOOLS: Tool[] = [
     },
     run: (i) => {
       const r = postCustomerMessage(str(i.orderId), str(i.text), "agent");
-      return r.ok ? { ok: true, data: { messageId: r.message.id, text: r.message.text } } : err(r.error, r.reasons);
+      if (r.ok) return { ok: true, data: { messageId: r.message.id, text: r.message.text } };
+      return { ok: false, data: { error: r.error, reasons: r.reasons, ...(r.retryAfter ? { retryAfter: r.retryAfter } : {}) } };
     },
   },
   {
@@ -501,15 +555,33 @@ export const TOOLS: Tool[] = [
 const NOT_FOR_LLM = ["propose_payment", "price_with_calculator"];
 export const LLM_TOOLS = TOOLS.filter((t) => !NOT_FOR_LLM.includes(t.name));
 
-/** Call a tool by name and record it in the decision log. Never throws. */
-export function callTool(name: string, input: Json, actor: "agent" | "human" = "agent"): ToolResult {
+/**
+ * Call a tool by name and record it in the decision log. Never throws: a tool that fails is an error result.
+ * by: the Chief (Claude in a run: the default for the agent), code (the rule-based planner) or a person.
+ */
+export function callTool(name: string, input: Json, actor: "agent" | "human" = "agent", by?: By): ToolResult {
   const tool = TOOLS.find((t) => t.name === name);
-  const result: ToolResult = tool ? tool.run(input) : err(`Unknown tool ${name}`);
+  const who: By = by ?? (actor === "human" ? "person" : "chief");
+  const prev = caller;
+  caller = who;
+  let result: ToolResult;
+  try {
+    result = tool ? tool.run(input) : err(`Unknown tool ${name}`);
+  } catch (e) {
+    result = err(`The tool failed: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`);
+  } finally {
+    caller = prev;
+  }
   const entry: Omit<AgentLogEntry, "id"> = {
     orderId: str(input.orderId) || (store.getQuote(str(input.quoteId))?.orderId ?? ""),
-    actor, tool: name, input, ok: result.ok, output: result.data, at: new Date().toISOString(),
+    actor, by: who, tool: name, input, ok: result.ok, output: result.data, at: new Date().toISOString(),
   };
-  store.addLog(entry);
+  try {
+    store.addLog(entry);
+  } catch (e) {
+    // The log is the record, not the action: a failed write never fails the step that already happened.
+    console.error(`! decision log (${name}): ${e instanceof Error ? e.message : String(e)}`);
+  }
   return result;
 }
 

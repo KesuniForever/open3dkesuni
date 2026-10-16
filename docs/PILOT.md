@@ -1,16 +1,24 @@
-# Pilot definition (fill in before building payments)
+# Pilot (Padang, October 2026)
 
-Status: TODO. Nothing here is decided until a person writes it down.
+Status: running since 15 Oct 2026. Customers are described, never named, in this repo.
 
-- Customer / orderer:
-- Product: custom lamp side table with 3D-printed components
-- Printed parts, quantity, deadline:
-- Payee (who gets paid) and payee address:
-- Acceptance rule (what "accepted" means, who signs off):
-- Budget mandate (max spend):
-- Partner printer (real? name?): none confirmed
-- Network / token / test amount: Arc testnet, USDC, small amount
-- Mainnet payment planned? undecided
+- **Customers:** three small businesses in Padang, Indonesia: an accessories shop (50 lighter cases), a graphic
+  designer (modular lamps) and a boarding-house owner who also sells accessories. They order through the customer
+  portal (`/customer`) or Kesuni enters the order for them.
+- **Products:** small batches in PLA or PETG, printed on Kesuni's three Bambu Lab A1 Combo printers. No partner printer
+  yet: the three printers stand in for partner studios.
+- **Price:** by weight from the slicer (`KESUNI_PRICE_PER_GRAM_IDR`, default Rp1.500 per gram, unit price rounded up to
+  Rp500), inside the owner's rules in code (minimum order, approval limit, minimum margin; `.env.example`).
+- **Budget mandate:** the customer's budget in rupiah, held as USDC at `IDR_PER_USDC` (default 16.500). The policy
+  engine refuses a plan above it; the customer can raise it on their page to exactly Kesuni's price.
+- **Payee:** Kesuni (`KESUNI_PAYOUT_ADDRESS`, a wallet on Arc Testnet).
+- **Acceptance:** the customer accepts on their own order page after ticking that they checked size, colour, finish and
+  function. Only then does code release the escrow, through the policy engine. A rejection refunds it.
+- **Network and money:** Arc Testnet, test USDC, not customer money. Payment to Kesuni is in rupiah, outside the app; Kesuni's demo-funds wallet tops
+  up the customer's order wallet with test USDC, which then goes into the escrow. The top-up is never counted.
+- **Snapshot** (17 Oct 2026, about 02:00 WIB): 4 real orders from 3 customers, 2 escrow deposits verified on Arc, no
+  release or refund on a real order yet. Live numbers: `/live`.
+- **Mainnet:** not planned before legal advice (see below).
 
 ## Switching to mainnet (later; needs approval)
 

@@ -16,6 +16,10 @@ import { microToUsdc } from "@/lib/policy";
 import { GET as queue } from "./slicer/queue/route";
 import { POST as queueItem } from "./slicer/queue/[id]/route";
 import { POST as result } from "./slicer/jobs/[id]/result/route";
+import { jakartaToday } from "@/lib/customer";
+
+/** Two weeks ahead: a fixed date would turn into a past deadline (refused) one day. */
+const DEADLINE = jakartaToday(Date.now() + 14 * 86_400_000);
 
 // The customer sends their own design with the order (one multipart request): checked, stored, weighed by the studio's
 // slicer and priced by the Chief without anyone at Kesuni touching the order first. Nothing here prints.
@@ -38,7 +42,7 @@ let ip = 0;
  */
 async function send(fields: Record<string, string>, design?: { name: string; bytes: Uint8Array }, headers: Record<string, string> = {}) {
   const form = new FormData();
-  const all = { invite: INVITE, name: "Aini", product: "Clip", quantity: "2", deadline: "2026-10-30", budgetIdr: "300000", note: "", colors: "[]", ...fields };
+  const all = { invite: INVITE, name: "Aini", product: "Clip", quantity: "2", deadline: DEADLINE, budgetIdr: "300000", note: "", colors: "[]", ...fields };
   for (const [k, v] of Object.entries(all)) form.set(k, v);
   if (design) form.set("design", new File([design.bytes as BlobPart], design.name));
   // A real browser sends the body's size: build it the way fetch would.
@@ -81,7 +85,7 @@ afterAll(() => {
 });
 
 describe("POST /api/c with the customer's design", () => {
-  it("creates the order, stores the design and weighs it; the slice result sets the grams and wakes the Chief to price", async () => {
+  it("creates the order, stores the design and weighs it; the slice result sets the grams and wakes the Chief (once) to price", async () => {
     await queue(new Request("http://x/api/slicer/queue", { headers: bridge })); // the studio PC's slicer is there
     const res = await send({}, { name: "Clip.stl", bytes: STL });
     expect(res.status).toBe(201);
@@ -89,7 +93,8 @@ describe("POST /api/c with the customer's design", () => {
     expect(body).toMatchObject({ link: expect.stringMatching(/^\/c\/[\w-]{24}$/), design: { stored: true, weighing: true } });
     const [o] = orders();
     expect(store.listAttachments(o.id)).toEqual([expect.objectContaining({ kind: "design", filename: "Clip.stl", uploadedBy: CUSTOMER_UPLOAD_BY })]);
-    expect(wake).toHaveBeenCalledWith(o.id, expect.stringMatching(/weighing it automatically: wait for slicerGrams/));
+    // While the studio's slicer weighs it the Chief is not woken (a run that could only wait): its grams wake it.
+    expect(wake).not.toHaveBeenCalled();
 
     // The studio PC weighs it.
     const { slices } = await (await queue(new Request("http://x/api/slicer/queue", { headers: bridge }))).json();
@@ -102,6 +107,7 @@ describe("POST /api/c with the customer's design", () => {
     }), ctx);
     expect(done.status).toBe(201);
     expect(store.getOrder(o.id)!.slicerGrams).toMatchObject({ gramsPerUnit: 12.5, by: "slicer" });
+    expect(wake).toHaveBeenCalledTimes(1);
     expect(wake).toHaveBeenLastCalledWith(o.id, "The studio's slicer weighed the customer's design: 12.5 g per unit, single colour (slicerGrams). Price it by weight and continue.");
 
     // The customer sees their own design and what the slicer found: weight, time, spool, the estimate by weight.
@@ -140,7 +146,7 @@ describe("POST /api/c with the customer's design", () => {
     expect((await send({ invite: accented }, { name: "Clip.stl", bytes: STL })).status).toBe(404);
     const json = await createOrder(new Request("http://x/api/c", {
       method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.201" },
-      body: JSON.stringify({ invite: accented, name: "A", product: "B", quantity: 1, deadline: "2026-10-30", budgetIdr: 50000 }),
+      body: JSON.stringify({ invite: accented, name: "A", product: "B", quantity: 1, deadline: DEADLINE, budgetIdr: 50000 }),
     }));
     expect(json.status).toBe(404);
     expect(orders()).toEqual([]);
@@ -235,7 +241,7 @@ describe("POST /api/c with the customer's design", () => {
     expect(wake).toHaveBeenCalledWith(orders()[0].id, expect.stringMatching(/^A customer just placed this order through the order form\. Prepare it/));
     const json = await createOrder(new Request("http://x/api/c", {
       method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.200" },
-      body: JSON.stringify({ invite: INVITE, name: "A", product: "B", quantity: 1, deadline: "2026-10-30", budgetIdr: 50000 }),
+      body: JSON.stringify({ invite: INVITE, name: "A", product: "B", quantity: 1, deadline: DEADLINE, budgetIdr: 50000 }),
     }));
     expect(json.status).toBe(201);
     const badColours = await send({ colors: "not json" });

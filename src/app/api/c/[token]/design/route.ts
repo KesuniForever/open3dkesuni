@@ -5,7 +5,7 @@ import { readAttachment } from "@/lib/files";
 import { clientIp, fail } from "@/lib/http";
 import { wakeChief } from "@/lib/agent/chief";
 import {
-  addCustomerDesign, customerDesignClosed, customerDesignContentProblem, customerDesignFile, newOrderWake,
+  addCustomerDesign, customerDesignClosed, customerDesignContentProblem, customerDesignFile, newOrderWake, weighingNow,
 } from "@/lib/auto-weigh";
 import { MAX_CUSTOMER_DESIGN_BYTES } from "@/lib/file-rules";
 import { mediaType, readFormCapped } from "@/lib/request-body";
@@ -95,7 +95,8 @@ async function receive(req: Request, orderId: string): Promise<Response> {
   try {
     const stored = await addCustomerDesign(orderId, design);
     if (!stored.stored) return fail(500, "The design could not be stored", ["Saving the file failed on the studio PC"]);
-    wakeChief(orderId, newOrderWake(stored, "later"));
+    // While the studio's slicer weighs it, its grams wake the Chief (src/lib/auto-weigh.ts): no run to only wait.
+    if (!weighingNow(stored)) wakeChief(orderId, newOrderWake(stored, "later"));
     return NextResponse.json({ ok: true, design: { stored: true, weighing: Boolean(stored.weighing?.ok) } }, { status: 201 });
   } finally {
     adding.delete(orderId);

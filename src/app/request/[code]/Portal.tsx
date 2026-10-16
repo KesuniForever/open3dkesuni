@@ -1,7 +1,9 @@
-// The customer portal's tabs besides the order form (/request/<code>?tab=…): the studio's printers, the price
-// calculator and the token research, each read-only and shaped on the server by src/lib/portal.ts. No hooks, so the
-// server renders them and the tests render them the same way. "My orders" lives in the browser (MyOrders.tsx).
+// The customer portal's tabs besides the order form (/request/<code>?tab=…): the studio's printers and the price
+// calculator, each read-only and shaped on the server by src/lib/portal.ts. No hooks, so the server renders them and
+// the tests render them the same way. "My orders" lives in the browser (MyOrders.tsx). The token research (TokenTab) is
+// not a portal tab: the Live studio page shows it.
 import Form from "next/form";
+import Link from "next/link";
 import Icon from "@/app/components/Icon";
 import Info from "@/app/components/Info";
 import ColorSwatch from "@/app/components/ColorSwatch";
@@ -14,15 +16,14 @@ import { dateLocale, type Locale, type T } from "@/i18n/core";
 import "../../machines/machines.css";
 import "./portal.css";
 
-/** The menu under the header. The order form first: /request/<code> without ?tab opens it. */
+/** The menu under the header: one row on a phone. The order form first: /customer without ?tab opens it. */
 export const PORTAL_TABS: Tab[] = [
   { id: "order", label: "New order" },
   { id: "orders", label: "My orders" },
   { id: "machines", label: "Machines" },
   { id: "price", label: "Price calculator" },
-  { id: "token", label: "Token research" },
 ];
-export type PortalTab = "order" | "orders" | "machines" | "price" | "token";
+export type PortalTab = "order" | "orders" | "machines" | "price";
 /** ?tab= as given; anything else (missing, unknown, repeated) opens the order form. */
 export const portalTab = (wanted: string | string[] | undefined): PortalTab => pickTab(PORTAL_TABS, wanted) as PortalTab;
 
@@ -38,7 +39,8 @@ function PrinterRow({ p, t }: { p: PortalPrinter; t: T }) {
           <h3>{p.name}</h3>
           <p><span className={`live-dot${p.online ? "" : " off"}`} />{t(p.online ? "Online" : "Offline")}</p>
         </div>
-        <span className={`mach-pill ${p.state.tone}`}>{p.state.text}</span>
+        {/* Offline says so once, on the line above. */}
+        {p.online && <span className={`mach-pill ${p.state.tone}`}>{p.state.text}</span>}
       </div>
       {p.stage?.needsPerson && <p className="portal-stage">{t("Waiting for a person at Kesuni")}</p>}
       {p.progress && (
@@ -81,13 +83,12 @@ export function MachinesTab({ m, t, locale }: { m: PortalMachines; t: T; locale:
       <div className="portal-head">
         <h2>
           {t("Machines")}
-          <Info>{t("Kesuni's printers right now, straight from the studio. Read only: nothing here can move a printer. The page updates by itself.")}</Info>
+          <Info>{t("Kesuni's printers right now.")}</Info>
         </h2>
         <span className="muted">{t("Updated {time} WIB", { time: clock })}</span>
       </div>
-      {m.bridgeDown && (
-        <p className="alert bad portal-alert">{t("The studio connection is offline. Last report {ago}.", { ago: m.lastReport ?? t("never") })}</p>
-      )}
+      {/* Not an alarm for a customer: the order form works all the same. */}
+      {m.bridgeDown && <p className="cust-note portal-quiet">{t("Printer status is not updating right now. You can still order as usual.")}</p>}
       {m.printers.length === 0
         ? <section className="card"><p className="muted portal-empty">{t("No printer has reported yet.")}</p></section>
         : <ul className="portal-printers">{m.printers.map((p) => <PrinterRow key={p.id} p={p} t={t} />)}</ul>}
@@ -97,6 +98,7 @@ export function MachinesTab({ m, t, locale }: { m: PortalMachines; t: T; locale:
 
 // ---------- Price calculator ----------
 
+/** `action`: the portal's address; its order tab is the address itself ("Order now"). */
 export function PriceTab({ p, action, t }: { p: PortalPrice; action: string; t: T }) {
   const r = p.result;
   return (
@@ -105,6 +107,7 @@ export function PriceTab({ p, action, t }: { p: PortalPrice; action: string; t: 
         {t("Price calculator")}
         <Info>{t("The weight comes from the slicer (Bambu Studio). Upload your STL in New order and Kesuni weighs it.")}</Info>
       </h2>
+      <p className="cust-note portal-quiet">{t("Don't know the weight? Send your 3D file in New order and Kesuni weighs it.")}</p>
       <p className="muted portal-rates">
         {MATERIALS.map((m) => <span key={m}><b>{m}</b> {t("{price} per gram", { price: rupiah(p.perGram[m]) })}</span>)}
       </p>
@@ -113,7 +116,7 @@ export function PriceTab({ p, action, t }: { p: PortalPrice; action: string; t: 
         <input type="hidden" name="tab" value="price" />
         <div className="row fields">
           <label style={{ flex: "2 1 150px" }}>{t("Grams per piece")}
-            <input name="g" defaultValue={p.input.grams} inputMode="decimal" placeholder="16" maxLength={12} required />
+            <input name="g" defaultValue={p.input.grams} inputMode="decimal" placeholder={t("for example 16")} maxLength={12} required />
           </label>
           <label style={{ flex: "1 1 90px" }}>{t("Quantity")}
             <input name="q" type="number" min={1} step={1} defaultValue={p.input.quantity} required />
@@ -129,12 +132,16 @@ export function PriceTab({ p, action, t }: { p: PortalPrice; action: string; t: 
       {r?.ok && (
         <div className="cust-price portal-total" aria-live="polite">
           <span className="big">{rupiah(r.totalIdr)}</span>
-          <span className="muted">≈ {r.usdc} USDC · {t("{price} per piece", { price: rupiah(r.unitPriceIdr) })}</span>
+          {r.quantity > 1 && <span className="muted">{t("{price} per piece", { price: rupiah(r.unitPriceIdr) })}</span>}
         </div>
       )}
       {r?.ok && r.totalIdr < p.minOrderIdr && (
         <p className="cust-note portal-note">{t("Orders under {min} need Kesuni's approval first, so the price can take longer.", { min: rupiah(p.minOrderIdr) })}</p>
       )}
+      {r?.ok && r.totalIdr > p.approvalAboveIdr && (
+        <p className="cust-note portal-note">{t("Orders above {max} are also checked by the owner first, so the price can take longer.", { max: rupiah(p.approvalAboveIdr) })}</p>
+      )}
+      {r?.ok && <Link href={action} className="btn-link portal-order-now">{t("Order now")}</Link>}
       {r && !r.ok && <div className="alert bad" role="status">{r.reasons.map((x) => tLib(t, x)).join("; ")}</div>}
       <p className="cust-note portal-note">{t("An estimate. The final price comes on your order page.")}</p>
     </section>

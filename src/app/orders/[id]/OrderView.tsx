@@ -81,6 +81,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [resetOpen, setResetOpen] = useState(false);
+  const [labelOpen, setLabelOpen] = useState(false);
 
   const [version, setVersion] = useState(0);
   const load = useCallback(() => setVersion((v) => v + 1), []);
@@ -123,6 +124,8 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
   const usdc = data.network.isTestnet ? t("test USDC") : "USDC";
   const stepIndex = order.status === "REJECTED" ? 3 : FLOW.indexOf(order.status === "PAID" ? "ACCEPTED" : order.status);
   const raised = budgetRaiseText(order, t, locale, data.network.isTestnet);
+  // The real / simulated switch (src/lib/order-label.ts): a practice order from the public form stops counting.
+  const nextLabel = order.label === "real" ? "simulated" : "real";
 
   return (
     <main className="wrap">
@@ -136,6 +139,12 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
         </div>
         <div className="page-actions">
           <span className={`badge ${order.label}`}>{t("{label} data", { label: t(order.label) })}</span>
+          {(order.label === "real" || order.label === "simulated") && (
+            <button disabled={busy} onClick={() => setLabelOpen(true)}
+              title={t("Real orders count as traction; simulated ones are the team's tests and never count.")}>
+              {t(nextLabel === "simulated" ? "Mark simulated" : "Mark real")}
+            </button>
+          )}
           <button
             disabled={busy}
             onClick={() => setResetOpen(true)}
@@ -154,6 +163,20 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
         onClose={() => setResetOpen(false)}>
         <p style={{ margin: 0 }}>{t("This deletes every simulated order with its escrow, Arc transfer records, print jobs and files, then restores the demo order. Real orders are not touched.")}</p>
         <p style={{ margin: 0 }}><b>{t("It cannot be undone.")}</b></p>
+      </ConfirmDialog>
+      <ConfirmDialog open={labelOpen} busy={busy} confirmLabel={t(nextLabel === "simulated" ? "Mark simulated" : "Mark real")}
+        title={t(nextLabel === "simulated" ? "Mark this order as simulated?" : "Mark this order as real?")}
+        onConfirm={async (by) => {
+          await act(`${base}/label`, { label: nextLabel, by }, t("Label changed."));
+          setLabelOpen(false);
+        }}
+        onClose={() => setLabelOpen(false)}>
+        <p style={{ margin: 0 }}>
+          {t(nextLabel === "simulated"
+            ? "It stops counting as a real order: not in traction, and the agent prints it only if a person sets its runs. “Reset simulated demo” would delete it."
+            : "It counts as a real order from now on: traction, the next deadline and agent prints.")}
+        </p>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>{t("Logged with your name.")}</p>
       </ConfirmDialog>
       <ol className="timeline" aria-label={t("Order progress")}>
         {FLOW.map((s, i) => (

@@ -6,6 +6,7 @@ import { dailyFacts, jakartaDay } from "./daily-review";
 import { ACTION_TOOLS, SKILLS, skillOf } from "./skills";
 import { callTool, LLM_TOOLS, materialConcern } from "./tools";
 import { chiefAuthority } from "./authority";
+import { createTask } from "../printer/actions";
 import { systemPrompt } from "./chief";
 import type { Spec } from "../types";
 
@@ -149,6 +150,18 @@ describe("know your limits", () => {
     const a = chiefAuthority(new Date());
     expect(a.today.bySkill).toMatchObject({ Operations: 1, Quality: 1 });
     expect(dailyFacts(jakartaDay(), new Date()).chief).toMatchObject({ decisions: 1, escalations: 1, refusals: 0 });
+  });
+
+  it("counts only the Chief's own steps: tasks code opens and the rule planner's plan are code's, apart", () => {
+    const id = order("Casing korek");
+    createTask(id, "collect_and_qc", "Print finished on A1 Combo #1.", "a1"); // a printer report
+    callTool("create_operator_task", { orderId: id, kind: "check_printer", text: "Check the nozzle" }); // the Chief
+    price(id); // the Chief prices
+    const q = store.listQuotes(id)[0];
+    callTool("choose_plan", { orderId: id, quoteId: q.id, reason: "cheapest allowed" }, "agent", "code"); // the rule planner
+    const f = dailyFacts(jakartaDay(), new Date()).chief;
+    expect(f).toMatchObject({ decisions: 2, codeActions: 2 });
+    expect(chiefAuthority(new Date()).today.decisions).toBe(2);
   });
 
   it("the Chief's instructions name what it must always hand to a person", () => {

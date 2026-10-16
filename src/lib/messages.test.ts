@@ -1,8 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as store from "./store";
-import { createOrder, ensureCustomerToken } from "./actions";
+import { chooseQuote, createOrder, ensureCustomerToken } from "./actions";
+import { quoteByWeight } from "./agreement";
 import { customerView } from "./customer";
-import { AGENT_MESSAGES_PER_ORDER, messageContentReasons, postCustomerMessage } from "./messages";
+import { AGENT_MESSAGES_PER_ORDER, amountsIn, messageContentReasons, postCustomerMessage } from "./messages";
 import { POST } from "@/app/api/orders/[id]/messages/route";
 
 const ORDER = "ORD-001";
@@ -86,6 +87,67 @@ describe("operator API POST /api/orders/[id]/messages", () => {
     expect((await post(ORDER, { text: "Saya Chief", by: "agent" })).status).toBe(400);
     expect((await post("ORD-404", { text: "Halo" })).status).toBe(404);
     expect(store.listMessages(ORDER).map((m) => m.by)).toEqual(["human"]);
+  });
+});
+
+describe("the Chief names no amount but the order's price, and promises no discount or refund", () => {
+  beforeEach(() => { process.env.IDR_PER_USDC = "16000"; });
+  afterEach(() => { delete process.env.IDR_PER_USDC; });
+
+  it("reads rupiah and USDC the ways people write them", () => {
+    expect(amountsIn("Rp450.000, Rp 1.200.000, Rp450rb, 450 ribu, Rp1,5 juta and 450.000 rupiah.")).toEqual({
+      idr: [450_000, 1_200_000, 450_000, 1_500_000, 450_000, 450_000], usdc: [],
+    });
+    expect(amountsIn("28.125 USDC, 15.15 test USDC, USDC 1,000.50, US$9.09").usdc).toEqual([28.125, 15.15, 1000.5, 9.09]);
+    expect(amountsIn("ORD-007: 50 pcs, about 6 hours, 2026-10-20, 3 kg")).toEqual({ idr: [], usdc: [] });
+    // Cents, extra spaces, USD and the "k" shorthand; an amount it cannot read is NaN (no price matches it).
+    expect(amountsIn("Rp 99.000,00, Rp1.234.567,89, 1.000,50 USDC, Rp  99.000, USD 5, 5 dollars, 450k, Rp1.2.3")).toEqual({
+      idr: [99_000, 1_234_567.89, 99_000, NaN, 450_000], usdc: [1000.5, 5, 5],
+    });
+  });
+
+  it("an amount written another way is checked the same, and one code cannot read is refused", () => {
+    const q = quoteByWeight(ORDER, { gramsPerUnit: 300, source: "Bambu Studio", by: "human" }); // Rp450.000
+    if (!q.ok) throw new Error(q.error);
+    expect(chooseQuote(ORDER, q.quote.id, "human", "by weight").ok).toBe(true);
+    for (const text of ["Your price is Rp 400.000,00.", "Only 400k today.", "Pay USD 5 now.", "Your price: IDR  400.000"]) {
+      expect(postCustomerMessage(ORDER, text, "agent", T0)).toMatchObject({ ok: false, reasons: [expect.stringMatching(/^Amounts must be the order's price/)] });
+    }
+    expect(postCustomerMessage(ORDER, "Your price is Rp4.50.000.", "agent", T0)).toMatchObject({
+      ok: false, reasons: [expect.stringMatching(/; not an amount written in a way code cannot check$/)],
+    });
+    expect(postCustomerMessage(ORDER, "Your price is ready: Rp 450.000,00 (450k). Please check and approve it on this page.", "agent", T0).ok).toBe(true);
+  });
+
+  it("before a price nothing; then only the price by weight (unit or total) or the chosen quote; never free or diskon", () => {
+    // The probe from the review: a made-up price and a promise of free goods.
+    expect(postCustomerMessage(ORDER, "Only Rp1.000 today, free if you pay now!", "agent", T0)).toMatchObject({
+      ok: false, reasons: [expect.stringMatching(/may not write "free"/), "This order has no price yet: name no amount"],
+    });
+    const q = quoteByWeight(ORDER, { gramsPerUnit: 300, source: "Bambu Studio", by: "human" }); // Rp450.000
+    if (!q.ok) throw new Error(q.error);
+    expect(chooseQuote(ORDER, q.quote.id, "human", "by weight").ok).toBe(true);
+    expect(postCustomerMessage(ORDER, "Your price is Rp400.000.", "agent", T0)).toMatchObject({
+      ok: false, reasons: [expect.stringMatching(/^Amounts must be the order's price \(Rp450\.000, 28\.125 USDC\); not Rp400\.000$/)],
+    });
+    expect(postCustomerMessage(ORDER, "Diskon 10% kalau bayar hari ini.", "agent", T0).ok).toBe(false);
+    expect(postCustomerMessage(ORDER, "If you reject it, you get a refund.", "agent", T0).ok).toBe(false);
+    expect(postCustomerMessage(ORDER, "Your price is ready: Rp450.000 (28.125 USDC). Please check and approve it on this page.", "agent", T0).ok).toBe(true);
+    // People are not limited to the price (a person may decide a discount).
+    expect(postCustomerMessage(ORDER, "Diskon Rp50.000 untuk pelanggan pertama.", "human", later(1)).ok).toBe(true);
+  });
+
+  it("once the order moved on (here: the payment arrived), the Chief may write again after 2 minutes, not 10", () => {
+    expect(postCustomerMessage(ORDER, "Your price is ready on this page.", "agent", T0).ok).toBe(true);
+    const same = postCustomerMessage(ORDER, "Still waiting for your approval.", "agent", later(3));
+    expect(same).toMatchObject({ ok: false, status: 429, retryAfter: later(10).toISOString() });
+    store.saveEscrow({
+      orderId: ORDER, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state: "FUNDED", txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: T0.toISOString(),
+    });
+    expect(postCustomerMessage(ORDER, "Your payment arrived; we start printing.", "agent", later(1))).toMatchObject({ ok: false, retryAfter: later(2).toISOString() });
+    expect(postCustomerMessage(ORDER, "Your payment arrived; we start printing.", "agent", later(3)).ok).toBe(true);
+    expect(store.listMessages(ORDER).map((m) => m.stage)).toEqual(["CREATED/none", "CREATED/FUNDED"]);
   });
 });
 

@@ -94,6 +94,19 @@ export const budgetEquals = (b: Budget): string =>
   `${rp(b.budgetIdr)} = ${usdcText(b.mandateMicro)} USDC ${b.mandateMicro % 10_000 === 0 ? "=" : "≈"} ${usdText(b.mandateMicro)}`;
 
 /**
+ * USDC as a customer reads it: "≈ 9.09 USDC" in English, "≈ 9,09 USDC" in Indonesian. At most 2 decimals, so "9.090909"
+ * is never read as nine million; the exact amount stays in the technical payment proof. A USDC string ("9.090909") or a
+ * number of USDC.
+ */
+export function usdcApprox(usdc: string | number, locale: Locale): string {
+  const n = typeof usdc === "number" ? usdc : Number(usdc);
+  return `≈ ${(Number.isFinite(n) ? n : 0).toLocaleString(dateLocale(locale), { maximumFractionDigits: 2 })} USDC`;
+}
+
+/** The order form's live line under the budget: "Rp150.000 ≈ 9.09 USDC" (the mandate the rupiah becomes). */
+export const budgetApprox = (b: Budget, locale: Locale): string => `${rp(b.budgetIdr)} ${usdcApprox(b.mandateMicro / 1_000_000, locale)}`;
+
+/**
  * "1.000" typed as USDC: in Indonesia that is how a thousand is written, but here the dot is a decimal point (1 USDC).
  * The form shows a hint for it (the amount itself is fine: the line under the field shows what it means).
  */

@@ -7,6 +7,7 @@ import { ID } from "@/i18n/id";
 import { LocaleProvider } from "@/i18n/client";
 import type { Order, Printer } from "@/lib/types";
 import type { Traction } from "@/lib/traction";
+import type { PortalToken } from "@/lib/portal";
 import { issueTexts } from "../machines/issue-texts";
 import LiveStudio, { LIVE_TABS, liveTab, type LiveTab } from "./LiveStudio";
 
@@ -15,7 +16,15 @@ const NOW = new Date("2026-10-16T05:00:00.000Z");
 const RECENT = new Date(NOW.getTime() - 8000).toISOString();
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 const snap = (over: Partial<PrinterSnapshot>): PrinterSnapshot => ({ ...emptySnapshot(RECENT), state: "IDLE", ...over });
-const TABS: LiveTab[] = ["overview", "printers", "agent", "money"];
+const TABS: LiveTab[] = ["overview", "printers", "agent", "money", "token"];
+/** The token research as the customer portal shapes it (src/lib/portal.ts portalToken). */
+const TOKEN: PortalToken = {
+  overall: "ISSUANCE BLOCKED", passed: 1, total: 2,
+  gates: [
+    { n: "01", id: "traction", title: "Real traction", status: "PASS", line: "Enough real orders." },
+    { n: "02", id: "signoff", title: "Owner sign-off", status: "NOT YET", line: "Not given." },
+  ],
+};
 
 const printers: Printer[] = [
   {
@@ -55,9 +64,9 @@ const rows = (locale: Locale): LiveRows => ({
     txs: [{ kind: "deposit", from: "0xc", to: "0xe", amountMicro: 100_000, idempotencyKey: "k", state: "COMPLETE", txHash: `0x${"cd34".repeat(16)}`, at: RECENT, verified: { ok: true, at: RECENT } }],
   }],
 });
-const page = (locale: Locale = "en", over: Partial<LiveRows> = {}, tab?: LiveTab) => renderToStaticMarkup(
+const page = (locale: Locale = "en", over: Partial<LiveRows> = {}, tab?: LiveTab, token: PortalToken | null = TOKEN) => renderToStaticMarkup(
   <LocaleProvider locale={locale}>
-    <LiveStudio v={liveView({ ...rows(locale), ...over }, NOW, makeT(locale, ID), locale)} t={makeT(locale, ID)} locale={locale} seconds={15} tab={tab} />
+    <LiveStudio v={liveView({ ...rows(locale), ...over }, NOW, makeT(locale, ID), locale)} t={makeT(locale, ID)} locale={locale} seconds={15} tab={tab} token={token} />
   </LocaleProvider>,
 );
 
@@ -65,11 +74,12 @@ describe("Live studio page", () => {
   it("opens on the Overview: what runs now, the orders, the Arc transfers and the agent today, in English", () => {
     const en = text(page());
     expect(en).toMatch(/Live Read only Arc Testnet · test USDC Open3DKesuni A real 3D-print studio in Padang, Indonesia\. An AI agent runs the order desk; people do the hands-on work\./);
-    expect(en).toMatch(/Nothing on this page can move a printer or money\. Last Arc transfer: Deposit 0\.1 test USDC · Verified on Arc Overview Printers Agent Money on Arc Updated 12:00:00 WIB /);
+    expect(en).toMatch(/Nothing on this page can move a printer or money\. Last Arc transfer: Deposit 0\.1 test USDC · Verified on Arc Overview Printers Agent Money on Arc Token research Updated 12:00:00 WIB /);
     expect(en).toMatch(/Running now .* Printers Printers online 3 \/ 3 Printing 1 Ready for a job 0 Parts to collect 1 /);
     expect(en).toMatch(/A1 Combo #1 ORD-010 real 62% Printing 42m left Done around 12:41 WIB A1 Combo #2 Holds a part to collect ORD-011 simulated /);
     expect(en).toMatch(/Orders .* All 2 In progress 2 Finished 0 real 1 simulated 1 .* Next deadline ORD-010 real in 4 d Tue 20 Oct /);
-    expect(en).toMatch(/Transactions on Arc .* Arc transfers 1 Verified on Arc 1 \/ 1 Volume 0\.1 test USDC Real orders 1 transfer · 0\.1 test USDC · 1 verified Tests, not counted 0 transfers · 0 test USDC /);
+    // The headline is real orders only, with the rupiah next to the USDC; the tests apart.
+    expect(en).toMatch(/Transactions on Arc .* Transfers on real orders 1 Verified on Arc 1 \/ 1 Volume 0\.1 test USDC ≈ Rp1\.650 Tests, not counted 0 transfers · 0 test USDC /);
     expect(en).toMatch(/Agent today .* Decisions today 1 Handed to a person 0 today Agent prints 0 not allowed Claude ran 0 times today\. No agent print yet: people started every print so far\./);
     expect(en).toMatch(/Only the studio's bridge talks to them, and it calls out to this site\. This page refreshes by itself every 15 s\. ?$/);
     // The other tabs' details stay on their tabs; the hero's old tiles are in the Overview only, once.
@@ -82,8 +92,8 @@ describe("Live studio page", () => {
   it("each card links to its tab; the menu marks the open tab and Overview is plain /live", () => {
     const html = page();
     const tabs = [...html.matchAll(/<a([^>]*class="tab[^"]*"[^>]*)>/g)].map((m) => m[1]);
-    expect(tabs.map((a) => /href="([^"]+)"/.exec(a)![1])).toEqual(["/live", "/live?tab=printers", "/live?tab=agent", "/live?tab=money"]);
-    expect(tabs.map((a) => /aria-current="page"/.test(a))).toEqual([true, false, false, false]);
+    expect(tabs.map((a) => /href="([^"]+)"/.exec(a)![1])).toEqual(["/live", "/live?tab=printers", "/live?tab=agent", "/live?tab=money", "/live?tab=token"]);
+    expect(tabs.map((a) => /aria-current="page"/.test(a))).toEqual([true, false, false, false, false]);
     const more = [...html.matchAll(/class="live-ov-more" href="([^"]+)"|href="([^"]+)" class="live-ov-more"/g)].map((m) => m[1] ?? m[2]);
     expect(more).toEqual(["/live?tab=printers#live-tabs", "/live?tab=money#live-tabs", "/live?tab=money#live-tabs", "/live?tab=agent#live-tabs"]);
     const money = page("en", {}, "money");
@@ -93,7 +103,9 @@ describe("Live studio page", () => {
   it("each tab shows its details: the printers, the agent at work, the money on Arc", () => {
     const printersTab = text(page("en", {}, "printers"));
     expect(printersTab).toMatch(/Printing 62% .*A1 Combo #1 Online · Last report 8 s ago Doing now Printing 62% .*220 °C Nozzle target 220 °C/);
-    expect(printersTab).toMatch(/AMS lite 1 PLA Yellow Order ORD-010 real Bed Empty/);
+    // The printer cannot see its bed: while it prints, the bed is in use, not empty.
+    expect(printersTab).toMatch(/AMS lite 1 PLA Yellow Order ORD-010 real Bed In use/);
+    expect(printersTab).toMatch(/A1 Combo #3 .* Order None Bed Empty/);
     // The pill says the state only; online and the last report have their own line.
     expect(printersTab).toMatch(/Finished .*A1 Combo #2 Online · Last report 8 s ago/);
     // A part on the bed names its order there: no "Order: None" above it.
@@ -108,8 +120,15 @@ describe("Live studio page", () => {
 
     const money = text(page("en", {}, "money"));
     expect(money).toMatch(/Real customers 0 Real orders 1 Transfers on real orders 1 Of those, verified 1 \/ 1 Not counted: 1 simulated order · 0 test transfers/);
-    expect(money).toMatch(/Deposit 0\.1 test USDC 16 Oct, 11:59 WIB ORD-010 real Verified on Arc 0xcd34cd…cd34/);
+    expect(money).toMatch(/Deposit 0\.1 test USDC ≈ Rp1\.650 16 Oct, 11:59 WIB ORD-010 real Verified on Arc 0xcd34cd…cd34/);
     expect(money).not.toMatch(/Running now|Nozzle|The agent at work/);
+    // How the money works, in view (not only behind an ⓘ), with who holds the wallets said plainly.
+    expect(money).toMatch(/How the money works: Circle \+ Arc Two Circle wallets per order: the customer's and the escrow\. .*Each transfer gets an idempotency key, saved before Circle is called\. .*Circle's Gas Station pays the gas\. .*ERC-4337.*Every transfer is re-checked on Arc\. .*Payment is in rupiah, outside the app; the deposits are test USDC, not customer money\. .*Kesuni holds these wallets\. Release and refund are guarded by the policy engine in our code, not by a smart contract\./);
+
+    const token = text(page("en", {}, "token"));
+    expect(token).toMatch(/Token research ISSUANCE BLOCKED Research only\. No token exists and nothing is sold\. .*1 of 2 checks passed 01 Real traction .*PASS 02 Owner sign-off .*NOT YET/);
+    expect(token).not.toMatch(/Running now|Nozzle|The agent at work|Latest transfers/);
+    expect(text(page("en", {}, "token", null))).toMatch(/The token research could not be read right now\./);
     for (const tab of TABS) expect(text(page("en", {}, tab)).match(/every 15 s/g), tab).toHaveLength(1);
   });
 
@@ -121,7 +140,7 @@ describe("Live studio page", () => {
         const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
         expect(hrefs.length).toBeGreaterThan(0);
         for (const h of hrefs) {
-          expect(h, `${locale} ${tab}: ${h}`).toMatch(/^(\/live(\?tab=(printers|agent|money)(#live-tabs)?)?|https:\/\/(e\.bambulab\.com|explorer\.testnet\.arc\.io)\/.*)$/);
+          expect(h, `${locale} ${tab}: ${h}`).toMatch(/^(\/live(\?tab=(printers|agent|money|token)(#live-tabs)?)?|https:\/\/(e\.bambulab\.com|explorer\.testnet\.arc\.io)\/.*)$/);
         }
         // Lia: Indonesian "keahlian" (skill) holds the letters.
         expect(html, `${locale} ${tab}`).not.toMatch(/keychain|lia_|Lia|Test vase|camera/i);
@@ -140,7 +159,7 @@ describe("Live studio page", () => {
     // The last known reading of a print, without a finish time.
     expect(en).toMatch(/Printers online 0 \/ 3 Printing 0 Ready for a job 0 Parts to collect 1 A1 Combo #1 ORD-010 real 62% Printing Last known reading 42m left A1 Combo #2/);
     expect(en).not.toMatch(/Done around/);
-    expect(en).toMatch(/Real orders 0 transfers · 0 test USDC Tests, not counted 1 transfer · 0\.1 test USDC · 1 verified/);
+    expect(en).toMatch(/Transfers on real orders 0 Verified on Arc 0 \/ 0 Volume 0 test USDC Tests, not counted 1 transfer · 0\.1 test USDC ≈ Rp1\.650 · 1 verified/);
     const money = text(page("en", over, "money"));
     expect(money).toMatch(/Not counted: 1 simulated order · 1 test transfer .*Test transfers are real Arc Testnet transactions too, but they are not counted above\. Deposit 0\.1 test USDC .*ORD-011 simulated/);
   });
@@ -155,10 +174,10 @@ describe("Live studio page", () => {
   it("in Indonesian", () => {
     const id = text(page("id"));
     expect(id).toMatch(/Live Hanya baca Arc Testnet · USDC uji Open3DKesuni Studio cetak 3D sungguhan di Padang, Indonesia\. Agen AI mengurus meja pesanan/);
-    expect(id).toMatch(/Halaman ini tidak bisa menggerakkan printer atau uang\. Transfer Arc terakhir: Setoran 0\.1 USDC uji · Terverifikasi di Arc Ringkasan Printer Agen Uang di Arc Diperbarui 12\.00\.00 WIB /);
+    expect(id).toMatch(/Halaman ini tidak bisa menggerakkan printer atau uang\. Transfer Arc terakhir: Setoran 0\.1 USDC uji · Terverifikasi di Arc Ringkasan Printer Agen Uang di Arc Riset token Diperbarui 12\.00\.00 WIB /);
     expect(id).toMatch(/Sedang berjalan .* Printer online 3 \/ 3 Mencetak 1 Siap dipakai 0 Hasil perlu diambil 1 A1 Combo #1 ORD-010 nyata 62% Mencetak sisa 42m Selesai sekitar 12\.41 WIB/);
     expect(id).toMatch(/Pesanan .* Semua 2 Berjalan 2 Selesai 0 nyata 1 simulasi 1 .* Tenggat berikutnya ORD-010 nyata 4 hari lagi Sel 20 Okt/);
-    expect(id).toMatch(/Transaksi di Arc .* Transfer Arc 1 Terverifikasi di Arc 1 \/ 1 Volume 0\.1 USDC uji Pesanan nyata 1 transfer · 0\.1 USDC uji · 1 terverifikasi Uji coba, tidak dihitung 0 transfer · 0 USDC uji/);
+    expect(id).toMatch(/Transaksi di Arc .* Transfer pesanan nyata 1 Terverifikasi di Arc 1 \/ 1 Volume 0\.1 USDC uji ≈ Rp1\.650 Uji coba, tidak dihitung 0 transfer · 0 USDC uji/);
     expect(id).toMatch(/Agen hari ini .* Keputusan hari ini 1 Diserahkan ke orang 0 hari ini Cetak oleh agen 0 tidak diizinkan Claude berjalan 0 kali hari ini\./);
 
     const printersTab = text(page("id", {}, "printers"));
@@ -168,12 +187,16 @@ describe("Live studio page", () => {
     const money = text(page("id", {}, "money"));
     expect(money).toMatch(/Uang di Arc/);
     expect(money).toMatch(/Transfer pesanan nyata 1 Yang terverifikasi 1 \/ 1 Tidak dihitung: 1 pesanan simulasi · 0 transfer uji/);
+    expect(money).toMatch(/Cara kerja uangnya: Circle \+ Arc Dua dompet Circle per pesanan: milik pelanggan dan escrow\./);
+    expect(money).toMatch(/Kesuni yang memegang dompet-dompet ini\. Pencairan dan pengembalian dijaga oleh policy engine di kode kami, bukan oleh smart contract\./);
+    expect(text(page("id", {}, "printers"))).toMatch(/Pesanan ORD-010 nyata Bed cetak Sedang dipakai/);
   });
 });
 
 describe("Live studio menu", () => {
   it("Overview first; ?tab= opens a known tab, anything else the Overview", () => {
-    expect(LIVE_TABS.map((x) => x.id)).toEqual(["overview", "printers", "agent", "money"]);
+    expect(LIVE_TABS.map((x) => x.id)).toEqual(["overview", "printers", "agent", "money", "token"]);
+    expect(liveTab("token")).toBe("token");
     expect(liveTab(undefined)).toBe("overview");
     expect(liveTab("")).toBe("overview");
     expect(liveTab("printers")).toBe("printers");

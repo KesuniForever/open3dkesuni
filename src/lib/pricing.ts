@@ -125,7 +125,7 @@ export function pricingFor(cfg: PricingConfig, material: Material | null | undef
 export function weightInputReasons(gramsPerUnit: number, quantity: number): string[] {
   const r: string[] = [];
   if (!Number.isFinite(gramsPerUnit) || gramsPerUnit <= 0 || gramsPerUnit > MAX_GRAMS_PER_UNIT) {
-    r.push(`Grams per unit must be above 0 and at most ${MAX_GRAMS_PER_UNIT}`);
+    r.push(`Grams per piece must be above 0 and at most ${MAX_GRAMS_PER_UNIT}`);
   }
   if (!Number.isInteger(quantity) || quantity < 1) r.push("Quantity must be a whole number, at least 1");
   return r;

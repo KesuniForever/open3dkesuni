@@ -10,6 +10,8 @@ import { gramsTyped, portalMachines, portalPrice, portalToken } from "./portal";
 import { emptySnapshot, stageOf, type PrinterSnapshot } from "./printer/bambu";
 import type { Printer } from "./types";
 import type { Traction } from "./traction";
+import { makeT } from "../i18n/core";
+import { ID } from "../i18n/id";
 
 // The customer portal's tabs, shaped on the server: the official price only, the printers without orders, the gates
 // without evidence.
@@ -23,7 +25,7 @@ afterEach(() => { for (const k of ENV) delete process.env[k]; });
 describe("portal price calculator", () => {
   it("shows the official price per gram and no result until grams are given", () => {
     const p = portalPrice({});
-    expect(p).toEqual({ material: "PLA", perGram: { PLA: 1500, PETG: 1500 }, roundIdr: 500, minOrderIdr: 100_000, input: { grams: "", quantity: "1" }, result: null });
+    expect(p).toEqual({ material: "PLA", perGram: { PLA: 1500, PETG: 1500 }, roundIdr: 500, minOrderIdr: 100_000, approvalAboveIdr: 1_000_000, input: { grams: "", quantity: "1" }, result: null });
   });
 
   it("prices like an order: grams × price per gram, rounded up per piece, × quantity; USDC as the quote holds it", () => {
@@ -45,11 +47,11 @@ describe("portal price calculator", () => {
   });
 
   it("gives the reasons for input it cannot price", () => {
-    expect(portalPrice({ g: "0" }).result).toEqual({ ok: false, reasons: ["Grams per unit must be above 0 and at most 5000"] });
+    expect(portalPrice({ g: "0" }).result).toEqual({ ok: false, reasons: ["Grams per piece must be above 0 and at most 5000"] });
     expect(portalPrice({ g: "abc", q: "1.5" }).result).toEqual({
       ok: false, reasons: ["Enter the grams per piece as a number, for example 16", "Quantity must be a whole number, at least 1"],
     });
-    expect(portalPrice({ g: "6000" }).result).toEqual({ ok: false, reasons: ["Grams per unit must be above 0 and at most 5000"] });
+    expect(portalPrice({ g: "6000" }).result).toEqual({ ok: false, reasons: ["Grams per piece must be above 0 and at most 5000"] });
     expect(portalPrice({ g: "12", q: "0" }).result).toMatchObject({ ok: false });
   });
 
@@ -62,9 +64,10 @@ describe("portal price calculator", () => {
     expect(portalPrice({ g: "1.000" }).result).toMatchObject({ ok: true, gramsPerUnit: 1000 });
   });
 
-  it("carries the owner's minimum order, so the page can say a small order waits for approval", () => {
-    expect(portalPrice({ g: "16" }).minOrderIdr).toBe(100_000);
-    expect(portalPrice({ g: "16" }, pricingConfig(), 150_000).minOrderIdr).toBe(150_000);
+  it("carries the owner's minimum order and approval limit, so the page can say a small or a large order waits for approval", () => {
+    expect(portalPrice({ g: "16" })).toMatchObject({ minOrderIdr: 100_000, approvalAboveIdr: 1_000_000 });
+    expect(portalPrice({ g: "16" }, pricingConfig(), { minOrderIdr: 150_000, approvalAboveIdr: 2_000_000 }))
+      .toMatchObject({ minOrderIdr: 150_000, approvalAboveIdr: 2_000_000 });
   });
 
   it("never carries Kesuni's cost or margin", () => {
@@ -128,6 +131,11 @@ describe("portal machines", () => {
     });
     expect(one.spools.map((s) => [s.type, s.name, s.active])).toEqual([["PLA", "Yellow", true], ["PETG", "White", false]]);
     expect(two).toMatchObject({ name: "A1 Combo #2", online: true, state: { text: "Finished" }, progress: null, stage: null, spools: [] });
+    // With the page's words: a printer at rest reads "Free" for a customer; one at work keeps its state.
+    const id = makeT("id", ID);
+    const words = portalMachines(liveView(rows(PRINTERS), NOW), id).printers.map((p) => p.state.text);
+    expect(words).toEqual(["Printing 62%", "Luang"]);
+    expect(portalMachines(liveView(rows(PRINTERS), NOW), makeT("en", {})).printers[1].state).toEqual({ tone: "ok", text: "Free" });
   });
 
   it("shows no order, customer, product, file or bed", () => {

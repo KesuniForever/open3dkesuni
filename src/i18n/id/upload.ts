@@ -31,13 +31,16 @@ const id: Record<string, string> = {
   "No 3D preview for this file.": "Tidak ada pratinjau 3D untuk file ini.",
   "3D view of your model. Drag to turn it.": "Tampilan 3D model Anda. Geser untuk memutarnya.",
   "Show 3D view": "Tampilkan 3D",
+  "This file can't be opened. Ask your designer for a new STL.": "File ini tidak bisa dibuka. Minta file STL baru ke desainer Anda.",
+  // a photo or a document picked instead of a model (src/lib/file-rules.ts)
+  "This is a photo, not a 3D file. Leave this empty and describe the item in the notes.":
+    "Ini foto, bukan file 3D. Kosongkan saja dan jelaskan barangnya di catatan.",
+  "This is a document, not a 3D file. Leave this empty and describe the item in the notes.":
+    "Ini dokumen, bukan file 3D. Kosongkan saja dan jelaskan barangnya di catatan.",
 
   // ---------- the customer's order page (src/app/c/[token]/CustomerView.tsx) ----------
   // "Your design": the customer's own model, what the slicer found, the estimate
   "Your design": "Desain Anda",
-  "Your own file, shown in your browser: drag to turn it. The studio's slicer weighs it with standard settings to set the price.":
-    "File Anda sendiri, ditampilkan di browser Anda: geser untuk memutarnya. Slicer studio menimbangnya dengan pengaturan standar untuk menentukan harga.",
-  "The colour does not change the weight.": "Warna tidak mengubah berat.",
   "Weighing…": "Sedang ditimbang…",
   "Weighed": "Sudah ditimbang",
   "Kesuni checks your file": "Kesuni mengecek file Anda",
@@ -45,7 +48,6 @@ const id: Record<string, string> = {
   "Print time (estimate)": "Waktu cetak (perkiraan)",
   "{time} per piece": "{time} per buah",
   "{time} for {n} pieces": "{time} untuk {n} buah",
-  "Weighed with": "Ditimbang dengan",
   "Estimated price": "Perkiraan harga",
   "Estimate · the final price comes with your agreement": "Perkiraan · harga akhir ada di kesepakatan Anda",
   // "Add your design": sending it later (POST /api/c/<token>/design)

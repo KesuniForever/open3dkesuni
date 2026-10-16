@@ -6,7 +6,7 @@ import { mergeReport } from "@/lib/printer/bambu";
 import { noteSlicerPoll, resetSlicerSeen, storeSliceResult, updateSliceItem } from "@/lib/slicing";
 import { fake3mf, makeZip } from "@/lib/threemf.test-helper";
 import { CUSTOMER_UPLOAD_BY } from "@/lib/file-rules";
-import { customerCreateOrder, customerView as viewOf } from "@/lib/customer";
+import { customerCreateOrder, customerView as viewOf, jakartaToday } from "@/lib/customer";
 import { quoteByWeight, setSlicerGrams } from "@/lib/agreement";
 import { addCustomerDesign } from "@/lib/auto-weigh";
 import { GET as download, POST as addDesign } from "./c/[token]/design/route";
@@ -19,6 +19,8 @@ const wake = vi.hoisted(() => vi.fn<(orderId: string, trigger: string) => boolea
 vi.mock("@/lib/agent/chief", async (orig) => ({ ...(await orig<typeof import("@/lib/agent/chief")>()), wakeChief: wake }));
 
 const INVITE = "kesuni-pilot-2026";
+/** Two weeks ahead: a fixed date would turn into a past deadline (refused) one day. */
+const DEADLINE = jakartaToday(Date.now() + 14 * 86_400_000);
 const mem = new Map<string, Uint8Array>();
 const files: FileStore = { async put(k, b) { mem.set(k, b); }, async get(k) { return mem.get(k)!; }, async remove(k) { mem.delete(k); } };
 const STL = new TextEncoder().encode("solid clip\n facet normal 0 0 1\n  outer loop\n   vertex 0 0 0\n   vertex 30 0 0\n   vertex 0 12.5 4\n  endloop\n endfacet\nendsolid clip\n");
@@ -33,7 +35,7 @@ let ip = 0;
 const nextIp = () => `198.18.${Math.floor(++ip / 250)}.${ip % 250}`;
 
 function order(extra: Partial<Parameters<typeof customerCreateOrder>[0]> = {}) {
-  const r = customerCreateOrder({ name: "Aini", product: "Clip", quantity: 3, deadline: "2026-10-30", budgetIdr: 500_000, note: "", ...extra });
+  const r = customerCreateOrder({ name: "Aini", product: "Clip", quantity: 3, deadline: DEADLINE, budgetIdr: 500_000, note: "", ...extra });
   if (!r.ok) throw new Error(JSON.stringify(r));
   return r.order;
 }
@@ -81,7 +83,7 @@ afterAll(() => {
 });
 
 describe("POST /api/c/<token>/design: the customer adds their design later", () => {
-  it("stores it as the customer's, measures it, weighs it and wakes the Chief, exactly like a design sent with the order", async () => {
+  it("stores it as the customer's, measures it and weighs it, exactly like a design sent with the order (its grams wake the Chief)", async () => {
     noteSlicerPoll();
     const o = order();
     expect(viewOf(o, o.customerToken!)).toMatchObject({ design: null, canAddDesign: true });
@@ -91,9 +93,8 @@ describe("POST /api/c/<token>/design: the customer adds their design later", () 
     expect(mine(o.id)).toEqual([expect.objectContaining({ kind: "design", filename: "Clip (v2).stl", mesh: { sizeMm: [30, 12.5, 4], triangles: 1 } })]);
     expect(store.listSliceJobs({ orderId: o.id })).toEqual([expect.objectContaining({ actor: "system", state: "queued", sourceName: "Clip (v2).stl" })]);
     expect(store.listLog(o.id).map((e) => e.tool)).toEqual(["customer_design", "slice_request"]);
-    expect(wake).toHaveBeenCalledTimes(1);
-    expect(wake.mock.calls[0]).toEqual([o.id, expect.stringMatching(
-      /^The customer just added their own design to this order on their order page\. The studio's slicer is weighing it automatically: wait for slicerGrams .* do not ask the operator/)]);
+    // Not woken while the studio's slicer weighs it (a run that could only wait): the grams wake the Chief.
+    expect(wake).not.toHaveBeenCalled();
     expect(viewOf(store.getOrder(o.id)!, o.customerToken!)).toMatchObject({
       design: { name: "Clip (v2).stl", sizeMm: [30, 12.5, 4], state: "weighing", estimate: null, priced: false }, canAddDesign: false,
     });
@@ -249,7 +250,7 @@ describe("POST /api/c/<token>/design: the customer adds their design later", () 
     setFileStore({ ...files, async put(k, b) { storing++; await gate; mem.set(k, b); } });
     // The order form with a design (every field, the invite in the header too), and "Add your design" on another order.
     const form = new FormData();
-    const fields = { invite: INVITE, name: "Aini", product: "Clip", quantity: "2", deadline: "2026-10-30", budgetIdr: "300000", note: "", colors: "[]" };
+    const fields = { invite: INVITE, name: "Aini", product: "Clip", quantity: "2", deadline: DEADLINE, budgetIdr: "300000", note: "", colors: "[]" };
     for (const [k, v] of Object.entries(fields)) form.set(k, v);
     form.set("design", new File([STL as BlobPart], "Clip.stl"));
     const probe = new Request("http://x/api/c", { method: "POST", body: form });

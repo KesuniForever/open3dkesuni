@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as store from "../store";
-import { chooseQuote } from "../actions";
-import { choosePrinter, clearBed, completeTask, confirmColors, ingestReport, linkPrinter } from "./actions";
+import { addEvidence, chooseQuote } from "../actions";
+import { setLlmGateway } from "../agent/chief";
+import { choosePrinter, clearBed, completeTask, confirmColors, createTask, ingestReport, linkPrinter, printFinished } from "./actions";
 import { detectEvents, mergeReport, type PrinterSnapshot } from "./bambu";
+import { orderGate } from "./autoprint";
+import { checkHeartbeat } from "../agent/heartbeat";
 import { POST as report } from "@/app/api/printers/report/route";
 
 const ORDER = "ORD-001";
@@ -287,5 +290,185 @@ describe("bridge endpoint with the full snapshot", () => {
     expect(res.status).toBe(200);
     expect(store.getPrinter("a1-3")!.snapshot).toMatchObject({ sdcard: true, ams: { trays: [{ type: "PLA", color: "#FF6910" }] } });
     expect(store.listAllTasks().filter((t) => t.errorCode === "HMS_0510_0400_0001_0044")).toHaveLength(1);
+  });
+});
+
+describe("an order of several units: one run per unit, the Chief woken at the end", () => {
+  const woken: string[] = [];
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+  /** The dispatcher's print of one unit, sent to printer #1 (the printer's reports move it on). */
+  const agentJob = (n: number) => {
+    const at = new Date().toISOString();
+    store.savePrintJob({
+      id: `PJ-${n}-x`, orderId: ORDER, printerId: "a1", attachmentId: "A-1", plate: 1, fileName: `ORD-001_${n}.gcode.3mf`, amsMapping: [0],
+      options: { bedLevelling: true, flowCali: true, timelapse: false, useAms: true }, state: "sent", by: "agent", actor: "agent",
+      bedCheckId: `BC-a1-${n}`, bedConfirmedBy: "Khelda", createdAt: at, updatedAt: at,
+    });
+  };
+  beforeEach(() => {
+    woken.length = 0;
+    process.env.KESUNI_MAX_WAKES_PER_HOUR = "1000";
+    setLlmGateway(async (req) => {
+      woken.push(String(req.messages[0].content));
+      return { stop_reason: "end_turn", content: [{ type: "text", text: "Decision: none.\nWaiting on: a person." }] };
+    });
+  });
+  afterEach(() => {
+    setLlmGateway(undefined);
+    delete process.env.KESUNI_MAX_WAKES_PER_HOUR;
+  });
+
+  it("only the last run opens the collect-and-QC task, marks printing finished and wakes the Chief", async () => {
+    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real", quantity: 3 });
+    let n = 0;
+    const run = async () => {
+      expect(linkPrinter("a1", ORDER).ok).toBe(true);
+      agentJob(++n);
+      push({ gcode_state: "RUNNING", mc_percent: 1 });
+      push({ gcode_state: "FINISH", mc_percent: 100 });
+      await settle();
+      return store.listTasks(ORDER).filter((t) => t.kind === "collect_and_qc").at(-1)!;
+    };
+    let task = await run();
+    expect(task.text).toMatch(/^Run 1 of 3 finished on A1 Combo #1\. Take the part off the bed and keep it with the order: QC comes after the last run\./);
+    expect(printFinished(ORDER)).toBe(false);
+    expect(woken).toEqual([]);
+    completeTask(task.id, "Khelda"); // the part is off the bed
+    task = await run();
+    expect(task.text).toMatch(/^Run 2 of 3 finished/);
+    completeTask(task.id, "Khelda");
+    task = await run();
+    expect(task.text).toMatch(/^Print finished on A1 Combo #1 \(all 3 runs\)\. Collect the item, check the quality/);
+    expect(printFinished(ORDER)).toBe(true);
+    expect(woken).toHaveLength(1);
+    expect(woken[0]).toContain(`all 3 runs of the order are printed. Task ${task.id} asks a person to collect the parts and record QC`);
+  });
+
+  it("an order of one unit (or not real) finishes with its one print, as before", async () => {
+    linkPrinter("a1", ORDER);
+    push({ gcode_state: "RUNNING", mc_percent: 1 });
+    push({ gcode_state: "FINISH", mc_percent: 100 });
+    await settle();
+    expect(store.listTasks(ORDER).at(-1)!.text).toMatch(/^Print finished on A1 Combo #1\. Collect the item/);
+    expect(printFinished(ORDER)).toBe(true);
+    expect(woken).toHaveLength(1);
+  });
+
+  it("a failed print or a fault pause wakes the Chief; a person's pause or stop does not", async () => {
+    const report = (print: Record<string, unknown>, prev?: PrinterSnapshot) => {
+      const next = mergeReport(prev, { print }, new Date().toISOString())!;
+      ingestReport("a1", next, detectEvents(prev, next));
+      return next;
+    };
+    linkPrinter("a1", ORDER);
+    let next = report({ gcode_state: "RUNNING", mc_percent: 20, stg: [2, 0], stg_cur: 0 });
+    next = report({ gcode_state: "PAUSE", stg_cur: 16, print_error: 0x03008001 }, next); // a person paused it
+    next = report({ gcode_state: "RUNNING", stg_cur: 0, print_error: 0 }, next);
+    await settle();
+    expect(woken).toEqual([]);
+    next = report({ gcode_state: "PAUSE", stg_cur: 6, print_error: 0x07008011 }, next); // out of filament
+    await settle();
+    expect(woken).toHaveLength(1);
+    expect(woken[0]).toMatch(/A1 Combo #1 stopped at 20% code 0700-8011 \(out of filament\) and needs a person/);
+    next = report({ gcode_state: "RUNNING", stg_cur: 0, print_error: 0 }, next);
+    report({ gcode_state: "FAILED", print_error: 0x0300400c }, next); // a person pressed Stop
+    await settle();
+    expect(woken).toHaveLength(1);
+    store.savePrinter({ ...store.getPrinter("a1")!, bedOccupiedBy: undefined });
+    linkPrinter("a1", ORDER);
+    next = report({ gcode_state: "RUNNING", mc_percent: 40 });
+    report({ gcode_state: "FAILED", print_error: 0x03004000 }, next);
+    await settle();
+    expect(woken).toHaveLength(2);
+    expect(woken[1]).toMatch(/The print failed on A1 Combo #1/);
+  });
+
+  it("a person's QC record wakes the Chief once to tell the customer", async () => {
+    linkPrinter("a1", ORDER);
+    push({ gcode_state: "RUNNING", mc_percent: 1 });
+    push({ gcode_state: "FINISH", mc_percent: 100 });
+    await settle();
+    woken.length = 0;
+    expect(addEvidence(ORDER, { kind: "qc", note: "OK, photo in WA", label: "manual" }).ok).toBe(true);
+    expect(addEvidence(ORDER, { kind: "qc", note: "second photo", label: "manual" }).ok).toBe(true);
+    await settle();
+    expect(woken).toHaveLength(1);
+    expect(woken[0]).toMatch(/A person recorded QC for this order: printing and QC are done/);
+    expect(woken[0]).not.toContain("photo in WA");
+  });
+
+  it("QC recorded with runs still to print: the Chief is told to ask a person first", async () => {
+    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real", quantity: 6 });
+    linkPrinter("a1", ORDER);
+    agentJob(1);
+    push({ gcode_state: "RUNNING", mc_percent: 1 });
+    push({ gcode_state: "FINISH", mc_percent: 100 });
+    expect(addEvidence(ORDER, { kind: "qc", note: "first lamp OK", label: "manual" }).ok).toBe(true);
+    await settle();
+    expect(woken).toEqual([expect.stringContaining("but only 1 of 6 runs are printed. Ask a person before telling the customer it is done.")]);
+  });
+
+  it("a person's print of a paid real order of several units (a full plate) is its one run: finished, never printed again", async () => {
+    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real", quantity: 50 });
+    store.saveEscrow({
+      orderId: ORDER, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state: "FUNDED", txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: new Date().toISOString(),
+    });
+    linkPrinter("a1", ORDER);
+    const at = new Date().toISOString();
+    store.savePrintJob({
+      id: "PJ-5-x", orderId: ORDER, printerId: "a1", attachmentId: "A-1", plate: 1, fileName: "ORD-001_p1.gcode.3mf", amsMapping: [0],
+      options: { bedLevelling: true, flowCali: true, timelapse: false, useAms: true }, state: "sent", by: "Khelda", createdAt: at, updatedAt: at,
+    });
+    push({ gcode_state: "RUNNING", mc_percent: 1 });
+    push({ gcode_state: "FINISH", mc_percent: 100 });
+    await settle();
+    const task = store.listTasks(ORDER).at(-1)!;
+    expect(task.text).toMatch(/^Print finished on A1 Combo #1\. Collect the item/);
+    expect(woken).toHaveLength(1);
+    completeTask(task.id, "Khelda");
+    expect(printFinished(ORDER)).toBe(true);
+    expect(orderGate(store.getOrder(ORDER)!)).toMatchObject({ runsNeeded: 1, runsDone: 1, why: { key: "All runs printed ({done} of {needed})" } });
+    expect(checkHeartbeat().some((f) => f.kind === "start_production")).toBe(false);
+  });
+
+  it("so is a person's print started outside the website (no print job) on a linked printer", async () => {
+    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real", quantity: 6 });
+    linkPrinter("a1", ORDER);
+    push({ gcode_state: "RUNNING", mc_percent: 1 });
+    expect(orderGate(store.getOrder(ORDER)!)).toMatchObject({ runsNeeded: 1, runsActive: 1 });
+    push({ gcode_state: "FINISH", mc_percent: 100 });
+    await settle();
+    expect(store.listTasks(ORDER).at(-1)!.text).toMatch(/^Print finished on A1 Combo #1\. Collect the item/);
+    expect(printFinished(ORDER)).toBe(true);
+    expect(woken).toHaveLength(1);
+  });
+
+  it("a printer that pauses again and again for the same fault wakes the Chief once per print", async () => {
+    const report = (print: Record<string, unknown>, prev?: PrinterSnapshot) => {
+      const next = mergeReport(prev, { print }, new Date().toISOString())!;
+      ingestReport("a1", next, detectEvents(prev, next));
+      return next;
+    };
+    linkPrinter("a1", ORDER);
+    let next = report({ gcode_state: "RUNNING", mc_percent: 20, stg: [2, 0], stg_cur: 0 });
+    for (let i = 0; i < 3; i++) {
+      next = report({ gcode_state: "PAUSE", stg_cur: 6, print_error: 0x07008011 }, next);
+      next = report({ gcode_state: "RUNNING", stg_cur: 0, print_error: 0 }, next);
+    }
+    await settle();
+    expect(woken).toHaveLength(1);
+    expect(store.listTasks(ORDER).filter((t) => t.kind === "change_filament")).toHaveLength(3); // each pause still asks a person
+  });
+});
+
+describe("who did it: the decision log tells code, people and the Chief apart", () => {
+  it("a button press is a person's, a printer report's task is code's", () => {
+    store.savePrinter({ id: "a1", name: "A1 Combo #1", lastSeen: new Date().toISOString(), snapshot: mergeReport(undefined, { print: { gcode_state: "IDLE" } }, new Date().toISOString())! });
+    expect(choosePrinter(ORDER).ok).toBe(true); // the order page's button
+    expect(store.listLog(ORDER).filter((e) => e.tool === "choose_printer")).toMatchObject([{ actor: "human", by: "person", ok: true }]);
+    createTask(ORDER, "check_printer", "A1 Combo #1 reports an error");
+    expect(store.listLog(ORDER).at(-1)).toMatchObject({ tool: "create_operator_task", actor: "agent", by: "code" });
+    expect(store.listTasks(ORDER).at(-1)).toMatchObject({ createdBy: "agent", by: "code" });
   });
 });

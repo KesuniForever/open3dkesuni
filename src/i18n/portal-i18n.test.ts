@@ -17,8 +17,8 @@ describe("customer portal in Indonesian", () => {
       ...PORTAL_TABS.map((x) => x.label), "Sections",
       // the order statuses (order-status.ts) and the errors of the paste field
       "Weighing your design", "Preparing your price", "Price ready", "Processing payment", "Waiting for a printer", "Printing {pct}", "Print paused", "Quality check",
-      "Ready to check", "Done", "Refunding", "Refunded",
-      "This is not an order link. An order link contains /c/ and a code.", "This order link was not found. Please check the link from Kesuni.",
+      "Your turn: check the item", "Payment still open", "Printed {printed} of {total}", "Done", "Refunding", "Refunded",
+      "Paste the whole link Kesuni sent you (it starts with https://).", "This order link was not found. Please check the link from Kesuni.",
       "Connection lost. Please try again.",
       // the calculator's own reason for grams it cannot read
       "Enter the grams per piece as a number, for example 16",

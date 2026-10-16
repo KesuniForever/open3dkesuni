@@ -9,7 +9,8 @@
 //   fine; colours confirmed by a person since the spools last changed; not linked to another order;
 // - bed: a person's "Bed is empty" given after the last print started and ended, not used, not older than 2 h;
 // - order: PLAN_CHOSEN or IN_PRODUCTION; a real order is paid into escrow (FUNDED); an order that is not real only when a
-//   person set its runs; runs left (runs needed - finished prints - prints on their way > 0, one at a time). Finished: the
+//   person set its runs; runs left (runs needed - finished prints - prints on their way > 0, one at a time; runsNeeded
+//   for the default: one per unit while only the agent prints, 1 once a person printed it). Finished: the
 //   order's done print jobs, or its collect tasks from a printer if more (a print started outside the website); every
 //   run when a person marked the test order printed without a print ("Done (debug)", done-debug.ts). On its
 //   way: its jobs not ended, and any printer linked to it that is printing. No open reprint task and no open "agent
@@ -112,21 +113,43 @@ export interface OrderGate {
   real: boolean;
 }
 
-/** Runs a person asked for; without it 1 for a real order and 0 (the agent never prints it) for any other. */
-export const runsNeeded = (o: Order): number => o.autoPrint?.runsNeeded ?? (o.label === "real" ? 1 : 0);
+/**
+ * Runs a person asked for. Without them, a real order: one run per unit while only the agent prints it (the studio's
+ * slice is one unit per plate), but 1 once a person printed (or tried to print) it, on the website or outside it: people
+ * print full plates, and they set the runs when the order needs more. Any other order: 0 (the agent never prints it).
+ * finishing: a print of the order just finished and its collect task is not raised yet (printer events).
+ */
+export const runsNeeded = (o: Order, opts: { finishing?: boolean } = {}): number => runState(o, opts).need;
 
-export function orderGate(o: Order): OrderGate {
-  const real = o.label === "real";
+/** Units one run makes: the quantity spread over the runs (1 per run by default while only the agent prints). */
+export const unitsPerRun = (o: Order): number => {
+  const need = runsNeeded(o);
+  return need > 0 ? Math.ceil(o.quantity / need) : 1;
+};
+
+function runState(o: Order, opts: { finishing?: boolean }) {
   const jobs = store.listPrintJobs({ orderId: o.id });
+  const printers = store.listPrinters();
   // A print a person started outside the website (Bambu Studio, the printer screen) has no print job: the collect task
   // the printer's "finished" raised counts it, and a linked printer that is printing counts as a run on its way.
-  const collected = store.listTasks(o.id).filter((t) => t.kind === "collect_and_qc" && t.printerId && t.createdBy === "agent").length;
-  const need = runsNeeded(o);
-  // "Done (debug)": a person marked this test order printed without a print (done-debug.ts): every run counts as printed.
-  const runsDone = Math.max(jobs.filter((j) => j.state === "done").length, collected, o.printDoneDebug ? need : 0);
+  const collected = store.listTasks(o.id).filter((t) => t.kind === "collect_and_qc" && t.printerId && t.createdBy === "agent").length
+    + (opts.finishing ? 1 : 0);
+  const jobsDone = jobs.filter((j) => j.state === "done").length;
   const busy = new Set(jobs.filter((j) => ACTIVE.includes(j.state)).map((j) => j.printerId));
-  for (const p of store.listPrinters()) if (p.currentOrderId === o.id && ON_PRINTER.includes(p.snapshot?.state ?? "")) busy.add(p.id);
-  const runsActive = busy.size;
+  const linkedOn = printers.filter((p) => p.currentOrderId === o.id && ON_PRINTER.includes(p.snapshot?.state ?? "")).map((p) => p.id);
+  // A person printed it: a print job a person started (any state), a finished print with no job, or a linked printer
+  // printing it without a job.
+  const byPerson = jobs.some((j) => j.actor !== "agent") || collected > jobsDone || linkedOn.some((id) => !busy.has(id));
+  const need = o.autoPrint?.runsNeeded ?? (o.label !== "real" ? 0 : byPerson ? 1 : Math.max(1, o.quantity));
+  for (const id of linkedOn) busy.add(id);
+  // "Done (debug)": a person marked this test order printed without a print (done-debug.ts): every run counts as printed.
+  return { need, runsDone: Math.max(jobsDone, collected, o.printDoneDebug ? need : 0), runsActive: busy.size };
+}
+
+/** The order gates. finishing: as runsNeeded. */
+export function orderGate(o: Order, opts: { finishing?: boolean } = {}): OrderGate {
+  const real = o.label === "real";
+  const { need, runsDone, runsActive } = runState(o, opts);
   const base = { runsNeeded: need, runsDone, runsActive, real };
   const no = (why: Why): OrderGate => ({ ...base, why });
   if (!PRODUCTION_STATUSES.includes(o.status)) return no({ key: "Order is {status}", vars: { status: o.status } });

@@ -7,7 +7,8 @@ import { budgetFromRupiah, createOrder, recordAcceptance, type Fail } from "./ac
 import { deposit, openEscrow, refund, release, syncEscrow, topUpCustomer } from "./escrow";
 import { circle } from "./circle";
 import { microToUsdc } from "./policy";
-import { notReadyReason } from "./printer/actions";
+import { notReadyReason, printFinished, runCount } from "./printer/actions";
+import { unitsPerRun } from "./printer/autoprint";
 import { idrPerUsdc, idrToMicro } from "./costing";
 import { agreementCurrent, costingForChosen, gramPricingForChosen } from "./agreement";
 import { isTestnetChain, publicNetwork, type PublicNetwork } from "./network";
@@ -18,22 +19,32 @@ import { nameOf, parseColorChoices, studioPalette, type PaletteColor } from "./c
 import { MATERIALS, orderMaterial, priceByWeight, pricingConfig, pricingFor } from "./pricing";
 import { customerDesignClosed, customerDesignFile } from "./auto-weigh";
 import { autoWeighState } from "./slicing";
+import { isOnline } from "./machines";
 import type { Vec3 } from "./mesh";
-import type { ActualReport, ChainTx, ColorChoice, Escrow, Material, Order, Review, Spec } from "./types";
+import type { ActualReport, ChainTx, ColorChoice, Escrow, Material, Order, Printer, Review, Spec } from "./types";
 
 const fail = (status: number, error: string, reasons?: string[]): Fail => ({ ok: false, status, error, reasons });
 const live = (t: ChainTx) => !["FAILED", "DENIED", "CANCELLED"].includes(t.state);
 const PAYABLE = ["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"];
+const CLOSED = ["ACCEPTED", "PAID", "REJECTED"];
 /** printedOn of a test order marked printed without a print (Order.printDoneDebug): no printer printed it. */
 export const TEST_PRINTED_ON = "Test (no real print)";
 
 export { idrPerUsdc };
 
+/** Today in Jakarta (WIB, UTC+7) as YYYY-MM-DD: the order form's earliest "Needed by" and the "running late" line. */
+export const jakartaToday = (now = Date.now()): string => new Date(now + 7 * 3_600_000).toISOString().slice(0, 10);
+export const PAST_DEADLINE = "Pick a date from today on.";
+/** A printer reported in the last 2 min: the colours the customer pages offer are loaded now. */
+export const studioOnline = (now = Date.now()): boolean => store.listPrinters().some((p) => isOnline(p, now));
+export const LOW_BUDGET = "The budget must be at least Rp1.000";
+
 export const orderForToken = (token: string): Order | undefined =>
   /^[A-Za-z0-9_-]{16,64}$/.test(token) ? store.getOrderByToken(token) : undefined;
 
 export interface CustomerView {
-  order: Pick<Order, "id" | "product" | "quantity" | "deadline" | "status" | "label" | "customerName" | "customerNote">;
+  /** budgetIdr: the customer's maximum in rupiah, as typed (orders from before rupiah budgets have none). */
+  order: Pick<Order, "id" | "product" | "quantity" | "deadline" | "status" | "label" | "customerName" | "customerNote" | "budgetIdr">;
   price: { usdc: string; idr: number; etaHours: number } | null;
   escrow: {
     state: Escrow["state"]; amountUsdc: string; network: string; label: string;
@@ -42,9 +53,24 @@ export interface CustomerView {
   } | null;
   paying: boolean;
   printing: { printer: string; state: string; percent: number; remainingMin: number | null; online: boolean } | null;
-  /** The printer whose bed holds the finished part, TEST_PRINTED_ON for a test order marked printed, else null. */
+  /**
+   * Every run is printed and Kesuni's quality check comes next: the printer whose bed holds the part (or held it last),
+   * TEST_PRINTED_ON for a test order marked printed. Null before that (also between the runs of an order printed piece
+   * by piece) and after a failed print.
+   */
   printedOn: string | null;
+  /** An order printed in more than one run, while runs are still to print: the pieces printed so far, of the quantity. */
+  pieces: { printed: number; total: number } | null;
+  /**
+   * "Latest updates": what a person at Kesuni logged, and what the printer reported as one fixed English line from
+   * DEVICE_LINES (the page translates it): no percentages, file names, printer names or error codes. Test lines are left
+   * out on a real order.
+   */
   updates: { kind: string; note: string; label: string; at: string; photo?: string }[];
+  /** Past the date the customer needs it (Jakarta time) and not printed yet: the page says it runs late. */
+  late: boolean;
+  /** A printer reported in the last 2 min: the colours offered are loaded now (else they are the last ones seen). */
+  studioOnline: boolean;
   /** Short updates from the Chief (AI) or a person at Kesuni, oldest first. Text, author kind and time only. */
   messages: { text: string; by: "agent" | "human"; at: string }[];
   acceptance: { accepted: boolean; by: string; note: string; at: string } | null;
@@ -109,7 +135,33 @@ export interface CustomerDesignView {
   priced: boolean;
 }
 
-export function customerView(order: Order, token: string): CustomerView {
+/** What the printer reported (the note after "<printer>: "), as the customer reads it; null: not news for them. */
+const DEVICE_LINES: [RegExp, string][] = [
+  [/^started printing/, "Printing started"],
+  [/^resumed printing/, "Printing again"],
+  [/^finished printing/, "Printing finished"],
+  [/^(paused|stopped) at /, "Paused, Kesuni is on it"],
+  [/^print stopped by a person/, "Printing stopped, Kesuni is on it"],
+  [/^print failed/, "This print didn't work, Kesuni will print it again"],
+];
+export function deviceUpdate(note: string): string | null {
+  const said = note.slice(note.indexOf(": ") + 2);
+  return DEVICE_LINES.find(([re]) => re.test(said))?.[1] ?? null;
+}
+
+/** "Done (debug)" on a test order (src/lib/printer/done-debug.ts): a test step with a person's name, not news. */
+const MARKED_PRINTED = "Print marked done for testing";
+
+function updatesOf(order: Order, token: string): CustomerView["updates"] {
+  return store.listEvidence(order.id).flatMap((e) => {
+    if (e.label === "simulated" && (order.label === "real" || e.note.startsWith(MARKED_PRINTED))) return [];
+    const note = e.label === "device" ? deviceUpdate(e.note) : e.note;
+    if (note === null) return [];
+    return [{ kind: e.kind, note, label: e.label, at: e.at, photo: e.attachmentId ? `/api/c/${token}/files/${e.attachmentId}` : undefined }];
+  });
+}
+
+export function customerView(order: Order, token: string, now = Date.now()): CustomerView {
   const quote = order.chosenQuoteId ? store.getQuote(order.chosenQuoteId) : undefined;
   const escrow = store.getEscrow(order.id);
   const rate = idrPerUsdc();
@@ -120,10 +172,11 @@ export function customerView(order: Order, token: string): CustomerView {
   const lastRaise = order.budgetRaises?.at(-1);
   const raised = !offer && lastRaise && order.status === "CREATED" ? { toIdr: lastRaise.toIdr } : null;
   const design = designOf(order);
+  const printedOn = printedOnOf(order, printers);
   return {
     order: {
       id: order.id, product: order.product, quantity: order.quantity, deadline: order.deadline, status: order.status,
-      label: order.label, customerName: order.customerName, customerNote: order.customerNote,
+      label: order.label, customerName: order.customerName, customerNote: order.customerNote, budgetIdr: order.budgetIdr,
     },
     // Rupiah as agreed (by weight or calculator), not converted back from whole USDC cents.
     price: quote ? { usdc: microToUsdc(quote.priceMicro), idr: quoteIdr(order, quote), etaHours: quote.etaHours } : null,
@@ -138,12 +191,13 @@ export function customerView(order: Order, token: string): CustomerView {
       printer: p.name, state: p.snapshot.state, percent: p.snapshot.percent, remainingMin: p.snapshot.remainingMin,
       online: !(notReadyReason(p) ?? "").startsWith("offline"),
     } : null,
-    // A test order a person marked printed without a print ("Done (debug)") reads as printed: QC comes next.
-    printedOn: printers.find((x) => x.bedOccupiedBy === order.id)?.name ?? (order.printDoneDebug ? TEST_PRINTED_ON : null),
-    updates: store.listEvidence(order.id).map((e) => ({
-      kind: e.kind, note: e.note, label: e.label, at: e.at,
-      photo: e.attachmentId ? `/api/c/${token}/files/${e.attachmentId}` : undefined,
-    })),
+    printedOn,
+    pieces: piecesOf(order),
+    updates: updatesOf(order, token),
+    // Once printed (or handed over for the customer's check) no new date is coming: the line would contradict the page.
+    late: !CLOSED.includes(order.status) && order.status !== "EVIDENCE_SUBMITTED" && !printedOn
+      && /^\d{4}-\d{2}-\d{2}$/.test(order.deadline) && order.deadline < jakartaToday(now),
+    studioOnline: studioOnline(now),
     messages: store.listMessages(order.id).map((m) => ({ text: m.text, by: m.by, at: m.at })),
     acceptance: acc ? { accepted: acc.accepted, by: acc.by, note: acc.note, at: acc.at } : null,
     idrPerUsdc: rate,
@@ -172,6 +226,29 @@ export function customerView(order: Order, token: string): CustomerView {
     budgetRaised: raised,
     ownerApprovalAboveIdr: ownerRules().approvalAboveIdr,
   };
+}
+
+/**
+ * See CustomerView.printedOn. The bed of each run's printer holds the order after every run, so the bed alone is not
+ * "printed": printFinished also needs every run done and no failed print after it. A test order a person marked printed
+ * without a print ("Done (debug)") reads as printed too. Once the part is collected, the printer of the last
+ * printer-raised collect task (the Chief's own tasks name no printer).
+ */
+function printedOnOf(order: Order, printers: Printer[]): string | null {
+  if (!printFinished(order.id)) return null;
+  const bed = printers.find((x) => x.bedOccupiedBy === order.id);
+  if (bed) return bed.name;
+  if (order.printDoneDebug) return TEST_PRINTED_ON;
+  const last = store.listTasks(order.id).filter((t) => t.kind === "collect_and_qc" && t.printerId).at(-1);
+  return printers.find((x) => x.id === last?.printerId)?.name ?? null;
+}
+
+/** See CustomerView.pieces: one piece per run, unless Kesuni set the runs for the whole order (unitsPerRun). */
+function piecesOf(order: Order): CustomerView["pieces"] {
+  if (!["PLAN_CHOSEN", "IN_PRODUCTION"].includes(order.status)) return null;
+  const r = runCount(order);
+  if (r.needed <= 1 || r.done >= r.needed) return null;
+  return { printed: Math.min(order.quantity, r.done * unitsPerRun(order)), total: order.quantity };
 }
 
 /** The customer's own design and what the automatic weighing found, customer-safe (see CustomerDesignView). */
@@ -247,6 +324,50 @@ export async function refreshPayment(orderId: string): Promise<void> {
   const toppedUp = now.txs.some((t) => t.kind === "customer_topup" && t.state === "COMPLETE");
   const depositing = now.txs.some((t) => t.kind === "deposit" && live(t));
   if (now.state === "AWAITING_DEPOSIT" && toppedUp && !depositing) await deposit(orderId);
+  // Every transfer of the payment failed and none is under way: the page asks the customer to tap Pay again and says
+  // Kesuni knows, so one open task tells a person. It closes by itself once the payment is in.
+  const after = store.getEscrow(orderId)!;
+  if (after.state === "AWAITING_DEPOSIT" && after.txs.length > 0 && !after.txs.some(live)) {
+    tellKesuni(orderId, PAYMENT_FAILED_KEY, `The customer's payment for ${orderId} did not go through on the network. Check it; the customer may tap Pay again.`);
+  } else if (after.state !== "AWAITING_DEPOSIT") {
+    settled(orderId, [PAYMENT_FAILED_KEY, PAY_FAILED_KEY]);
+  }
+}
+
+const isoNow = () => new Date().toISOString();
+const PAYMENT_FAILED_KEY = "customer:payment-failed";
+const PAY_FAILED_KEY = "customer:pay-failed";
+
+/** One open task per key for the team: something only a person can sort out for the customer (needs_info, not a printer). */
+function tellKesuni(orderId: string, key: string, text: string): void {
+  if (store.listTasks(orderId).some((t) => t.status === "open" && t.key === key)) return;
+  store.saveTask({ id: store.nextTaskId(), orderId, kind: "needs_info", status: "open", createdBy: "agent", at: isoNow(), text, key });
+}
+function settled(orderId: string, keys: string[]): void {
+  for (const t of store.listTasks(orderId)) {
+    if (t.status === "open" && t.key && keys.includes(t.key)) store.saveTask({ ...t, status: "done", doneAt: isoNow(), doneBy: "the payment arrived" });
+  }
+}
+
+/** What the customer reads when paying, accepting or rejecting cannot go through for a reason that is not theirs to fix. */
+export const NOT_THROUGH = "This couldn't go through. Kesuni has been told and will contact you.";
+/** Answers the customer can fix on the page themselves: shown as they are (the page translates them). */
+const THEIRS_TO_FIX = new Set([
+  "Name is required", "Who accepted is required", "Approve the agreement (price and spec) before paying",
+  "First tick the box that you checked the size, colour, finish and function of the item you received",
+]);
+
+/**
+ * A pay, accept or reject that failed, for the customer's page: their own slips as they are; anything else (a wallet,
+ * the network, a policy check) becomes NOT_THROUGH. The reason goes to the decision log and one open task tells a person.
+ * Status codes stay as they were.
+ */
+export function customerFailure(orderId: string, action: "pay" | "accept" | "reject", r: Fail): Fail {
+  if (THEIRS_TO_FIX.has(r.error)) return r;
+  const reasons = [r.error, ...(r.reasons ?? [])];
+  store.addLog({ orderId, actor: "human", tool: `customer_${action}_failed`, input: {}, ok: false, output: { error: r.error, reasons: r.reasons ?? [] }, at: isoNow() });
+  tellKesuni(orderId, `customer:${action}-failed`, `The customer tried to ${action} ${orderId} and it failed: ${reasons.join("; ")}. Check it, then contact the customer.`);
+  return { ok: false, status: r.status, error: NOT_THROUGH };
 }
 
 /** The customer presses "Pay": open the escrow if needed, then pay (on testnet, test USDC first). */
@@ -338,11 +459,13 @@ export async function customerDecide(
 export function customerCreateOrder(input: {
   name: string; product: string; quantity: number; deadline: string; budgetIdr: number; note: string;
   material?: unknown; colors?: unknown;
-}): { ok: true; order: Order } | Fail {
+}, now = Date.now()): { ok: true; order: Order } | Fail {
   const r: string[] = [];
   if (!input.name.trim()) r.push("Name is required");
   if (input.product.trim().length > 200) r.push("Product name is too long (at most 200 characters)");
-  if (!Number.isFinite(input.budgetIdr) || input.budgetIdr < 1000) r.push("Budget minimal Rp1.000");
+  // A date already past could never be met: the owner's deadline rule refuses every price, so the price never comes.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input.deadline) && input.deadline < jakartaToday(now)) r.push(PAST_DEADLINE);
+  if (!Number.isFinite(input.budgetIdr) || input.budgetIdr < 1000) r.push(LOW_BUDGET);
   const choice = readColorChoice(input.material, input.colors, studioPalette(store.listPrinters()));
   if (!choice.ok) r.push(...choice.reasons);
   if (r.length || !choice.ok) return fail(400, "The order is incomplete", r);

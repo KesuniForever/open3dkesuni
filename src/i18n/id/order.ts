@@ -18,6 +18,29 @@ const id: Record<string, string> = {
   "device": "perangkat",
   "local": "lokal",
   "Restore the simulated demo order. Real orders are not touched.": "Kembalikan pesanan demo simulasi. Pesanan nyata tidak disentuh.",
+
+  // the real / simulated switch (src/lib/order-label.ts)
+  "Real orders count as traction; simulated ones are the team's tests and never count.":
+    "Pesanan nyata dihitung sebagai traction; pesanan simulasi adalah uji coba tim dan tidak pernah dihitung.",
+  "Mark simulated": "Tandai simulasi",
+  "Mark real": "Tandai nyata",
+  "Mark this order as simulated?": "Tandai pesanan ini sebagai simulasi?",
+  "Mark this order as real?": "Tandai pesanan ini sebagai nyata?",
+  "It stops counting as a real order: not in traction, and the agent prints it only if a person sets its runs. “Reset simulated demo” would delete it.":
+    "Pesanan ini tidak lagi dihitung sebagai pesanan nyata: tidak masuk traction, dan agen hanya mencetaknya kalau orang mengatur jumlah run-nya. “Reset demo simulasi” akan menghapusnya.",
+  "It counts as a real order from now on: traction, the next deadline and agent prints.":
+    "Mulai sekarang pesanan ini dihitung sebagai pesanan nyata: traction, tenggat berikutnya, dan cetak oleh agen.",
+  "Logged with your name.": "Dicatat dengan nama Anda.",
+  "Label changed.": "Label diubah.",
+  "Label must be real or simulated": "Label harus nyata atau simulasi",
+  "The label cannot change now": "Label belum bisa diubah sekarang",
+  "Money is held in this order's escrow: release or refund it first": "Ada uang yang ditahan di escrow pesanan ini: cairkan atau kembalikan dulu",
+  "An escrow transfer of this order is still in progress": "Masih ada transfer escrow pesanan ini yang sedang diproses",
+  "This order's escrow is on mainnet (real USDC): it stays real": "Escrow pesanan ini ada di mainnet (USDC sungguhan): pesanan tetap nyata",
+  "On mainnet an order the customer can still pay stays real": "Di mainnet, pesanan yang masih bisa dibayar pelanggan tetap nyata",
+  "A practice order from the demo stays simulated": "Pesanan latihan dari demo tetap simulasi",
+  "Marked printed for testing without a print: it stays simulated": "Sudah ditandai selesai cetak untuk uji tanpa mencetak: pesanan tetap simulasi",
+  "Marked {label} by {name}": "Ditandai {label} oleh {name}",
   "Reset simulated demo": "Reset demo simulasi",
   "Reset the simulated demo?": "Reset demo simulasi?",
   "Delete and reset": "Hapus dan reset",

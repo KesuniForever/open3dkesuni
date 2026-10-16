@@ -3,8 +3,10 @@ import * as store from "./store";
 import { setCircleGateway } from "./circle";
 import { addEvidence, chooseQuote, ensureCustomerToken } from "./actions";
 import {
-  customerCreateOrder, customerDecide, customerPay, customerSetColors, customerView, orderForToken, readColorChoice, refreshPayment,
+  customerCreateOrder, customerDecide, customerPay, customerSetColors, customerView, jakartaToday, orderForToken, readColorChoice, refreshPayment,
+  TEST_PRINTED_ON,
 } from "./customer";
+import { orderStatus } from "@/app/request/[code]/order-status";
 import { studioPalette } from "./colors";
 import { emptySnapshot, type AmsTray } from "./printer/bambu";
 import { DEMO, fakeCircle } from "./fake-circle.test-helper";
@@ -14,6 +16,8 @@ import { POST as createViaInvite } from "@/app/api/c/route";
 import { clientIp } from "./http";
 
 const SHOP = "0x1111111111111111111111111111111111111111";
+/** A "Needed by" two weeks ahead (Jakarta): a date already past is refused. */
+const SOON = jakartaToday(Date.now() + 14 * 86_400_000);
 const ORDER = "ORD-001";
 let fake: ReturnType<typeof fakeCircle>;
 
@@ -164,7 +168,7 @@ describe("customer pays, accepts, and the agent settles", () => {
 describe("ordering through the invite link", () => {
   it("creates a real order with the budget converted from rupiah", () => {
     process.env.IDR_PER_USDC = "16000";
-    const r = customerCreateOrder({ name: "Aini", product: "Casing korek", quantity: 2, deadline: "2026-10-20", budgetIdr: 48_000, note: "hitam" });
+    const r = customerCreateOrder({ name: "Aini", product: "Casing korek", quantity: 2, deadline: SOON, budgetIdr: 48_000, note: "hitam" });
     expect(r.ok && r.order).toMatchObject({ label: "real", customerName: "Aini", mandateMicro: 3_000_000, status: "CREATED" });
     delete process.env.IDR_PER_USDC;
   });
@@ -172,7 +176,7 @@ describe("ordering through the invite link", () => {
   it("the endpoint refuses a wrong or missing invite code", async () => {
     const req = (invite: string) => new Request("http://x/api/c", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ invite, name: "A", product: "B", quantity: 1, deadline: "2026-10-20", budgetIdr: 50000 }),
+      body: JSON.stringify({ invite, name: "A", product: "B", quantity: 1, deadline: SOON, budgetIdr: 50000 }),
     });
     expect((await createViaInvite(req("anything"))).status).toBe(404); // no code configured
     process.env.CUSTOMER_INVITE_CODE = "kesuni-pilot-2026";
@@ -186,7 +190,7 @@ describe("ordering through the invite link", () => {
     process.env.CUSTOMER_INVITE_CODE = "kesuni-pilot-2026";
     const req = (ip: string, product = "Casing") => new Request("http://x/api/c", {
       method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": ip },
-      body: JSON.stringify({ invite: "kesuni-pilot-2026", name: "A", product, quantity: 1, deadline: "2026-10-20", budgetIdr: 50000 }),
+      body: JSON.stringify({ invite: "kesuni-pilot-2026", name: "A", product, quantity: 1, deadline: SOON, budgetIdr: 50000 }),
     });
     expect((await createViaInvite(req("203.0.113.9", "x".repeat(201)))).status).toBe(400);
     for (let i = 0; i < 5; i++) expect((await createViaInvite(req("203.0.113.9"))).status).toBe(201);
@@ -208,7 +212,7 @@ describe("ordering through the invite link", () => {
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 2 * 3_600_000 }); // the earlier tests' orders are over an hour old
     const req = (headers: Record<string, string>) => new Request("http://x/api/c", {
       method: "POST", headers: { "content-type": "application/json", ...headers },
-      body: JSON.stringify({ invite: "kesuni-pilot-2026", name: "A", product: "Casing", quantity: 1, deadline: "2026-10-20", budgetIdr: 50000 }),
+      body: JSON.stringify({ invite: "kesuni-pilot-2026", name: "A", product: "Casing", quantity: 1, deadline: SOON, budgetIdr: 50000 }),
     });
     try {
       process.env.RAILWAY_ENVIRONMENT_ID = "test";
@@ -253,7 +257,7 @@ describe("material and colours the customer picks", () => {
     } });
   };
   const newOrder = (extra: Partial<Parameters<typeof customerCreateOrder>[0]> = {}) => {
-    const r = customerCreateOrder({ name: "Aini", product: "Casing", quantity: 1, deadline: "2026-10-20", budgetIdr: 50_000, note: "", ...extra });
+    const r = customerCreateOrder({ name: "Aini", product: "Casing", quantity: 1, deadline: SOON, budgetIdr: 50_000, note: "", ...extra });
     if (!r.ok) throw new Error(JSON.stringify(r));
     return r.order;
   };
@@ -290,13 +294,13 @@ describe("material and colours the customer picks", () => {
         material: "PLA", budgetIdr: 48_000, rateIdrPerUsdc: 16_000, mandateMicro: 3_000_000,
         preferredColors: [{ type: "PLA", color: "#FEC600", name: "Yellow" }, { type: "PLA", color: "#FF6910", name: "Orange" }],
       });
-      const bad = customerCreateOrder({ name: "A", product: "B", quantity: 1, deadline: "2026-10-20", budgetIdr: 50_000, note: "", colors: [{ type: "PLA", color: "#123456" }] });
+      const bad = customerCreateOrder({ name: "A", product: "B", quantity: 1, deadline: SOON, budgetIdr: 50_000, note: "", colors: [{ type: "PLA", color: "#123456" }] });
       expect(bad.ok === false && bad.reasons).toEqual([expect.stringMatching(/is not loaded in the studio right now$/)]);
       // Through the endpoint too.
       const res = await createViaInvite(new Request("http://x/api/c", {
         method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "192.0.2.77" },
         body: JSON.stringify({
-          invite: "kesuni-pilot-2026", name: "A", product: "B", quantity: 1, deadline: "2026-10-20", budgetIdr: 50000,
+          invite: "kesuni-pilot-2026", name: "A", product: "B", quantity: 1, deadline: SOON, budgetIdr: 50000,
           material: "PETG", colors: [{ type: "PETG", color: "#FFFFFF" }],
         }),
       }));
@@ -349,7 +353,143 @@ describe("material and colours the customer picks", () => {
 
   it("nothing loaded (bridge offline): a material alone is fine, any colour is refused", () => {
     expect(newOrder({ material: "PLA" }).material).toBe("PLA");
-    const r = customerCreateOrder({ name: "A", product: "B", quantity: 1, deadline: "2026-10-20", budgetIdr: 50_000, note: "", colors: [{ type: "PLA", color: "#000000" }] });
+    const r = customerCreateOrder({ name: "A", product: "B", quantity: 1, deadline: SOON, budgetIdr: 50_000, note: "", colors: [{ type: "PLA", color: "#000000" }] });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("the order page in plain words (17 Oct bug hunt)", () => {
+  const token = () => ensureCustomerToken(ORDER)!;
+  const ctx = () => ({ params: Promise.resolve({ token: token() }) });
+  const post = (body: unknown) => new Request("http://x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("a past \"Needed by\" is refused (the owner's deadline rule would refuse every price); today is fine", () => {
+    const now = Date.parse("2026-10-17T20:00:00Z"); // 18 Oct, 03:00 in Jakarta
+    expect(jakartaToday(now)).toBe("2026-10-18");
+    const order = (deadline: string) => customerCreateOrder({ name: "Aini", product: "Clip", quantity: 1, deadline, budgetIdr: 50_000, note: "" }, now);
+    const past = order("2026-10-17");
+    expect(!past.ok && past.reasons).toEqual(["Pick a date from today on."]);
+    expect(order("2026-10-18").ok).toBe(true);
+    const low = customerCreateOrder({ name: "Aini", product: "Clip", quantity: 1, deadline: "2026-10-30", budgetIdr: 500, note: "" }, now);
+    expect(!low.ok && low.reasons).toEqual(["The budget must be at least Rp1.000"]);
+  });
+
+  it("running late: past the date and not finished", () => {
+    const o = store.getOrder(ORDER)!;
+    const at = (deadline: string, status = o.status) => customerView({ ...o, deadline, status }, token(), Date.parse("2026-10-17T05:00:00Z")).late;
+    expect(at("2026-10-16")).toBe(true);
+    expect(at("2026-10-17")).toBe(false); // due today: not late yet
+    expect(at("2026-10-16", "PAID")).toBe(false);
+    expect(at("2026-10-16", "REJECTED")).toBe(false);
+    // Handed over for the customer's check, or printed: no new date is coming.
+    expect(at("2026-10-16", "EVIDENCE_SUBMITTED")).toBe(false);
+    expect(at("2026-10-16", "IN_PRODUCTION")).toBe(true);
+    store.saveOrder({ ...o, deadline: "2026-10-16", status: "IN_PRODUCTION", printDoneDebug: { by: "Khelda", at: new Date().toISOString() } });
+    expect(customerView(store.getOrder(ORDER)!, token(), Date.parse("2026-10-17T05:00:00Z"))).toMatchObject({ printedOn: TEST_PRINTED_ON, late: false });
+  });
+
+  it("an order of 3 pieces, one per run: after the first run it is still printing; \"printed\" only after the last", () => {
+    const at = new Date().toISOString();
+    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real", quantity: 3, status: "IN_PRODUCTION" });
+    // The bed of the run's printer holds the order after every run, not only after the last one.
+    store.savePrinter({ id: "a1", name: "A1 Combo #1", bedOccupiedBy: ORDER });
+    // One run: the agent's print job is done and the printer's "finished" raised a collect task.
+    const run = (n: number) => {
+      store.savePrintJob({
+        id: `PJ-${n}-x`, orderId: ORDER, printerId: "a1", attachmentId: "A-1", plate: 1, fileName: `run${n}.gcode.3mf`, amsMapping: [0],
+        options: { bedLevelling: true, flowCali: true, timelapse: false, useAms: true }, state: "done", by: "agent", actor: "agent", createdAt: at, updatedAt: at,
+      });
+      store.saveTask({
+        id: store.nextTaskId(), orderId: ORDER, kind: "collect_and_qc", printerId: "a1", text: `Run ${n} of 3 finished`, status: "open", createdBy: "agent", at,
+      });
+    };
+    const now = () => customerView(store.getOrder(ORDER)!, token());
+    run(1);
+    expect(now()).toMatchObject({ printedOn: null, pieces: { printed: 1, total: 3 } });
+    expect(orderStatus(now())).toMatchObject({ stage: "printing", vars: { printed: 1, total: 3 } });
+    run(2);
+    run(3);
+    expect(now()).toMatchObject({ printedOn: "A1 Combo #1", pieces: null });
+    expect(orderStatus(now()).stage).toBe("checking");
+    // Collected (the bed is empty), QC not logged yet: still printed, never back to "waiting for a printer".
+    store.savePrinter({ id: "a1", name: "A1 Combo #1" });
+    expect(now().printedOn).toBe("A1 Combo #1");
+    // A failed print after it needs a new run: not printed.
+    store.saveTask({ id: store.nextTaskId(), orderId: ORDER, kind: "reprint", printerId: "a1", text: "Print failed", status: "open", createdBy: "agent", at });
+    expect(now().printedOn).toBeNull();
+  });
+
+  it("the customer's budget in rupiah is on the view; the printer's own lines become plain sentences", () => {
+    const made = customerCreateOrder({ name: "Aini", product: "Clip", quantity: 1, deadline: SOON, budgetIdr: 150_000, note: "" });
+    expect(made.ok && customerView(made.order, "t".repeat(24)).order.budgetIdr).toBe(150_000);
+    chooseQuote(ORDER, "Q-own", "agent", "within budget");
+    for (const note of [
+      "A1 Combo #1: started printing (Benchy_Bambu_Pla_Basic)", "A1 Combo #1: progress 25%", "A1 Combo #1: paused at 40% by a person",
+      "A1 Combo #1: stopped at 41% code 0300-4000, needs an operator", "A1 Combo #1: resumed printing from 41%", "A1 Combo #1: reports 0300-4000",
+      "A1 Combo #1: finished printing (Benchy)", "A1 Combo #1: print failed at 50% code 0500-0001", "A1 Combo #1: print stopped by a person at 10%",
+    ]) addEvidence(ORDER, { kind: "log", note, label: "device" });
+    addEvidence(ORDER, { kind: "log", note: "Test line, no real print", label: "simulated" });
+    addEvidence(ORDER, { kind: "log", note: "Collected, looks neat", label: "manual" });
+    const real = { ...store.getOrder(ORDER)!, label: "real" as const };
+    expect(customerView(real, token()).updates.map((u) => u.note)).toEqual([
+      "Printing started", "Paused, Kesuni is on it", "Paused, Kesuni is on it", "Printing again", "Printing finished",
+      "This print didn't work, Kesuni will print it again", "Printing stopped, Kesuni is on it", "Collected, looks neat",
+    ]);
+    expect(JSON.stringify(customerView(real, token()).updates)).not.toMatch(/Benchy|0300|A1 Combo|%|Test line/);
+    // On a test order its test lines stay (the page says "test order"), except "marked printed for testing" by a person.
+    addEvidence(ORDER, { kind: "log", note: "Print marked done for testing (no real print) by Khelda", label: "simulated" });
+    const test = customerView({ ...store.getOrder(ORDER)!, label: "simulated" }, token()).updates.map((u) => u.note);
+    expect(test).toContain("Test line, no real print");
+    expect(test.join()).not.toContain("Khelda");
+  });
+
+  it("paying fails for a reason that is not the customer's: one plain sentence; the reason in the log and one task for the team", async () => {
+    chooseQuote(ORDER, "Q-own", "agent", "within budget");
+    delete process.env.KESUNI_DEMO_FUNDS_ADDRESS; // the test top-up cannot run
+    const res = await act(post({ action: "pay", agree: true, by: "Aini" }), ctx());
+    expect(res.status).toBe(501);
+    expect(await res.json()).toEqual({ error: "This couldn't go through. Kesuni has been told and will contact you." });
+    expect(store.listLog(ORDER).find((e) => e.tool === "customer_pay_failed")).toMatchObject({ ok: false, output: { error: "KESUNI_DEMO_FUNDS_ADDRESS is not set" } });
+    await act(post({ action: "pay", agree: true, by: "Aini" }), ctx()); // again: still one task
+    const tasks = store.listTasks(ORDER).filter((t) => t.key === "customer:pay-failed");
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]).toMatchObject({ kind: "needs_info", status: "open" });
+    expect(tasks[0].text).toContain("KESUNI_DEMO_FUNDS_ADDRESS is not set");
+    expect(tasks[0].text).not.toContain("Aini");
+    // Their own slips still say what to do.
+    const noName = await act(post({ action: "pay", agree: true, by: "" }), ctx());
+    expect((await noName.json()).error).toBe("Name is required");
+    // Once the payment arrives the task closes by itself.
+    process.env.KESUNI_DEMO_FUNDS_ADDRESS = DEMO;
+    await pay();
+    await refreshPayment(ORDER);
+    expect(store.listTasks(ORDER).find((t) => t.key === "customer:pay-failed")!.status).toBe("done");
+  });
+
+  it("every transfer of the payment failed: one task, so \"Kesuni has been told\" on the page is true", async () => {
+    chooseQuote(ORDER, "Q-own", "agent", "within budget");
+    const at = new Date().toISOString();
+    store.saveEscrow({
+      orderId: ORDER, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state: "AWAITING_DEPOSIT", network: "ARC-TESTNET", label: "testnet", createdAt: at,
+      txs: [{ kind: "customer_topup", from: DEMO, to: "0xc", amountMicro: 30_000_000, idempotencyKey: "k1", state: "FAILED", at }],
+    });
+    await refreshPayment(ORDER);
+    await refreshPayment(ORDER);
+    expect(store.listTasks(ORDER).filter((t) => t.key === "customer:payment-failed" && t.status === "open")).toHaveLength(1);
+    expect(customerView(store.getOrder(ORDER)!, token()).paying).toBe(false);
+  });
+
+  it("a held release answers settled: false without the policy's reasons (the headline says Kesuni finishes it)", async () => {
+    chooseQuote(ORDER, "Q-own", "agent", "within budget");
+    await pay();
+    qc();
+    fake.balances.set(store.getEscrow(ORDER)!.escrowAddress, 0); // the escrow wallet is empty: the policy holds the release
+    const res = await act(post({ action: "accept", by: "Aini", note: "", checked: true }), ctx());
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body).toEqual({ ok: true, settled: false });
+    expect(store.getOrder(ORDER)!.status).toBe("ACCEPTED");
   });
 });

@@ -17,7 +17,7 @@ export function DesignInfo() {
   return <Info>{t("Optional. One file is one piece: the price is multiplied by the quantity. STL or OBJ, up to 25 MB. Kesuni weighs it to set the price. For a 3MF or several colours, send the file on WhatsApp.")}</Info>;
 }
 
-export default function DesignPicker({ file, onFile, error, onError, label, disabled = false, color = null }: {
+export default function DesignPicker({ file, onFile, error, onError, label, disabled = false, color = null, onUnreadable }: {
   file: File | null; onFile: (f: File | null) => void;
   /** English (this field's or the server's): shown translated under the field. */
   error: string | null; onError: (e: string | null) => void;
@@ -26,6 +26,8 @@ export default function DesignPicker({ file, onFile, error, onError, label, disa
   disabled?: boolean;
   /** "#RRGGBB": the colour the customer picked, so the preview looks like their print. */
   color?: string | null;
+  /** The picked file is no readable model (a broken STL): the preview says so, and the form keeps Send off. */
+  onUnreadable?: (unreadable: boolean) => void;
 }) {
   const t = useT();
   const input = useRef<HTMLInputElement>(null);
@@ -56,7 +58,7 @@ export default function DesignPicker({ file, onFile, error, onError, label, disa
           <button type="button" className="quiet" onClick={() => { onFile(null); onError(null); }} disabled={disabled}>{t("Remove file")}</button>
         )}
       </div>
-      {file && <ModelPreview source={file} name={file.name} color={color} />}
+      {file && <ModelPreview source={file} name={file.name} color={color} onUnreadable={onUnreadable} />}
       {error && <p className="alert bad" role="status" style={{ margin: "10px 0 0" }}>{tLib(t, error)}</p>}
     </>
   );

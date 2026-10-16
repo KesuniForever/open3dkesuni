@@ -4,6 +4,7 @@ import { setCircleGateway } from "../circle";
 import { chooseQuote } from "../actions";
 import { customerAgree } from "../agreement";
 import { customerPay } from "../customer";
+import { quoteByWeight } from "../agreement";
 import { DEMO, fakeCircle } from "../fake-circle.test-helper";
 import { clearBed, completeTask, confirmColors, ingestReport, linkPrinter } from "../printer/actions";
 import { mergeReport, type PrinterSnapshot } from "../printer/bambu";
@@ -11,7 +12,7 @@ import { setAutoPrint } from "../printer/dispatch";
 import { addAttachment, setFileStore, type FileStore } from "../files";
 import { fake3mf } from "../threemf.test-helper";
 import { SLICER_NAME } from "../slice-rules";
-import { setLlmGateway, type LlmResponse } from "./chief";
+import { setLlmGateway, wakeChief, type LlmResponse } from "./chief";
 import { checkHeartbeat, heartbeatStatus, runHeartbeat, startHeartbeatScheduler } from "./heartbeat";
 import { register } from "@/instrumentation";
 import { GET, POST } from "@/app/api/heartbeat/route";
@@ -58,14 +59,26 @@ afterAll(() => {
 });
 
 describe("checks (code only)", () => {
-  it("a new order without quotes needs a price; with quotes it needs a plan; an open question silences both", () => {
+  it("a new order without quotes needs a price; with quotes it needs a plan; an open question covers both (no wake)", () => {
     store.deleteQuote("Q-own");
     store.deleteQuote("Q-partner");
     expect(checkHeartbeat().map((f) => f.kind)).toEqual(["needs_price"]);
     store.saveQuote({ id: "Q-own", orderId: ORDER, vendorId: "own", priceMicro: 30_000_000, etaHours: 48, source: "own" });
-    expect(checkHeartbeat()).toMatchObject([{ kind: "needs_plan", key: `needs_plan:${ORDER}`, wake: true }]);
+    // The key is what the Chief decides from: quotes and prices, the budget, the owner's approval, the grams.
+    expect(checkHeartbeat()).toMatchObject([{ kind: "needs_plan", key: `needs_plan:${ORDER}:own=30000000/48h:32000000::`, wake: true }]);
     store.saveTask({ id: "T-1", orderId: ORDER, kind: "needs_info", text: "Berapa gram?", status: "open", createdBy: "agent", at: new Date().toISOString() });
-    expect(checkHeartbeat()).toEqual([]);
+    expect(checkHeartbeat()).toMatchObject([{ kind: "needs_plan", wake: false, covered: true, text: expect.stringContaining("Waiting on the open question T-1") }]);
+  });
+
+  it("the customer's page offers to raise the budget: no wake while every quote is above it", () => {
+    store.deleteQuote("Q-partner");
+    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real" });
+    store.saveOrder({ ...store.getOrder(ORDER)!, slicerGrams: { gramsPerUnit: 400, source: "Bambu Studio", by: "operator", at: new Date().toISOString() } });
+    expect(quoteByWeight(ORDER, { gramsPerUnit: 400, source: "Bambu Studio", by: "human" }).ok).toBe(true); // Rp600.000 > budget
+    // Q-own (30 USDC) still fits the budget: the Chief chooses.
+    expect(checkHeartbeat()).toMatchObject([{ kind: "needs_plan", wake: true }]);
+    store.deleteQuote("Q-own");
+    expect(checkHeartbeat()).toMatchObject([{ kind: "needs_plan", wake: false, covered: true, text: expect.stringContaining("Waiting on the customer") }]);
   });
 
   it("never puts the customer's name in a finding", () => {
@@ -103,11 +116,30 @@ describe("heartbeat run", () => {
     expect(store.getMeta("heartbeatLast")).toMatchObject({ trigger: "timer", woke: [] });
   });
 
-  it("a problem that goes away and comes back wakes Claude again", async () => {
+  it("a question closed without any change does not wake Claude again; a change does (no question loop)", async () => {
     await beat();
     store.saveTask({ id: "T-q", orderId: ORDER, kind: "needs_info", text: "Tanya pemilik", status: "open", createdBy: "agent", at: new Date().toISOString() });
-    expect((await beat()).findings).toEqual([]);
+    const s = await beat();
+    expect(s.findings).toMatchObject([{ kind: "needs_plan", wake: false, covered: true }]);
+    expect(s.woke).toEqual([]);
     store.saveTask({ ...store.getTask("T-q")!, status: "done" });
+    await beat();
+    expect(fromHeartbeat()).toHaveLength(1); // the same quotes, budget, approval and grams: nothing new to decide
+    store.saveQuote({ ...store.getQuote("Q-own")!, priceMicro: 29_000_000 }); // re-priced: a new problem
+    await beat();
+    expect(fromHeartbeat()).toHaveLength(2);
+  });
+
+  it("a problem that goes away and comes back wakes Claude again", async () => {
+    chooseQuote(ORDER, "Q-own", "agent", "within budget");
+    store.saveEscrow({
+      orderId: ORDER, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state: "FUNDED", txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: new Date().toISOString(),
+    });
+    await beat();
+    store.savePrinter({ id: "a1", name: "A1 Combo #1", currentOrderId: ORDER, lastSeen: new Date().toISOString() });
+    expect((await beat()).findings).toEqual([]);
+    store.savePrinter({ id: "a1", name: "A1 Combo #1", lastSeen: new Date().toISOString() });
     await beat();
     expect(fromHeartbeat()).toHaveLength(2);
   });
@@ -208,19 +240,85 @@ describe("heartbeat run", () => {
     expect(fromHeartbeat()).toHaveLength(0);
   });
 
-  it("deadline at risk: one wake and one operator task, also when it then passes", async () => {
+  it("deadline: one wake when it is near and one when it passed; the Chief decides, so code opens no second task", async () => {
     store.saveOrder({ ...store.getOrder(ORDER)!, deadline: "2026-10-20" });
     const s = await beat(new Date("2026-10-20T10:00:00+07:00"));
     expect(s.findings.map((f) => f.kind).sort()).toEqual(["deadline_risk", "needs_plan"]);
     expect(fromHeartbeat()).toHaveLength(1);
     expect(fromHeartbeat()[0].trigger).toContain("less than 24 hours away");
-    expect(store.listTasks(ORDER)).toMatchObject([{ kind: "needs_info", status: "open" }]);
-    // the question to a person silences "needs a plan"; the deadline problem is unchanged
+    expect(store.listTasks(ORDER)).toEqual([]);
     const s2 = await beat(new Date("2026-10-21T08:00:00+07:00"));
-    expect(s2.findings.filter((f) => f.kind !== "task_stale")) // the task was saved with the real clock
-      .toMatchObject([{ kind: "deadline_risk", text: expect.stringContaining("has passed") }]);
+    expect(s2.findings.find((f) => f.kind === "deadline_risk"))
+      .toMatchObject({ key: `deadline_passed:${ORDER}:2026-10-20`, text: expect.stringContaining("has passed") });
+    expect(fromHeartbeat()).toHaveLength(2);
+    expect(fromHeartbeat()[1].trigger).toContain("has passed");
+    expect(fromHeartbeat()[1].trigger).toContain("(product: «Custom lamp side table"); // the customer's words, marked as data
+    await beat(new Date("2026-10-21T09:00:00+07:00"));
+    expect(fromHeartbeat()).toHaveLength(2);
+    expect(store.listTasks(ORDER)).toEqual([]);
+  });
+
+  it("deadline while Claude fails: code opens the task itself, once, and names it when the Chief runs later", async () => {
+    chooseQuote(ORDER, "Q-own", "agent", "within budget");
+    store.saveOrder({ ...store.getOrder(ORDER)!, deadline: "2026-10-20" });
+    fakeClaude(async () => { throw new Error("Claude API 400: credit balance too low"); });
+    const t0 = new Date("2026-10-20T10:00:00+07:00").getTime();
+    expect((await beat(new Date(t0))).woke).toMatchObject([{ orderId: ORDER, outcome: "error" }]);
+    const tasks = () => store.listTasks(ORDER);
+    expect(tasks()).toMatchObject([{ kind: "check_printer", status: "open", key: `deadline_risk:${ORDER}:2026-10-20`, by: "code" }]);
+    await beat(new Date(t0 + 2 * 60_000)); // within the retry wait: no second task
+    expect(tasks()).toHaveLength(1);
+    fakeClaude();
+    await beat(new Date(t0 + 31 * 60_000));
     expect(fromHeartbeat()).toHaveLength(1);
-    expect(store.listTasks(ORDER)).toHaveLength(1);
+    expect(fromHeartbeat()[0].trigger).toContain(`(Operator task ${tasks()[0].id} is already open for this.)`);
+    expect(tasks()).toHaveLength(1);
+  });
+
+  it("the Chief already on the order (an event woke it): no second run queued; the next beat looks again", async () => {
+    process.env.KESUNI_MAX_WAKES_PER_HOUR = "1000";
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    fakeClaude(async () => { await gate; return end("Decision: none.\nWaiting on: the operator."); });
+    expect(wakeChief(ORDER, "A new order arrived.")).toBe(true);
+    const s = await beat();
+    expect(s.woke).toMatchObject([{ orderId: ORDER, outcome: "busy" }]);
+    release();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(woken).toHaveLength(1); // only the event's run
+    await beat();
+    expect(fromHeartbeat()).toHaveLength(1); // not handled while busy: this beat woke it
+    await beat();
+    expect(fromHeartbeat()).toHaveLength(1);
+    delete process.env.KESUNI_MAX_WAKES_PER_HOUR;
+  });
+
+  it("pricing again at the same price is no new problem (no quote ids in the key)", async () => {
+    await beat();
+    const q = store.getQuote("Q-own")!;
+    store.deleteQuote("Q-own");
+    store.saveQuote({ ...q, id: "Q-own-2" });
+    await beat();
+    expect(fromHeartbeat()).toHaveLength(1);
+  });
+
+  it("rules mode: the deadline gets one code task, closed once the order's print starts", async () => {
+    setLlmGateway(undefined);
+    process.env.KESUNI_AGENT_MODE = "rules";
+    chooseQuote(ORDER, "Q-own", "agent", "within budget");
+    const soon = new Date(Date.now() + 12 * 3_600_000);
+    const day = new Date(soon.getTime() + 7 * 3_600_000).toISOString().slice(0, 10); // its Jakarta day
+    store.saveOrder({ ...store.getOrder(ORDER)!, deadline: day });
+    await beat();
+    const [task] = store.listTasks(ORDER);
+    expect(task).toMatchObject({ kind: "check_printer", status: "open", key: `deadline_risk:${ORDER}:${day}`, by: "code" });
+    expect(linkPrinter("a1", ORDER).ok).toBe(true);
+    const at = new Date().toISOString();
+    const running: PrinterSnapshot = {
+      state: "RUNNING", percent: 1, remainingMin: 60, layer: null, totalLayers: null, jobName: null, errorCode: 0, nozzleTemp: null, bedTemp: null, at,
+    };
+    ingestReport("a1", running, [{ kind: "started", percent: 1, jobName: null, at }]);
+    expect(store.getTask(task.id)).toMatchObject({ status: "done", doneBy: "A1 Combo #1 (printing started)" });
   });
 
   it("wakes at most 3 orders per beat; the rest follow on the next beat", async () => {

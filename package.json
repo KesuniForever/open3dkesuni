@@ -11,7 +11,8 @@
     "start": "node scripts/railway-start.mjs",
     "lint": "eslint",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:clean": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "@circle-fin/developer-controlled-wallets": "^10.8.1",

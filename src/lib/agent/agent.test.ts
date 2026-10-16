@@ -3,10 +3,14 @@ import * as store from "../store";
 import { resetDb } from "../store";
 import { planOrder } from "./planner";
 import { callTool, LLM_TOOLS, redactNote, TOOLS } from "./tools";
-import { chooseQuote, createOrder } from "../actions";
+import { approveByOwner, chooseQuote, createOrder, ensureCustomerToken } from "../actions";
 import { setSlicerGrams } from "../agreement";
 import { completeTask, ingestReport, linkPrinter } from "../printer/actions";
 import { detectEvents, mergeReport, type PrinterSnapshot } from "../printer/bambu";
+import { setOrderRuns } from "../printer/dispatch";
+import { nameOf } from "../colors";
+import { setLlmGateway } from "./chief";
+import { POST as approvalRoute } from "@/app/api/orders/[id]/owner-approval/route";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -313,5 +317,206 @@ describe("materials: the Chief prices PLA and PETG", () => {
     store.saveOrder({ ...store.getOrder("ORD-001")!, material: "PETG", customerNote: "", spec: { dimensions: "", toleranceMm: 0.2, material: "PLA", color: "", layerMm: 0.2, infillPct: 15, finishing: "Standard", promise: "" } });
     expect((callTool("get_order", { orderId: "ORD-001" }).data as { pricingBlockedBy: string }).pricingBlockedBy)
       .toBe('The order\'s material is PETG but the spec says "PLA": a person checks which one it is');
+  });
+});
+
+describe("privacy: no tool result carries the customer's name or the token of their order page", () => {
+  beforeEach(() => { process.env.IDR_PER_USDC = "16000"; });
+  afterEach(() => { delete process.env.IDR_PER_USDC; });
+
+  it("every tool, before and after the plan, refused or not", () => {
+    const orderId = "ORD-001";
+    const token = ensureCustomerToken(orderId)!;
+    store.saveOrder({
+      ...store.getOrder(orderId)!, customerName: "Aini Rahmawati", label: "real", customerNote: "Untuk Aini Rahmawati",
+      // The owner may name the customer in their note.
+      ownerApproval: { quoteId: "Q-own", priceMicro: 30_000_000, by: "Khelda", note: "Pilot order for Aini, OK", at: new Date().toISOString() },
+    });
+    slicer(300);
+    const inputs: Record<string, Record<string, unknown>> = {
+      check_vendor_policy: { quoteId: "Q-own" },
+      price_by_weight: { orderId, gramsPerUnit: 300, source: "Bambu Studio" },
+      request_human_decision: { orderId, question: "Is this right?" },
+      create_operator_task: { orderId, kind: "check_printer", text: "Check the nozzle" },
+      message_customer: { orderId, text: "Your order is in." },
+      propose_payment: { orderId, recipient: "0x0000000000000000000000000000000000000001", amountMicro: 1, idempotencyKey: "k" },
+      price_with_calculator: { orderId, gramsPerUnit: 300, machineHours: 2, unitPriceIdr: 450_000, source: "slicer" },
+    };
+    const results: unknown[] = [];
+    const runAll = () => { for (const t of TOOLS) results.push(callTool(t.name, inputs[t.name] ?? { orderId })); };
+    runAll();
+    results.push(callTool("choose_plan", { orderId, quoteId: "Q-own", reason: "Own studio" }));
+    expect(results.at(-1)).toMatchObject({ ok: true, data: { id: orderId, status: "PLAN_CHOSEN", chosenQuoteId: "Q-own" } });
+    store.saveEscrow({
+      orderId, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state: "FUNDED", txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: new Date().toISOString(),
+    });
+    runAll();
+    const json = JSON.stringify(results);
+    expect(json).not.toContain(token);
+    expect(json).not.toMatch(/Aini|Rahmawati|customerName|customerToken/);
+    // nor the log the tools write
+    expect(JSON.stringify(store.listLog(orderId))).not.toContain(token);
+    expect(json).toContain("Pilot order for [customer name], OK");
+  });
+
+  it("the owner's approval note wakes the Chief without the customer's name", async () => {
+    const orderId = "ORD-001";
+    const woken: string[] = [];
+    process.env.KESUNI_MAX_WAKES_PER_HOUR = "1000";
+    setLlmGateway(async (req) => { woken.push(String(req.messages[0].content)); return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; });
+    store.saveOrder({ ...store.getOrder(orderId)!, customerName: "Aini Rahmawati" });
+    const res = await approvalRoute(new Request("http://x", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ quoteId: "Q-own", by: "Khelda", note: "Pilot order for Aini, OK" }),
+    }), { params: Promise.resolve({ id: orderId }) });
+    expect(res.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 20));
+    setLlmGateway(undefined);
+    delete process.env.KESUNI_MAX_WAKES_PER_HOUR;
+    expect(woken).toEqual([expect.stringContaining('quote Q-own: "Pilot order for [customer name], OK"')]);
+    expect(woken.join()).not.toMatch(/Aini|Rahmawati/);
+  });
+});
+
+describe("one open question per order (the over-budget loop of ORD-005)", () => {
+  afterEach(() => setLlmGateway(undefined));
+
+  it("the same question is not asked twice; a new one while it is open becomes an Update line", () => {
+    const orderId = "ORD-001";
+    const a = callTool("request_human_decision", { orderId, question: "Rp600.000 is over the budget. Approve?", recommendation: "Ask the customer" });
+    const id = (a.data as { taskId: string }).taskId;
+    expect(callTool("request_human_decision", { orderId, question: "Rp600.000 is over the budget. Approve?" }).data)
+      .toMatchObject({ taskId: id, alreadyAsked: true });
+    expect(callTool("request_human_decision", { orderId, question: "Still over the budget with the new grams. Approve?" }).data)
+      .toMatchObject({ taskId: id, updatedOpenQuestion: true });
+    const open = store.listTasks(orderId).filter((t) => t.kind === "needs_info");
+    expect(open).toHaveLength(1);
+    expect(open[0].text).toBe("Rp600.000 is over the budget. Approve?\nChief's recommendation: Ask the customer\nUpdate: Still over the budget with the new grams. Approve?");
+    expect(open[0]).toMatchObject({ by: "chief", createdBy: "agent" });
+    // get_order shows earlier questions, answered ones too, without who answered.
+    completeTask(id, "Khelda");
+    const seen = (callTool("get_order", { orderId }).data as { earlierQuestions: unknown[] }).earlierQuestions;
+    expect(seen).toEqual([{ taskId: id, text: open[0].text, status: "done", at: open[0].at, doneAt: expect.any(String) }]);
+    expect(JSON.stringify(seen)).not.toContain("Khelda");
+    // Answered: the next question is a new task.
+    expect((callTool("request_human_decision", { orderId, question: "Grams per unit?" }).data as { taskId: string }).taskId).not.toBe(id);
+  });
+
+  it("an owner approval the policy would still refuse is refused: nothing saved, the question stays open, no wake", async () => {
+    const orderId = "ORD-001";
+    const woken: string[] = [];
+    setLlmGateway(async (req) => { woken.push(String(req.messages[0].content)); return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; });
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    store.saveOrder({ ...store.getOrder(orderId)!, deadline: tomorrow });
+    store.saveQuote({ ...store.getQuote("Q-own")!, etaHours: 500 }); // after the deadline: no approval lifts that
+    store.saveTask({ id: "T-q", orderId, kind: "needs_info", text: "Approve?", status: "open", createdBy: "agent", at: new Date().toISOString() });
+    const res = await approvalRoute(new Request("http://x", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ quoteId: "Q-own", by: "Khelda", note: "ok" }),
+    }), { params: Promise.resolve({ id: orderId }) });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: expect.stringMatching(/cannot make this quote allowed/), reasons: [expect.stringMatching(/SLA/)] });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(store.getOrder(orderId)!.ownerApproval).toBeUndefined();
+    expect(store.getTask("T-q")!.status).toBe("open");
+    expect(woken).toEqual([]);
+  });
+
+  it("a price above the customer's budget: saved for the customer's raise, the question answered, the Chief not woken", async () => {
+    const orderId = "ORD-001";
+    const woken: string[] = [];
+    setLlmGateway(async (req) => { woken.push(String(req.messages[0].content)); return { stop_reason: "end_turn", content: [{ type: "text", text: "ok" }] }; });
+    store.saveQuote({ ...store.getQuote("Q-own")!, priceMicro: 40_000_000 }); // over the 32 USDC budget
+    store.saveTask({ id: "T-q", orderId, kind: "needs_info", text: "Over budget. Approve?", status: "open", createdBy: "agent", at: new Date().toISOString() });
+    const res = await approvalRoute(new Request("http://x", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ quoteId: "Q-own", by: "Khelda", note: "pilot" }),
+    }), { params: Promise.resolve({ id: orderId }) });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ waitsOnCustomer: true });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(store.getOrder(orderId)!.ownerApproval).toMatchObject({ quoteId: "Q-own", priceMicro: 40_000_000 });
+    expect(store.getTask("T-q")).toMatchObject({ status: "done", doneBy: "Khelda (approved by the owner; the customer may raise their budget)" });
+    expect(woken).toEqual([]);
+    expect(approveByOwner(orderId, { quoteId: "Q-partner", by: "Khelda", note: "x" })).toMatchObject({ ok: true, waitsOnCustomer: true });
+  });
+});
+
+describe("production: runs, units and the studio's slices", () => {
+  const realOrder = (quantity: number) => {
+    const r = createOrder({ product: "Lampu", quantity, deadline: "2099-12-31", designVersion: "v1", mandateMicro: 500_000_000, label: "real" });
+    if (!r.ok) throw new Error(r.error);
+    return r.order.id;
+  };
+
+  it("get_production_status: a real order needs one run per unit unless a person set the runs", () => {
+    const id = realOrder(6);
+    const prod = () => (callTool("get_production_status", { orderId: id }).data as { production: Record<string, unknown> }).production;
+    expect(prod()).toEqual({
+      quantity: 6, runsNeeded: 6, runsDone: 0, runsOnTheirWay: 0, unitsPerRun: 1, unitsPrinted: 0, runsSetBy: "default", printingFinished: false,
+    });
+    expect(setOrderRuns(id, { runsNeeded: 2, by: "Khelda" }).ok).toBe(true); // three lamps per plate
+    expect(prod()).toMatchObject({ runsNeeded: 2, unitsPerRun: 3, runsSetBy: "a person" });
+  });
+
+  it("get_production_status: once a person printed a real order (a full plate), it needs that one run", () => {
+    const id = realOrder(6);
+    const at = new Date().toISOString();
+    store.savePrintJob({
+      id: "PJ-1-x", orderId: id, printerId: "a1", attachmentId: "A-1", plate: 1, fileName: "x.gcode.3mf", amsMapping: [0],
+      options: { bedLevelling: true, flowCali: true, timelapse: false, useAms: true }, state: "done", by: "Khelda", createdAt: at, updatedAt: at,
+    });
+    const prod = (callTool("get_production_status", { orderId: id }).data as { production: Record<string, unknown> }).production;
+    expect(prod).toMatchObject({ quantity: 6, runsNeeded: 1, runsDone: 1, unitsPerRun: 6, unitsPrinted: 6, runsSetBy: "default" });
+  });
+
+  it("get_order shows the studio's slices for checking (weight, minutes), never who sliced", () => {
+    const id = realOrder(1);
+    const at = new Date().toISOString();
+    store.insertSliceJob({
+      id: "SJ-1", orderId: id, attachmentId: "A-1", sourceName: "Lampu.stl", mode: "mesh", printerId: "a1", tray: 0, material: "PLA", color: "#FFFFFF",
+      quality: "standard", infillPct: 15, supports: "auto", key: "k", state: "done", actor: "person", by: "Khelda", createdAt: at, updatedAt: at,
+      result: { predictionSec: 8700, weightG: 55.29, priceIdr: null },
+    });
+    const d = callTool("get_order", { orderId: id }).data as { slices: unknown[] };
+    expect(d.slices).toEqual([{ sliceId: "SJ-1", file: "Lampu.stl", weightG: 55.29, minutes: 145, by: "a person" }]);
+    expect(JSON.stringify(d)).not.toContain("Khelda");
+  });
+
+  it("choose_printer picks the printer with the order's spool; without one it asks for it and links nothing", () => {
+    const id = realOrder(1);
+    store.saveQuote({ id: "Q-x", orderId: id, vendorId: "own", priceMicro: 30_000_000, etaHours: 48, source: "own" });
+    expect(chooseQuote(id, "Q-x", "agent", "ok").ok).toBe(true);
+    store.saveOrder({ ...store.getOrder(id)!, material: "PETG", preferredColors: [{ type: "PETG", color: "#0A3FD0" }] });
+    store.saveEscrow({
+      orderId: id, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state: "FUNDED", txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: new Date().toISOString(),
+    });
+    const idle = (type: string, color: string) => ({
+      gcode_state: "IDLE", sdcard: true, hms: [], nozzle_diameter: "0.4",
+      ams: { ams: [{ id: "0", info: "1002", tray: [{ id: "0", tray_type: type, tray_color: color, tray_sub_brands: "" }] }] },
+    });
+    ingestReport("a1", mergeReport(undefined, { print: idle("PLA", "FEC600FF") }, new Date().toISOString())!, []);
+    ingestReport("a1-2", mergeReport(undefined, { print: idle("PETG", "0A3FD0FF") }, new Date().toISOString())!, []);
+    expect(callTool("choose_printer", { orderId: id })).toMatchObject({ ok: true, data: { printer: "A1 Combo #2" } });
+    store.savePrinter({ ...store.getPrinter("a1-2")!, currentOrderId: undefined });
+    ingestReport("a1-2", mergeReport(undefined, { print: idle("PLA", "FFFFFFFF") }, new Date().toISOString())!, []);
+    const r = callTool("choose_printer", { orderId: id });
+    expect(r).toMatchObject({ ok: false, data: { error: `No ready printer has PETG ${nameOf("#0A3FD0")} (#0A3FD0) loaded` } });
+    expect(store.listPrinters().some((p) => p.currentOrderId === id)).toBe(false);
+    expect(store.listTasks(id).filter((t) => t.status === "open"))
+      .toMatchObject([{ kind: "change_filament", by: "chief", text: expect.stringContaining(`Load PETG ${nameOf("#0A3FD0")} (#0A3FD0) on a ready printer for ${id}`) }]);
+    callTool("choose_printer", { orderId: id });
+    expect(store.listTasks(id).filter((t) => t.kind === "change_filament")).toHaveLength(1); // asked once
+  });
+});
+
+describe("a tool that fails", () => {
+  it("is an error result for the Chief, logged; callTool never throws", () => {
+    TOOLS.push({ name: "boom", description: "test", inputSchema: { type: "object" }, run: () => { throw new Error("disk full"); } });
+    try {
+      expect(callTool("boom", { orderId: "ORD-001" })).toEqual({ ok: false, data: { error: "The tool failed: disk full", reasons: undefined } });
+      expect(store.listLog("ORD-001").at(-1)).toMatchObject({ tool: "boom", ok: false, by: "chief" });
+    } finally {
+      TOOLS.pop();
+    }
   });
 });

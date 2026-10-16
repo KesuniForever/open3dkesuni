@@ -341,6 +341,8 @@ export interface OperatorTask {
   text: string;
   status: "open" | "done";
   createdBy: "agent" | "human";
+  /** Who opened it: the Chief (Claude), code (printer reports, the heartbeat, the dispatcher) or a person. Older tasks: none. */
+  by?: "chief" | "code" | "person";
   at: string;
   doneAt?: string;
   doneBy?: string;
@@ -510,6 +512,8 @@ export interface CustomerMessage {
   text: string;
   by: "agent" | "human";
   at: string;
+  /** The order's status and escrow state when the Chief wrote it ("PLAN_CHOSEN/FUNDED"): a new one lets it write sooner. */
+  stage?: string;
 }
 
 /** The Chief's daily report to the owner for one Jakarta day. `facts` is DailyFacts (src/lib/agent/daily-review.ts). */
@@ -539,6 +543,8 @@ export interface AgentLogEntry {
   id: number;
   orderId: string;
   actor: "agent" | "human";
+  /** Who really did it: Claude in a Chief run, code (rules, printer reports, the heartbeat) or a person. Older rows: none. */
+  by?: "chief" | "code" | "person";
   tool: string;
   input: unknown;
   ok: boolean; // false when the tool refused or the policy blocked it

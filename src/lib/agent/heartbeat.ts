@@ -1,8 +1,10 @@
 // The Chief's proactive rounds (heartbeat). Every KESUNI_HEARTBEAT_SECONDS (default 120, 0 = off) cheap code
 // checks look at active orders and printers. What code can handle is handled for free: sync a pending payment,
 // open an operator task. Claude is woken only when an order needs a decision, at most 3 orders per beat, and
-// never again for the same unchanged problem: each finding has a stable key, and keys already handled are kept
-// in the meta table until the problem goes away (then it may fire again later). Last, once per Jakarta day after
+// never again for the same unchanged problem: each finding has a stable key (for a price or a plan: the quotes, budget,
+// approval and grams it rests on), and keys already handled are kept in the meta table until the problem goes away
+// (then it may fire again later). A problem a person (an open question) or the customer (a budget raise offered on
+// their page) already has counts as handled: no wake, also after the question is closed unchanged. Last, once per Jakarta day after
 // KESUNI_DAILY_REVIEW_HOUR, it writes the Chief's daily review for the owner (daily-review.ts). Never throws.
 // Also a free code action each beat: up to 5 COMPLETE escrow transfers are checked on Arc (arc-verify.ts, read-only).
 // And the agent dispatcher (src/lib/printer/dispatch.ts, code, no Claude) runs on each beat before any wake: when a
@@ -10,8 +12,8 @@
 import * as store from "../store";
 import { deadlineEnd } from "../owner-rules";
 import { refreshPayment } from "../customer";
-import { createTask, notReadyReason, printFinished } from "../printer/actions";
-import { agentMode, runChief, type ChiefRun } from "./chief";
+import { createTask, notReadyReason, printFinished, runCount } from "../printer/actions";
+import { agentMode, chiefBusy, runChief, type ChiefRun } from "./chief";
 import { maybeRunDailyReview } from "./daily-review";
 import { agentText } from "./tools";
 import { openArcMismatchTask, verifyBatch } from "../arc-verify";
@@ -19,6 +21,7 @@ import { microToUsdc } from "../policy";
 import { planDispatch, safeDispatch } from "../printer/dispatch";
 import { whyText } from "../printer/autoprint-rules";
 import { autoWeighState } from "../slicing";
+import { raiseOffer } from "../budget-raise";
 import type { ChainTx, OperatorTask, Order } from "../types";
 
 export type FindingKind =
@@ -30,7 +33,11 @@ export interface Finding {
   kind: FindingKind;
   text: string;         // simple English, for people
   wake: boolean;        // needs the Chief (Claude) to decide
-  /** Code action: open this operator task (text = the finding's text) when the problem first appears. */
+  /** Someone already has it: an open question to a person, or the customer's page offering to raise the budget. Counts
+   *  as handled, so closing that question without any change never wakes the Chief for the same problem again. */
+  covered?: boolean;
+  /** Code action: open this operator task (text = the finding's text) when the problem first appears. In Claude mode,
+   *  for a finding that wakes the Chief, only when the Chief did not run for it (then it decides, one task at most). */
   task?: { kind: OperatorTask["kind"]; printerId?: string };
 }
 
@@ -82,8 +89,9 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
   try { plan = planDispatch(t); } catch { plan = null; }
 
   for (const o of store.listOrders()) {
-    // Finding texts go to Claude: no customer name, phone or address from the product text.
-    const label = `${o.id} (${agentText(o.product, o)})`;
+    // Finding texts go to Claude: no customer name, phone or address from the product text, and the product is marked
+    // as the customer's words (data, not instructions).
+    const label = `${o.id} (product: «${agentText(o.product, o)}»)`;
     const escrow = store.getEscrow(o.id);
     // Payments are synced for every order, also rejected ones waiting for their refund.
     if (escrow?.txs.some((x) => !FINAL.includes(x.state))) {
@@ -92,19 +100,31 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
     }
     if (o.status === "REJECTED" || o.status === "PAID") continue;
 
-    if (o.status === "CREATED" && !hasOpen(o.id, "needs_info")) {
+    if (o.status === "CREATED") {
+      // The key is what the Chief would decide from: who quotes what price and time, the budget, the owner's approval and
+      // the grams. The same key is the same problem: closing a question without changing any of them wakes nobody. No
+      // quote ids: pricing again by weight makes a new quote at the same price, which is no new problem.
+      const quotes = store.listQuotes(o.id);
+      const approved = o.ownerApproval ? `${store.getQuote(o.ownerApproval.quoteId)?.vendorId ?? "?"}=${o.ownerApproval.priceMicro}` : "";
+      const facts = [quotes.map((q) => `${q.vendorId}=${q.priceMicro}/${q.etaHours}h`).sort().join(","), o.mandateMicro, approved, o.slicerGrams?.gramsPerUnit ?? ""].join(":");
+      // Someone else has the next step: a person (an open question) or the customer (their page offers to raise the budget).
+      const asked = open.find((x) => x.orderId === o.id && x.kind === "needs_info");
+      // (Only while every quote is above the budget: a quote within it is still the Chief's to choose.)
+      const offer = quotes.length > 0 && quotes.every((q) => q.priceMicro > o.mandateMicro) ? raiseOfferSafe(o) : null;
+      const waits = asked ? ` Waiting on the open question ${asked.id}.` : offer ? " Waiting on the customer: their page offers to raise the budget to Kesuni's price." : "";
+      const covered = Boolean(asked || offer);
       // The customer's own design is being weighed automatically: its grams wake the Chief (src/lib/auto-weigh.ts).
       const weigh = !o.slicerGrams ? autoWeighState(o.id, t) : null;
-      findings.push(store.listQuotes(o.id).length > 0
-        ? { key: `needs_plan:${o.id}`, orderId: o.id, kind: "needs_plan", wake: true,
-            text: `${label} has quotes but no plan yet. Choose a plan or ask the owner for approval.` }
+      findings.push(quotes.length > 0
+        ? { key: `needs_plan:${o.id}:${facts}`, orderId: o.id, kind: "needs_plan", wake: !covered, covered,
+            text: `${label} has quotes but no plan yet.${waits || " Choose a plan or ask the owner for approval."}` }
         : weigh?.state === "weighing"
           ? { key: `weighing:${o.id}`, orderId: o.id, kind: "needs_price", wake: false,
               text: `${label}: the studio's slicer is weighing the customer's design; the price follows when the grams arrive.` }
-          : { key: `needs_price:${o.id}`, orderId: o.id, kind: "needs_price", wake: true,
-              text: weigh && weigh.state !== "done"
-                ? `${label} has no price yet: the automatic weighing of the customer's design did not finish. Ask the operator for the grams per unit from the slicer.`
-                : `${label} has no price yet. Price it by weight, or ask for the grams per unit from the slicer.` });
+          : { key: `needs_price:${o.id}:${facts}:${weigh?.state ?? ""}`, orderId: o.id, kind: "needs_price", wake: !covered, covered,
+              text: `${label} has no price yet.${waits || (weigh && weigh.state !== "done"
+                ? " The automatic weighing of the customer's design did not finish. Ask the operator for the grams per unit from the slicer."
+                : " Price it by weight, or ask for the grams per unit from the slicer.")}` });
     }
 
     const onPrinter = printers.some((p) => p.currentOrderId === o.id || p.bedOccupiedBy === o.id);
@@ -112,18 +132,22 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
     if (escrow?.state === "FUNDED" && (o.status === "PLAN_CHOSEN" || o.status === "IN_PRODUCTION")
       && !onPrinter && !hasOpen(o.id, "check_printer") && !printFinished(o.id)) {
       const line = plan?.on ? plan.orders[o.id] : undefined;
+      const runs = runCount(o);
+      const withRuns = runs.done > 0 ? `${label} (${runs.done} of ${runs.needed} runs printed)` : label;
       findings.push(plan?.on
         ? { key: `start_production:${o.id}`, orderId: o.id, kind: "start_production", wake: false,
-            text: `${label} is paid into escrow but has no printer yet. Agent prints are on; the dispatcher: ${line ? whyText(line.why) : "not in production"}.` }
+            text: `${withRuns} is paid into escrow but has no printer yet. Agent prints are on; the dispatcher: ${line ? whyText(line.why) : "not in production"}.` }
         : { key: `start_production:${o.id}`, orderId: o.id, kind: "start_production", wake: true,
-            text: `${label} is paid into escrow but has no printer yet. Start production.` });
+            text: `${withRuns} is paid into escrow but has no printer yet. ${runs.done > 0 ? "Start the next run." : "Start production."}` });
     }
 
     const end = deadlineEnd(o);
     if (UNFINISHED.includes(o.status) && Number.isFinite(end) && end - t <= 24 * HOUR) {
+      // Two problems, one wake each: less than 24 h left, then passed.
+      const passed = end <= t;
       findings.push({
-        key: `deadline_risk:${o.id}:${o.deadline}`, orderId: o.id, kind: "deadline_risk", wake: true,
-        text: end <= t
+        key: `${passed ? "deadline_passed" : "deadline_risk"}:${o.id}:${o.deadline}`, orderId: o.id, kind: "deadline_risk", wake: true,
+        text: passed
           ? `The deadline of ${label} has passed (${o.deadline}) and the order is not finished. Check it and tell the customer.`
           : `The deadline of ${label} is less than 24 hours away (${o.deadline}) and the order is not finished. Check whether it can be on time.`,
         task: { kind: o.status === "CREATED" ? "needs_info" : "check_printer" },
@@ -151,6 +175,15 @@ export function checkHeartbeat(now: Date = new Date()): Finding[] {
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** The customer's page offers to raise the budget to Kesuni's price (src/lib/budget-raise.ts); null when not, or on error. */
+function raiseOfferSafe(o: Order) {
+  try {
+    return raiseOffer(o);
+  } catch {
+    return null;
+  }
+}
+
 /** One beat: checks, code actions, then wake the Chief for new problems. Refuses to overlap; never throws. */
 export async function runHeartbeat(opts: { now?: Date; trigger: "timer" | "button" }): Promise<HeartbeatResult> {
   if (state.busy) return { ok: false, busy: true, error: "A heartbeat is already running" };
@@ -169,8 +202,8 @@ export async function runHeartbeat(opts: { now?: Date; trigger: "timer" | "butto
   try {
     const prev = store.getMeta<Seen>(SEEN_KEY) ?? {};
     findings = checkHeartbeat(now);
-    // A key that is gone is forgotten, so the same problem can fire again later.
-    for (const f of findings) seen[f.key] = prev[f.key] ?? { since: at };
+    // A key that is gone is forgotten, so the same problem can fire again later. One someone else has is handled.
+    for (const f of findings) seen[f.key] = f.covered ? { since: prev[f.key]?.since ?? at, handled: true } : prev[f.key] ?? { since: at };
     checked = true;
     const fresh = findings.filter((f) => !prev[f.key]);
     for (const f of fresh) freshKeys.add(f.key);
@@ -179,21 +212,25 @@ export async function runHeartbeat(opts: { now?: Date; trigger: "timer" | "butto
     const byOrder = new Map<string, Finding[]>();
     for (const f of fresh) if (f.orderId) byOrder.set(f.orderId, [...(byOrder.get(f.orderId) ?? []), f]);
     for (const [orderId, list] of byOrder) {
-      store.addLog({ orderId, actor: "agent", tool: "heartbeat", input: { trigger: opts.trigger }, ok: true,
+      store.addLog({ orderId, actor: "agent", by: "code", tool: "heartbeat", input: { trigger: opts.trigger }, ok: true,
         output: { findings: list.map((f) => ({ kind: f.kind, text: f.text })) }, at });
     }
 
-    // Code actions (free): operator tasks for new problems, payment sync.
-    for (const f of fresh) {
-      if (!f.task || !f.orderId) continue;
+    // Code actions (free): operator tasks for new problems, payment sync. A problem that wakes Claude gets no code task
+    // when the Chief runs: it decides what a person should do (one task, not two). When it does not run (Claude failed or
+    // unavailable, max wakes, busy), the task opens after the wakes below, so a person still hears of it.
+    const openTask = (f: Finding, oncePerKey = false) => {
+      if (!f.task || !f.orderId) return;
       try {
-        if (store.listTasks(f.orderId).some((x) => x.status === "open" && x.text === f.text)) continue;
-        createTask(f.orderId, f.task.kind, f.text, f.task.printerId);
+        // oncePerKey (a fallback, tried each beat while the Chief does not run): not again after a person closed it.
+        if (store.listTasks(f.orderId).some((x) => (oncePerKey && x.key === f.key) || (x.status === "open" && x.text === f.text))) return;
+        createTask(f.orderId, f.task.kind, f.text, f.task.printerId, undefined, f.key);
         actions.push(`Task for ${f.orderId}: ${f.text}`);
       } catch (e) {
         errors.push(`Task for ${f.orderId}: ${errText(e)}`);
       }
-    }
+    };
+    for (const f of fresh) if (!(mode === "claude" && f.wake)) openTask(f);
     for (const f of findings) {
       if (f.kind !== "payment_pending" || !f.orderId) continue;
       try {
@@ -231,6 +268,12 @@ export async function runHeartbeat(opts: { now?: Date; trigger: "timer" | "butto
       const runnable = mode === "claude" ? list : list.filter((f) => f.kind === "needs_plan");
       if (runnable.length < list.length) woke.push({ orderId, outcome: "needs_claude", summary: "Needs Claude (rules mode)" });
       if (runnable.length === 0) continue;
+      // The Chief is on this order now (an event woke it): the facts are changing under that run, so the next beat
+      // looks again, not a second run queued with what this beat saw. Not handled.
+      if (chiefBusy(orderId)) {
+        woke.push({ orderId, outcome: "busy", summary: "The Chief is working on this order; the next beat looks again" });
+        continue;
+      }
       if (wakes >= MAX_WAKES) {
         woke.push({ orderId, outcome: "deferred", summary: `Next beat (max ${MAX_WAKES} wakes per beat)` });
         continue;
@@ -238,17 +281,23 @@ export async function runHeartbeat(opts: { now?: Date; trigger: "timer" | "butto
       wakes++;
       let r: ChiefRun;
       try {
-        r = await runChief(orderId, `Heartbeat check (${opts.trigger}) found: ${runnable.map((f) => f.text).join(" ")}`);
+        // A code task opened on an earlier beat (below) is named, so the Chief opens no second one.
+        const said = (f: Finding) => {
+          const task = store.listTasks(orderId).find((x) => x.status === "open" && x.key === f.key);
+          return task ? `${f.text} (Operator task ${task.id} is already open for this.)` : f.text;
+        };
+        r = await runChief(orderId, `Heartbeat check (${opts.trigger}) found: ${runnable.map(said).join(" ")}`, { queue: false });
       } catch (e) {
         r = { mode, outcome: "error", summary: "", turns: 0, error: errText(e) };
       }
       woke.push({ orderId, outcome: r.outcome, summary: r.summary.slice(0, 300) || undefined });
       if (r.error) errors.push(`Chief on ${orderId}: ${r.error}`);
-      // Busy: the Chief is already on this order; try again next beat if the problem is still there.
-      // Claude unavailable (r.error): not handled; try again after RETRY_MS so a dead key does not cost a call every beat.
       if (r.outcome === "busy") continue;
+      // Claude unavailable (r.error): not handled; try again after RETRY_MS so a dead key does not cost a call every beat.
       for (const f of runnable) seen[f.key] = r.error ? { ...seen[f.key], failedAt: at } : { since: seen[f.key].since, handled: true };
     }
+    // A problem with a code task that the Chief did not take this beat (Claude failed, max wakes, busy): the task now, once.
+    if (mode === "claude") for (const f of findings) if (f.wake && f.task && !seen[f.key].handled) openTask(f, true);
   } catch (e) {
     errors.push(errText(e));
   }

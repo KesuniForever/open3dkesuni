@@ -8,6 +8,8 @@ import { parseColorChoices } from "./colors";
 import { MATERIALS } from "./pricing";
 import { idrPerUsdc } from "./costing";
 import { idrBudget, type Budget } from "./budget";
+import { wakeChief } from "./agent/chief";
+import { runCount } from "./printer/actions";
 import type { Acceptance, Evidence, Label, Material, Order, PaymentIntent, Quote } from "./types";
 
 export type Fail = { ok: false; status: number; error: string; reasons?: string[] };
@@ -131,15 +133,28 @@ export function addEvidence(
   store.addEvidence(evidence);
   const reachedQc = evidence.kind === "qc" || order.status === "EVIDENCE_SUBMITTED";
   store.saveOrder({ ...order, status: reachedQc ? "EVIDENCE_SUBMITTED" : "IN_PRODUCTION" });
+  // The first QC record: the Chief tells the customer to check and decide (the note itself is not passed on). With runs
+  // still to print it is told so, to ask a person first.
+  if (evidence.kind === "qc" && order.status !== "EVIDENCE_SUBMITTED") {
+    const runs = runCount(order);
+    wakeChief(orderId, runs.needed > 1 && runs.done < runs.needed
+      ? `A person recorded QC for this order, but only ${runs.done} of ${runs.needed} runs are printed. Ask a person before telling the customer it is done.`
+      : "A person recorded QC for this order: printing and QC are done, and the order now waits for the customer to accept or reject it on their page.");
+  }
   return { ok: true, evidence };
 }
 
 /**
  * The owner lifts their own rule for one quote at its current price (e.g. a small pilot order). A re-priced or
- * new quote needs a new approval. The Chief's open questions on the order are answered by this, so they are
- * closed. People only: no agent tool calls this.
+ * new quote needs a new approval. People only: no agent tool calls this.
+ * Refused, with nothing saved, when the quote would still be refused for a reason the owner cannot lift (the deadline,
+ * the partner rule, the vendor). When only the customer's budget still blocks it, the approval is saved (the customer's
+ * page offers to raise the budget to this price: src/lib/budget-raise.ts) and the order waits on the customer
+ * (waitsOnCustomer: the route does not wake the Chief). Either way the Chief's open questions are answered: closed.
  */
-export function approveByOwner(orderId: string, input: { quoteId: string; by: string; note: string }): { ok: true; order: Order } | Fail {
+export function approveByOwner(
+  orderId: string, input: { quoteId: string; by: string; note: string },
+): { ok: true; order: Order; waitsOnCustomer: boolean } | Fail {
   const order = store.getOrder(orderId);
   if (!order) return fail(404, "Order not found");
   if (order.status !== "CREATED") return fail(409, `Order is ${order.status}; approval is for choosing a plan`);
@@ -149,12 +164,17 @@ export function approveByOwner(orderId: string, input: { quoteId: string; by: st
   const at = new Date().toISOString();
   const by = input.by.trim().slice(0, 80);
   const updated: Order = { ...order, ownerApproval: { quoteId: quote.id, priceMicro: quote.priceMicro, by, note: input.note.trim().slice(0, 300), at } };
+  // The policy with this approval, as if the customer's budget covered the price: what is left, the owner cannot lift.
+  const lifted = checkPlan({ ...updated, mandateMicro: Math.max(order.mandateMicro, quote.priceMicro) }, quote, store.getVendor(quote.vendorId));
+  if (!lifted.ok) return fail(422, "The owner's approval cannot make this quote allowed: nothing was saved", lifted.reasons);
+  const waitsOnCustomer = quote.priceMicro > order.mandateMicro;
   store.saveOrder(updated);
+  const answered = waitsOnCustomer ? "approved by the owner; the customer may raise their budget" : "approved by the owner";
   for (const t of store.listTasks(orderId)) {
-    if (t.status === "open" && t.kind === "needs_info") store.saveTask({ ...t, status: "done", doneAt: at, doneBy: `${by} (approved by the owner)` });
+    if (t.status === "open" && t.kind === "needs_info") store.saveTask({ ...t, status: "done", doneAt: at, doneBy: `${by} (${answered})` });
   }
-  store.addLog({ orderId, actor: "human", tool: "owner_approval", input: { quoteId: quote.id, note: updated.ownerApproval!.note }, ok: true, output: { by }, at });
-  return { ok: true, order: updated };
+  store.addLog({ orderId, actor: "human", tool: "owner_approval", input: { quoteId: quote.id, note: updated.ownerApproval!.note }, ok: true, output: { by, waitsOnCustomer }, at });
+  return { ok: true, order: updated, waitsOnCustomer };
 }
 
 // Acceptance is a human decision. It is never derived from model output.

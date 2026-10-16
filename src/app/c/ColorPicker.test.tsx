@@ -46,15 +46,27 @@ describe("customer colour picker", () => {
     expect(id).toMatch(/Bahan.*Warna.*Satu warna Multi warna.*Warna yang tersedia.*PLA Hitam Hijau Merah Kuning PETG Hitam Biru Putih/);
   });
 
-  it("multi colour: counts the colours and says a 3MF file is needed", () => {
+  it("multi colour: counts the colours and says Kesuni helps on WhatsApp; the 3MF stays behind the ⓘ", () => {
     const two: Choice = { material: "PLA", colors: [{ type: "PLA", color: "#FEC600", name: "Yellow" }, { type: "PLA", color: "#3F8E43", name: "Green" }] };
-    expect(text(render(two))).toMatch(/Colours · 2 of 4.*Multi-colour needs a 3MF file from Bambu Studio\. Send it to Kesuni on WhatsApp\./);
-    expect(text(render(two, "id"))).toMatch(/Warna · 2 dari 4.*Multi warna perlu file 3MF dari Bambu Studio\./);
+    const html = render(two);
+    expect(text(html)).toMatch(/Colours · 2 of 4.*More than one colour\? Kesuni will help you set the colours on WhatsApp\./);
+    expect(html).toMatch(/<span class="info-pop" role="tooltip">An STL file has no colours\./);
+    expect(text(render(two, "id"))).toMatch(/Warna · 2 dari 4.*Lebih dari satu warna\? Kesuni akan bantu atur warnanya lewat WhatsApp\./);
   });
 
   it("says so while loading and when nothing is loaded in the studio", () => {
     expect(text(render({ material: null, colors: [] }, "en", null))).toContain("Loading colours…");
     expect(text(render({ material: null, colors: [] }, "id", []))).toContain("Belum ada warna yang bisa ditampilkan. Tulis warna yang Anda inginkan di catatan.");
+  });
+
+  it("no printer reporting now: the colours are the ones Kesuni usually has, not \"loaded now\"", () => {
+    const html = (locale: Locale) => renderToStaticMarkup(
+      <LocaleProvider locale={locale}><ColorPicker value={{ material: null, colors: [] }} onChange={() => {}} palette={PALETTE} live={false} /></LocaleProvider>,
+    );
+    expect(text(html("en"))).toContain("Colours Kesuni usually has");
+    expect(text(html("en"))).not.toMatch(/Available colours|loaded in Kesuni's printers right now/);
+    expect(text(html("id"))).toContain("Warna yang biasanya ada di Kesuni");
+    expect(text(render({ material: null, colors: [] }))).toContain("Available colours");
   });
 
   it("the order page summary: material, colour names, or not chosen yet", () => {

@@ -4,8 +4,9 @@
 // reviewers or thresholds. Pure (rows in, view out) apart from the defaults that read the server's settings.
 import { MATERIALS, priceByWeight, pricingConfig, pricingFor, toMaterial, type PricingConfig } from "./pricing";
 import { idrToMicro } from "./costing";
-import { ownerRules } from "./owner-rules";
+import { ownerRules, type OwnerRules } from "./owner-rules";
 import { microToUsdc } from "./policy";
+import type { T } from "../i18n/core";
 import type { LiveView } from "./live";
 import type { Tone } from "./machines";
 import type { GateStatus, Readiness } from "./token-research";
@@ -30,8 +31,10 @@ export interface PortalPrice {
   perGram: Record<Material, number>;
   /** The price per piece is rounded up to this. */
   roundIdr: number;
-  /** Orders under this total wait for the owner's approval before Kesuni can price them (src/lib/owner-rules.ts). */
+  /** Orders under this total, or above approvalAboveIdr, wait for the owner's approval before Kesuni can price them
+   *  (src/lib/owner-rules.ts). */
   minOrderIdr: number;
+  approvalAboveIdr: number;
   /** What the visitor typed, to fill the form again. */
   input: { grams: string; quantity: string };
   /** null until grams are given. */
@@ -53,10 +56,12 @@ const NOT_A_NUMBER = "Enter the grams per piece as a number, for example 16";
 /**
  * The official price for a weight, exactly as an order is priced (agreement.ts setSlicerGrams): grams per piece ×
  * the material's price per gram, rounded up per piece, × quantity; USDC as the quote would hold it. The colour mode
- * never changes the price per gram, so it is left out. With the owner's minimum order, so the page can say when a
- * total that small waits for approval.
+ * never changes the price per gram, so it is left out. With the owner's minimum order and approval limit, so the page can
+ * say when a total that small or that large waits for approval. (The USDC stays for the API; the page shows rupiah.)
  */
-export function portalPrice(query: PortalPriceQuery, cfg: PricingConfig = pricingConfig(), minOrderIdr = ownerRules().minOrderIdr): PortalPrice {
+export function portalPrice(
+  query: PortalPriceQuery, cfg: PricingConfig = pricingConfig(), rules: Pick<OwnerRules, "minOrderIdr" | "approvalAboveIdr"> = ownerRules(),
+): PortalPrice {
   const material = toMaterial(first(query.m)) ?? "PLA";
   const grams = first(query.g).trim().slice(0, 12);
   const quantity = first(query.q).trim().slice(0, 6) || "1";
@@ -71,9 +76,9 @@ export function portalPrice(query: PortalPriceQuery, cfg: PricingConfig = pricin
         unitPriceIdr: r.price.unitPriceIdr, totalIdr: r.price.totalIdr, usdc: microToUsdc(idrToMicro(r.price.totalIdr)),
       }
       // Not a number at all: say what to type, not that the number is out of range.
-      : { ok: false, reasons: r.reasons.map((x) => (Number.isNaN(g) && x.startsWith("Grams per unit") ? NOT_A_NUMBER : x)) };
+      : { ok: false, reasons: r.reasons.map((x) => (Number.isNaN(g) && x.startsWith("Grams per piece") ? NOT_A_NUMBER : x)) };
   }
-  return { material, perGram, roundIdr: cfg.roundIdr, minOrderIdr, input: { grams, quantity }, result };
+  return { material, perGram, roundIdr: cfg.roundIdr, minOrderIdr: rules.minOrderIdr, approvalAboveIdr: rules.approvalAboveIdr, input: { grams, quantity }, result };
 }
 
 // ---------- Machines ----------
@@ -91,7 +96,7 @@ export interface PortalPrinter {
   id: string;
   name: string;
   online: boolean;
-  /** What it is doing, in the page's language: "Idle", "Printing 45%", "Offline". */
+  /** What it is doing, in the page's language: "Free", "Printing 45%", "Offline". */
   state: { tone: Tone; text: string };
   /** Bambu's own stage words, only while a print runs or when a person is needed. */
   stage: { text: string; needsPerson: boolean } | null;
@@ -110,14 +115,17 @@ export interface PortalMachines {
   printers: PortalPrinter[];
 }
 
-/** The Live studio's printers (src/lib/live.ts, already allow-listed), lighter: no order, bed, temperatures or faults. */
-export function portalMachines(v: LiveView): PortalMachines {
+/**
+ * The Live studio's printers (src/lib/live.ts, already allow-listed), lighter: no order, bed, temperatures or faults.
+ * With the page's t, an online printer at rest (idle, or a print finished: the "ok" pill) reads "Free" for a customer.
+ */
+export function portalMachines(v: LiveView, t?: T): PortalMachines {
   const running = new Map(v.overview.printers.running.map((r) => [r.id, r]));
   const printers = v.printers.map((p): PortalPrinter => ({
     id: p.id,
     name: p.name,
     online: p.online,
-    state: { tone: p.pill.tone, text: p.pill.text },
+    state: { tone: p.pill.tone, text: t && p.online && p.pill.tone === "ok" && !p.progress ? t("Free") : p.pill.text },
     stage: p.stage && (p.progress || p.stage.needsPerson) ? { text: p.stage.text, needsPerson: p.stage.needsPerson } : null,
     progress: p.progress
       ? { percent: p.progress.percent, paused: p.progress.paused, remaining: p.remaining, doneAt: running.get(p.id)?.doneAt ?? null }

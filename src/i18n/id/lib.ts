@@ -220,7 +220,7 @@ const id: Dict = {
   "Invalid USDC amount \"{input}\" (max 6 decimals, digits only)": "Jumlah USDC \"{input}\" tidak valid (maks. 6 desimal, hanya angka)",
 
   // ---------- price by weight (src/lib/pricing.ts) ----------
-  "Grams per unit must be above 0 and at most {max}": "Gram per unit harus di atas 0 dan maksimal {max}",
+  "Grams per piece must be above 0 and at most {max}": "Gram per buah harus di atas 0 dan maksimal {max}",
   "Quantity must be a whole number, at least 1": "Jumlah harus bilangan bulat, minimal 1",
 
   // ---------- spec, quotes, agreement, plan vs actual (src/lib/agreement.ts) ----------
@@ -261,7 +261,7 @@ const id: Dict = {
   "First tick the box that you checked the size, colour, finish and function of the item you received":
     "Centang dulu kotak bahwa Anda sudah mengecek ukuran, warna, hasil akhir, dan fungsi barang yang diterima",
   "Product name is too long (at most 200 characters)": "Nama produk terlalu panjang (maksimal 200 karakter)",
-  "Budget minimal Rp1.000": "Anggaran minimal Rp1.000",
+  "The budget must be at least Rp1.000": "Anggaran minimal Rp1.000",
   "The order is incomplete": "Pesanan belum lengkap",
 
   // ---------- reviews (src/lib/reputation.ts) ----------
@@ -820,7 +820,7 @@ filled("Runs on {network} (test USDC); mainnet is locked unless KESUNI_ALLOW_MAI
 filled("Runs on {network} (real USDC); mainnet is unlocked by KESUNI_ALLOW_MAINNET=1", [[{ network: "Arc" }]]);
 filled("Runs on {network} (real USDC); mainnet is locked: KESUNI_ALLOW_MAINNET is not 1", [[{ network: "Arc" }]]);
 filled("At most {n} background wake-ups per hour (all orders together)", [[{ n: 20 }]]);
-filled("Grams per unit must be above 0 and at most {max}", [[{ max: 5000 }]]);
+filled("Grams per piece must be above 0 and at most {max}", [[{ max: 5000 }]]);
 filled("File is larger than {n} MB", [[{ n: 50 }]]);
 filled("Message is longer than {n} characters", [[{ n: 500 }]]);
 filled("The Chief has already written {n} messages on this order; a person writes from now on", [[{ n: 20 }]]);

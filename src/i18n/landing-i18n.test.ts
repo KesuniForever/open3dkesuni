@@ -20,6 +20,7 @@ describe("Landing page in Indonesian", () => {
     const landing = read("src/app/welcome/Landing.tsx");
     const keys = [
       ...literals(landing), ...tableTexts(landing), ...literals(read("src/app/welcome/page.tsx")),
+      ...literals(read("src/app/welcome/LandingPage.tsx")), ...literals(read("src/app/components/TeamLogin.tsx")),
       ...Object.values(SCENARIO_OUTCOMES), ...DEMO_SCENARIOS.flatMap((s) => [s.title, s.tag, s.line]),
     ];
     const same = ["Demo", "Printer", "Blockchain"]; // read the same in Indonesian

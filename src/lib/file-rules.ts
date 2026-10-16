@@ -22,10 +22,16 @@ export const CUSTOMER_DESIGN_EXTS = [".stl", ".obj"];
 
 /** The name is not .stl or .obj (the order form then reads the first bytes: src/lib/model-sniff.ts). */
 export const NOT_A_MODEL = "Send your design as an STL or OBJ file";
+/** Customers without a 3D file often pick a photo of the item or a logo: the field is optional, the notes do instead. */
+export const A_PHOTO = "This is a photo, not a 3D file. Leave this empty and describe the item in the notes.";
+export const A_DOCUMENT = "This is a document, not a 3D file. Leave this empty and describe the item in the notes.";
+const PHOTO_EXTS = [".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp", ".gif"];
 
 /** Why the order form refuses this file before sending it (name and size only; the server reads the content), or null. */
 export function customerDesignProblem(name: string, size: number): string | null {
   const ext = /\.[^./\\]+$/.exec(name.toLowerCase())?.[0] ?? "";
+  if (PHOTO_EXTS.includes(ext)) return A_PHOTO;
+  if (ext === ".pdf") return A_DOCUMENT;
   if (ext === ".step" || ext === ".stp") return "STEP files cannot be weighed here: export an STL from your CAD program";
   if (ext === ".3mf") return "Export your model as an STL or OBJ. Send a 3MF project on WhatsApp.";
   if (!CUSTOMER_DESIGN_EXTS.includes(ext)) return NOT_A_MODEL;
