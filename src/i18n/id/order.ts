@@ -316,7 +316,6 @@ const id: Record<string, string> = {
   "{n} done tasks": "{n} tugas selesai",
 
   // 3. evidence
-  "Production evidence and QC": "Bukti produksi dan QC",
   "No evidence yet.": "Belum ada bukti.",
   "Opens once a plan is chosen, after the price is agreed.": "Terbuka setelah rencana dipilih, sesudah harga disepakati.",
   "PHOTO": "FOTO",
@@ -328,6 +327,13 @@ const id: Record<string, string> = {
   "Note (entered by operator, labelled manual)": "Catatan (diisi operator, berlabel manual)",
   "e.g. Printed 4 legs, PLA, 6h": "mis. Cetak 4 kaki, PLA, 6 jam",
   "Add evidence": "Tambah bukti",
+  "Production evidence": "Bukti produksi",
+  "Quality check (QC)": "Cek kualitas (QC)",
+  "Needed before the customer's payment can be released. A QC photo goes under Files (QC photo); it does not replace this result.":
+    "Wajib sebelum pembayaran pelanggan bisa diteruskan. Foto QC diunggah di Files (QC photo); foto itu tidak menggantikan hasil ini.",
+  "No QC result yet.": "Belum ada hasil QC.",
+  "Record QC result": "Catat hasil QC",
+  "e.g. All 5 checked: size, colour and finish OK": "mis. Ke-5 sudah dicek: ukuran, warna, dan hasil akhir OK",
 
   // plan vs actual
   "Plan vs actual": "Rencana vs aktual",

@@ -115,6 +115,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
   if (!data) return <main className="wrap"><p className="muted">{t("Loading…")}</p></main>;
 
   const { order, quotes, vendors, evidence, acceptance, agentLog, paymentIntents, escrow } = data;
+  const evidenceOpen = ["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status);
   const base = `/api/orders/${order.id}`;
   const vendorName = (vid: string) => vendors.find((v) => v.id === vid)?.name ?? vid;
   const chosen = quotes.find((q) => q.id === order.chosenQuoteId);
@@ -256,21 +257,24 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
             busy={busy} act={act} onChange={load} />
           <PrinterPanel order={order} printers={data.printers} tasks={data.tasks} busy={busy} act={act} onChange={load} issueTexts={issueTexts} />
 
-          {/* 3. Evidence */}
+          {/* 3. Production evidence, then the QC check in its own card: both are needed, so neither hides in the other. */}
           <section className="card">
-            <h2><span className="step">3</span> {t("Production evidence and QC")}</h2>
-            {evidence.length === 0 ? <p className="muted">{t("No evidence yet.")}</p> : (
-              <ul>
-                {evidence.map((e) => (
-                  <li key={e.id}><b>{t(e.kind.toUpperCase())}</b> {e.note} <span className="badge">{t(e.label)}</span>
-                    {e.attachmentId && <> <a href={`/api/files/${e.attachmentId}`} target="_blank" rel="noreferrer">{t("view photo")}</a></>}</li>
-                ))}
-              </ul>
-            )}
-            {!["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status) && (
-              <p className="muted">{t("Opens once a plan is chosen, after the price is agreed.")}</p>
-            )}
-            <EvidenceForm disabled={busy || !["PLAN_CHOSEN", "IN_PRODUCTION", "EVIDENCE_SUBMITTED"].includes(order.status)}
+            <h2><span className="step">3</span> {t("Production evidence")}</h2>
+            <EvidenceList items={evidence.filter((e) => e.kind !== "qc")} empty={t("No evidence yet.")} />
+            {!evidenceOpen && <p className="muted">{t("Opens once a plan is chosen, after the price is agreed.")}</p>}
+            <EvidenceForm kinds={["log", "photo"]} disabled={busy || !evidenceOpen} button={t("Add evidence")}
+              placeholder={t("e.g. Printed 4 legs, PLA, 6h")}
+              onSubmit={(b) => act(`${base}/evidence`, b, t("Recorded {kind} evidence.", { kind: b.kind }))} />
+          </section>
+
+          <section className="card">
+            <h2><span className="step">Q</span> {t("Quality check (QC)")}{" "}
+              <Info>{t("Needed before the customer's payment can be released. A QC photo goes under Files (QC photo); it does not replace this result.")}</Info>
+            </h2>
+            <EvidenceList items={evidence.filter((e) => e.kind === "qc")} empty={t("No QC result yet.")} />
+            {!evidenceOpen && <p className="muted">{t("Opens once a plan is chosen, after the price is agreed.")}</p>}
+            <EvidenceForm kinds={["qc"]} disabled={busy || !evidenceOpen} button={t("Record QC result")}
+              placeholder={t("e.g. All 5 checked: size, colour and finish OK")}
               onSubmit={(b) => act(`${base}/evidence`, b, t("Recorded {kind} evidence.", { kind: b.kind }))} />
           </section>
 
@@ -507,25 +511,43 @@ function QuoteForm({ vendors, disabled, onSubmit }: {
   );
 }
 
-function EvidenceForm({ disabled, onSubmit }: { disabled: boolean; onSubmit: (b: { kind: string; note: string; label: string }) => void }) {
+function EvidenceList({ items, empty }: { items: Evidence[]; empty: string }) {
   const t = useT();
-  const [kind, setKind] = useState("log");
+  if (items.length === 0) return <p className="muted">{empty}</p>;
+  return (
+    <ul>
+      {items.map((e) => (
+        <li key={e.id}><b>{t(e.kind.toUpperCase())}</b> {e.note} <span className="badge">{t(e.label)}</span>
+          {e.attachmentId && <> <a href={`/api/files/${e.attachmentId}`} target="_blank" rel="noreferrer">{t("view photo")}</a></>}</li>
+      ))}
+    </ul>
+  );
+}
+
+const EVIDENCE_KINDS = { log: "Production log", photo: "Photo note", qc: "QC result" } as const;
+
+function EvidenceForm({ kinds, disabled, button, placeholder, onSubmit }: {
+  kinds: (keyof typeof EVIDENCE_KINDS)[]; disabled: boolean; button: string; placeholder: string;
+  onSubmit: (b: { kind: string; note: string; label: string }) => void;
+}) {
+  const t = useT();
+  const [kind, setKind] = useState<string>(kinds[0]);
   const [note, setNote] = useState("");
   return (
     <form className="form" onSubmit={(e) => { e.preventDefault(); onSubmit({ kind, note, label: "manual" }); setNote(""); }}>
       <div className="row">
-        <label style={{ flex: "0 0 140px" }}>{t("Type")}
-          <select value={kind} onChange={(e) => setKind(e.target.value)} disabled={disabled}>
-            <option value="log">{t("Production log")}</option>
-            <option value="photo">{t("Photo note")}</option>
-            <option value="qc">{t("QC result")}</option>
-          </select>
-        </label>
+        {kinds.length > 1 && (
+          <label style={{ flex: "0 0 140px" }}>{t("Type")}
+            <select value={kind} onChange={(e) => setKind(e.target.value)} disabled={disabled}>
+              {kinds.map((k) => <option key={k} value={k}>{t(EVIDENCE_KINDS[k])}</option>)}
+            </select>
+          </label>
+        )}
         <label style={{ flex: "1 1 240px" }}>{t("Note (entered by operator, labelled manual)")}
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("e.g. Printed 4 legs, PLA, 6h")} disabled={disabled} required />
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={placeholder} disabled={disabled} required />
         </label>
       </div>
-      <div><button disabled={disabled || !note.trim()}>{t("Add evidence")}</button></div>
+      <div><button disabled={disabled || !note.trim()}>{button}</button></div>
     </form>
   );
 }
