@@ -28,12 +28,14 @@ order from the public form `simulated` (`POST /api/orders/:id/label`, logged wit
 stops counting as traction once it is marked. An order whose escrow still holds money is marked after its release or
 refund, so until then it is counted.
 
-**Traction, honestly** (snapshot 17 Oct 2026, about 02:00 WIB; live numbers on `/live`):
+**Traction, honestly** (snapshot 17 Oct 2026, about 04:30 WIB; live numbers on `/live`):
 
 - 4 real orders from 3 pilot customers (an accessories shop, a graphic designer, a boarding-house owner).
-- 2 escrow deposits on real orders, verified on Arc (test USDC from Kesuni's demo wallet).
-- No release or refund on a real order yet. The one release so far was on a simulated order.
-- 24 Claude runs on orders; 82.5% of their input tokens came from the prompt cache.
+- 3 escrow deposits on real orders, verified on Arc (test USDC from Kesuni's demo wallet).
+- 1 real order done end to end: 5 lamps (ORD-005). The price was above the customer's budget; the customer raised
+  it on their own page, the Chief chose the plan, the escrow was funded, the customer accepted the lamps and the
+  release (122.727273 test USDC) was verified on Arc.
+- 24 Claude runs on orders by 02:00 WIB; 82.5% of their input tokens came from the prompt cache.
 
 ## How the Chief works
 
