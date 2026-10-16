@@ -32,11 +32,11 @@ describe("Landing page", () => {
     expect(t).not.toContain("runs itself");
   });
 
-  it("has no form and no button, and links only to /live, /dashboard and #demo", () => {
+  it("has no form and no button, and links only to /live, /customer, /dashboard and #demo", () => {
     for (const locale of ["en", "id"] as const) {
       const html = render(locale);
       expect(html).not.toMatch(/<form|<button|<input|method=|formaction/i);
-      expect([...new Set(hrefs(html))].sort()).toEqual(["#demo", "/dashboard", "/live"]);
+      expect([...new Set(hrefs(html))].sort()).toEqual(["#demo", "/customer", "/dashboard", "/live"]);
     }
   });
 
@@ -55,7 +55,7 @@ describe("Landing page", () => {
     const yt = render("en", videoEmbed("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
     expect(yt).toContain('<iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"');
     expect(yt).not.toContain("Demo video coming soon");
-    expect(hrefs(yt).every((h) => ["#demo", "/live", "/dashboard"].includes(h))).toBe(true);
+    expect(hrefs(yt).every((h) => ["#demo", "/live", "/customer", "/dashboard"].includes(h))).toBe(true);
     const mp4 = render("en", videoEmbed("https://files.example.com/demo.mp4"));
     expect(mp4).toMatch(/<video src="https:\/\/files\.example\.com\/demo\.mp4"[^>]*controls/);
   });

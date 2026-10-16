@@ -65,6 +65,7 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
           </p>
           <div className="lp-actions">
             <a className="lp-btn primary" href="/live"><span className="live-dot" aria-hidden="true" />{t("See the studio live")}</a>
+            <a className="lp-btn" href="/customer"><Icon name="box" size={15} />{t("Continue as customer")}</a>
             <a className="lp-btn" href="#demo"><Icon name="play" size={15} />{t("Watch the demo")}</a>
           </div>
         </div>
@@ -223,6 +224,7 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
         <h2>{t("See it for yourself")}</h2>
         <div className="lp-actions">
           <a className="lp-btn primary" href="/live"><span className="live-dot" aria-hidden="true" />{t("See the studio live")}</a>
+          <a className="lp-btn" href="/customer"><Icon name="box" size={15} />{t("Continue as customer")}</a>
           {/* A full page load on purpose: the browser asks for the operator password and the layout adds the sidebar. */}
           <a className="lp-btn ghost" href="/dashboard"><Icon name="orders" size={15} />{t("Operations dashboard (team login)")}</a>
         </div>

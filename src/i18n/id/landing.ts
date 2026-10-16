@@ -20,6 +20,7 @@ const id: Record<string, string> = {
   "Open3DKesuni is the order desk of Kesuni, a real 3D-print studio in Padang, Indonesia. An AI agent takes the orders, prices them, plans the printers and keeps the customer updated. The customer's money waits in a USDC escrow on Arc until they accept the part.":
     "Open3DKesuni adalah meja pesanan Kesuni, studio cetak 3D sungguhan di Padang, Indonesia. Agen AI menerima pesanan, menghitung harga, mengatur printer, dan memberi kabar ke pelanggan. Uang pelanggan menunggu di escrow USDC di Arc sampai mereka menerima hasilnya.",
   "See the studio live": "Lihat studio secara live",
+  "Continue as customer": "Lanjut sebagai pelanggan",
   "Watch the demo": "Tonton demo",
   "AI agent": "Agen AI",
   "Priced by weight": "Harga dari berat",
