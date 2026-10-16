@@ -43,11 +43,12 @@ const NAV: { group: string; items: NavItem[] }[] = [
   },
 ];
 
-/** Customer pages (opened from WhatsApp), the public Live studio and the landing page ("/", /welcome) never get the
- *  operator shell (its links only ask for the password), not even the 404 for a cut-off link (/c, /request, /live, /welcome). */
+/** Customer pages (opened from WhatsApp), the customer portal at /customer, the public Live studio and the landing page
+ *  ("/", /welcome) never get the operator shell (its links only ask for the password), not even the 404 for a cut-off
+ *  link (/c, /request, /live, /welcome). /customer shows the portal by a rewrite, so the browser's path stays /customer. */
 export const isCustomerPage = (path: string) =>
   path === "/" || path === "/c" || path.startsWith("/c/") || path === "/request" || path.startsWith("/request/") || path === "/live" || path.startsWith("/live/") ||
-  path === "/welcome" || path.startsWith("/welcome/");
+  path === "/welcome" || path.startsWith("/welcome/") || path === "/customer" || path.startsWith("/customer/");
 
 function crumb(path: string): string[] {
   if (path.startsWith("/orders/")) return ["Orders", decodeURIComponent(path.split("/")[2] ?? "")];
