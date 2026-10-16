@@ -3,6 +3,7 @@ import { getLocale, getT } from "@/i18n/server";
 import { cachedLive } from "@/lib/live";
 import { DEMO_VIDEO_URL, videoEmbed } from "@/lib/landing";
 import { CustTop } from "../c/CustTop";
+import Icon from "@/app/components/Icon";
 import Landing, { type LandingStats } from "./Landing";
 import "../live/live.css";
 import "./landing.css";
@@ -33,7 +34,8 @@ export default async function LandingPage() {
   }
   return (
     <main className="live lp" lang={locale}>
-      <CustTop />
+      {/* The team's way in, top right. A full page load on purpose: from the internet the browser asks for the password. */}
+      <CustTop action={<a className="lp-btn ghost lp-top-dash" href="/dashboard"><Icon name="orders" size={14} />{t("Dashboard")}</a>} />
       <Landing t={t} stats={stats} video={videoEmbed(DEMO_VIDEO_URL)} />
     </main>
   );

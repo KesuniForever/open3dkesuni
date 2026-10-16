@@ -3,13 +3,17 @@ import { BrandMark } from "@/app/components/Icon";
 import LangSwitch from "@/app/components/LangSwitch";
 import "./customer.css";
 
-/** Header of the customer pages: brand on the left; a short label and the EN | ID switch on the right. */
-export function CustTop({ children }: { children?: ReactNode }) {
+/**
+ * Header of the customer pages: brand on the left; a short label, an optional link (the landing page's "Dashboard") and
+ * the EN | ID switch on the right.
+ */
+export function CustTop({ children, action }: { children?: ReactNode; action?: ReactNode }) {
   return (
     <header className="cust-top">
       <span className="brand"><BrandMark size={30} />Open3DKesuni</span>
       <div className="cust-top-right">
         {children != null && children !== false && <span className="muted">{children}</span>}
+        {action}
         <LangSwitch />
       </div>
     </header>

@@ -33,6 +33,14 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { href: "/token", label: "Token research", icon: "flask", active: (p) => p.startsWith("/token") },
     ],
   },
+  {
+    // What judges and visitors see, without a login: a quick way to check it from the dashboard.
+    group: "Public pages",
+    items: [
+      { href: "/", label: "Landing page", icon: "info", active: (p) => p === "/" },
+      { href: "/live", label: "Live studio", icon: "arrow", active: (p) => p === "/live" },
+    ],
+  },
 ];
 
 /** Customer pages (opened from WhatsApp), the public Live studio and the landing page ("/", /welcome) never get the

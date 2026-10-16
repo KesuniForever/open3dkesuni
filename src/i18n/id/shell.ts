@@ -11,6 +11,8 @@ const id: Record<string, string> = {
   "Finance": "Keuangan",
   "Price calculator": "Kalkulator harga",
   "Open3DKesuni network": "Jaringan Open3DKesuni",
+  "Public pages": "Halaman publik",
+  "Landing page": "Landing page",
   "Circle & Arc": "Circle & Arc",
   "Chief (AI)": "Chief (AI)",
   "Operations": "Operasional",

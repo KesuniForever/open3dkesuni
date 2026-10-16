@@ -30,6 +30,9 @@
 .lp-btn.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
 .lp-btn.primary:hover { background: var(--primary-hover); }
 .lp-btn.ghost { color: var(--text-2); font-weight: 500; }
+/* The small "Dashboard" link in the top bar, next to EN | ID. */
+.lp-btn.lp-top-dash { padding: 6px 12px; font-size: 13px; gap: 6px; }
+@media (max-width: 420px) { .lp-btn.lp-top-dash { padding: 6px 10px; } }
 .lp-btn .live-dot { margin-right: 0; background: var(--lime); }
 
 /* The hero picture: four rows, one per actor, ending in "paid only after acceptance". */
@@ -115,6 +118,7 @@
   background: var(--bad-bg); color: var(--bad); font-weight: 500;
 }
 .lp-branch svg { flex: none; }
+.lp-branch-n { flex: none; background: var(--person); }
 .lp-motto {
   margin: 16px 0 0; padding: 18px 20px; border-radius: 14px; background: var(--navy); color: #fff;
   font-size: 18px; font-weight: 650; line-height: 1.45; letter-spacing: -0.2px; text-align: center; text-wrap: balance;
@@ -205,4 +209,10 @@
   .lp-step-head { flex-wrap: wrap; gap: 6px; }
   .lp-step-text { font-size: 14px; }
   .lp-step:not(:last-child)::after { left: auto; right: -17px; top: 50%; bottom: auto; margin: -5px 0 0; transform: rotate(-45deg); }
+  /* Under steps 5-7 (4 columns and 4 gaps in), so its middle, where the pointer sits, is the middle of step 6. */
+  .lp-branch { position: relative; margin-left: calc((100% - 132px) / 7 * 4 + 88px); }
+  .lp-branch::before {
+    content: ""; position: absolute; top: -6px; left: 50%; width: 12px; height: 12px; margin-left: -6px;
+    background: var(--bad-bg); transform: rotate(45deg);
+  }
 }

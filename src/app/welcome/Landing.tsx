@@ -126,7 +126,12 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
             </li>
           ))}
         </ol>
-        <p className="lp-branch"><Icon name="close" size={15} />{t("Customer rejects: code refunds the escrow to the customer.")}</p>
+        {/* The other way out of step 6: on a wide screen it sits under steps 5-7 with its pointer on step 6. */}
+        <p className="lp-branch">
+          <span className="lp-step-n lp-branch-n" aria-hidden="true">6</span>
+          <Icon name="close" size={15} />
+          {t("If the customer rejects at step 6, code refunds the escrow to them.")}
+        </p>
         <p className="lp-motto">{t("AI decides. Code constrains. The blockchain executes. Humans control the boundaries.")}</p>
       </section>
 

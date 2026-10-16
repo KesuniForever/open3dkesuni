@@ -8,6 +8,8 @@ const id: Record<string, string> = {
   "An AI agent runs the order desk of a real 3D-print studio in Padang; the customer's USDC waits in escrow on Arc until they accept the part.":
     "Agen AI mengurus meja pesanan studio cetak 3D sungguhan di Padang; USDC pelanggan menunggu di escrow di Arc sampai mereka menerima hasilnya.",
 
+  "Dashboard": "Dasbor",
+
   // ---------- hero ----------
   "About the studio": "Tentang studio",
   "Real studio · Padang, Indonesia": "Studio sungguhan · Padang, Indonesia",
@@ -64,7 +66,7 @@ const id: Record<string, string> = {
   "A person checks quality": "Orang memeriksa kualitas",
   "Customer accepts": "Pelanggan menerima",
   "Code releases the escrow to Kesuni": "Kode mencairkan escrow ke Kesuni",
-  "Customer rejects: code refunds the escrow to the customer.": "Pelanggan menolak: kode mengembalikan escrow ke pelanggan.",
+  "If the customer rejects at step 6, code refunds the escrow to them.": "Kalau pelanggan menolak di langkah 6, kode mengembalikan uangnya ke pelanggan.",
   "AI decides. Code constrains. The blockchain executes. Humans control the boundaries.":
     "AI memutuskan. Kode membatasi. Blockchain mengeksekusi. Manusia memegang batasnya.",
 
