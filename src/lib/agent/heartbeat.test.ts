@@ -306,8 +306,9 @@ describe("heartbeat run", () => {
     setLlmGateway(undefined);
     process.env.KESUNI_AGENT_MODE = "rules";
     chooseQuote(ORDER, "Q-own", "agent", "within budget");
-    const soon = new Date(Date.now() + 12 * 3_600_000);
-    const day = new Date(soon.getTime() + 7 * 3_600_000).toISOString().slice(0, 10); // its Jakarta day
+    // Today in Jakarta: its end (23:59:59 WIB) is always less than 24 h away. Twelve hours from now was tomorrow
+    // after noon WIB, more than 24 h away, so the test failed every afternoon.
+    const day = new Date(Date.now() + 7 * 3_600_000).toISOString().slice(0, 10);
     store.saveOrder({ ...store.getOrder(ORDER)!, deadline: day });
     await beat();
     const [task] = store.listTasks(ORDER);
