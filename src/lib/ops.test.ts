@@ -183,6 +183,18 @@ describe("chiefFeed", () => {
     expect(describeEntry(row({ tool: "create_operator_task", sec: 0, input: { text: "Short task." } }))).toEqual({ title: "Task for the operator", line: "Short task." });
   });
 
+  it("a message to the customer reads in the page's language: its Indonesian on an Indonesian page, else its English", () => {
+    const both = row({ tool: "message_customer", sec: 0, input: { orderId: "ORD-001", text: "Your price is ready.", textId: "Harga sudah siap." } });
+    const enOnly = row({ tool: "message_customer", sec: 1, actor: "human", input: { text: "We send photos tomorrow." } });
+    const idT = makeT("id", {});
+    expect(describeEntry(both).line).toBe("Your price is ready.");
+    expect(describeEntry(both, idT, "id").line).toBe("Harga sudah siap.");
+    expect(describeEntry(enOnly, idT, "id").line).toBe("We send photos tomorrow.");
+    expect(chiefFeed([both], orders, 15, idT, "id")[0]).toMatchObject({ line: "Harga sudah siap." });
+    expect(auditEvents({ orders, log: [both, enOnly], decisions: [], tasks: [], escrows: [] }, idT, "id").map((e) => e.line))
+      .toEqual(["We send photos tomorrow.", "Harga sudah siap."]);
+  });
+
   it("returns the newest items first, up to the limit", () => {
     const log = Array.from({ length: 30 }, (_, i) => row({ tool: "choose_printer", sec: i * 100, orderId: i % 2 ? "ORD-001" : "ORD-002", output: { chose: `P${i}` } }));
     const feed = chiefFeed(log, orders, 5);

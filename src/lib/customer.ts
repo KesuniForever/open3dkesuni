@@ -71,8 +71,9 @@ export interface CustomerView {
   late: boolean;
   /** A printer reported in the last 2 min: the colours offered are loaded now (else they are the last ones seen). */
   studioOnline: boolean;
-  /** Short updates from the Chief (AI) or a person at Kesuni, oldest first. Text, author kind and time only. */
-  messages: { text: string; by: "agent" | "human"; at: string }[];
+  /** Short updates from the Chief (AI) or a person at Kesuni, oldest first. Text (English, and Indonesian when written),
+   *  author kind and time only. */
+  messages: { text: string; textId?: string; by: "agent" | "human"; at: string }[];
   acceptance: { accepted: boolean; by: string; note: string; at: string } | null;
   idrPerUsdc: number;
   spec: Spec | null;
@@ -198,7 +199,7 @@ export function customerView(order: Order, token: string, now = Date.now()): Cus
     late: !CLOSED.includes(order.status) && order.status !== "EVIDENCE_SUBMITTED" && !printedOn
       && /^\d{4}-\d{2}-\d{2}$/.test(order.deadline) && order.deadline < jakartaToday(now),
     studioOnline: studioOnline(now),
-    messages: store.listMessages(order.id).map((m) => ({ text: m.text, by: m.by, at: m.at })),
+    messages: store.listMessages(order.id).map((m) => ({ text: m.text, ...(m.textId ? { textId: m.textId } : {}), by: m.by, at: m.at })),
     acceptance: acc ? { accepted: acc.accepted, by: acc.by, note: acc.note, at: acc.at } : null,
     idrPerUsdc: rate,
     spec: order.spec ?? null,

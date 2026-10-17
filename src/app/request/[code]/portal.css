@@ -1,7 +1,7 @@
 /* Customer portal (/customer, which shows /request/<code>): the customer layout (customer.css) with a menu under the top
    bar. Phone first: one column, 16px gutters from .cust, nothing wider than the screen. */
 .portal > .tabs { margin: 0 0 16px; }
-/* The menu on a phone: four tabs, each big enough for a thumb (they wrap only on the narrowest screens). */
+/* The menu on a phone: five tabs, each big enough for a thumb (they wrap to a second row on a phone). */
 .portal > .tabs .tab { min-height: 40px; padding: 8px 13px; font-size: 14px; }
 @media (max-width: 400px) { .portal > .tabs .tab { padding: 8px 10px; font-size: 13.5px; } }
 .portal-main { min-width: 0; }
@@ -65,7 +65,7 @@
 .portal-note { margin-top: 12px; }
 .portal-order-now { margin-top: 14px; }
 
-/* ---------- Token research (TokenTab: shown on the Live studio page) ---------- */
+/* ---------- Token research (TokenTab: on /customer?tab=token and the Live studio page) ---------- */
 .portal-research {
   display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: 0 0 12px; padding: 9px 12px; border-radius: 9px;
   background: var(--blue-bg); color: var(--blue); font-size: 13.5px; font-weight: 500; line-height: 1.4;

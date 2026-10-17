@@ -706,7 +706,7 @@ export function liveView(rows: LiveRows, now: Date, t: T = EN, locale: Locale = 
     products: rows.orders.flatMap((o) => [o.product, agentText(o.product, o)]),
   };
   // More of the feed than the page shows: folding repeated runs makes it shorter.
-  const feed = foldRuns(chiefFeed(rows.log, rows.orders, LIVE_AGENT_ITEMS * 5, t)).map((f) => liveAgentItem(f, orderOf, hide, rows.issueTexts, t, locale));
+  const feed = foldRuns(chiefFeed(rows.log, rows.orders, LIVE_AGENT_ITEMS * 5, t, locale)).map((f) => liveAgentItem(f, orderOf, hide, rows.issueTexts, t, locale));
   const agent = [...feed, ...personPrints(rows.log, orderOf, hide, t, locale)]
     .sort((a, b) => b.at.localeCompare(a.at)).slice(0, LIVE_AGENT_ITEMS);
   const seen = rows.printers.map((p) => p.lastSeen).filter((x): x is string => Boolean(x)).sort().pop();

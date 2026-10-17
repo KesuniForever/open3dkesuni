@@ -12,7 +12,8 @@ import { NOT_THROUGH, PAST_DEADLINE, deviceUpdate } from "@/lib/customer";
 import { budgetApprox, idrBudget, usdcApprox } from "@/lib/budget";
 import { A_DOCUMENT, A_PHOTO, customerDesignProblem } from "@/lib/file-rules";
 import { readMesh } from "@/lib/mesh";
-import { AgreeAndPay, Decide, dayText, headline, stepOf, stepsOf } from "./[token]/CustomerView";
+import { AgreeAndPay, Decide, MessagesCard, dayText, headline, stepOf, stepsOf } from "./[token]/CustomerView";
+import { messageText } from "@/lib/text";
 import { UNREADABLE } from "./ModelPreview";
 import { WhatsAppButton, waChatLink, waShareLink, whatsappNumber } from "./whatsapp";
 import { readDraft } from "@/app/request/[code]/OrderForm";
@@ -229,6 +230,30 @@ describe("the order form", () => {
     expect(readDraft(JSON.stringify({ name: "A" }))).toEqual({ fields: { name: "A" }, choice: null, hadFile: false });
     expect(readDraft("not json")).toBeNull();
     expect(readDraft(null)).toBeNull();
+  });
+});
+
+describe("messages from Kesuni follow the page's EN | ID switch", () => {
+  const messages: CustomerView["messages"] = [
+    { text: "Your price is ready. Please check and approve it on this page.", textId: "Harga sudah siap. Silakan cek dan setujui di halaman ini.", by: "agent", at: "2026-10-17T03:00:00.000Z" },
+    { text: "We send photos tomorrow.", by: "human", at: "2026-10-17T04:00:00.000Z" },
+  ];
+
+  it("English, or the Indonesian when there is one; newest first", () => {
+    expect(text(render(<MessagesCard messages={messages} t={en} locale="en" />, "en"))).toMatch(
+      /^Messages from Kesuni K We send photos tomorrow\. from the Kesuni team · .* AI Your price is ready\. Please check and approve it on this page\. written by the Chief \(AI\) · /,
+    );
+    const idText = text(render(<MessagesCard messages={messages} t={id} locale="id" />, "id"));
+    // A person's message without an Indonesian text, and every older message, stays in English.
+    expect(idText).toMatch(/^Pesan dari Kesuni K We send photos tomorrow\. dari tim Kesuni · .* AI Harga sudah siap\. Silakan cek dan setujui di halaman ini\. ditulis oleh Chief \(AI\) · /);
+    expect(idText).not.toContain("Your price is ready");
+    // Each text says its language, so a screen reader reads the English one as English.
+    const idHtml = render(<MessagesCard messages={messages} t={id} locale="id" />, "id");
+    expect(idHtml).toMatch(/<div lang="en"[^>]*>We send photos tomorrow\.<\/div>/);
+    expect(idHtml).toMatch(/<div lang="id"[^>]*>Harga sudah siap\./);
+    expect(messageText({ text: "Hi.", textId: "" }, "id")).toBe("Hi.");
+    expect(messageText({ text: "Hi.", textId: "Halo." }, "en")).toBe("Hi.");
+    expect(render(<MessagesCard messages={[]} t={en} locale="en" />)).toBe("");
   });
 });
 

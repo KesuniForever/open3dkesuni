@@ -6,12 +6,13 @@ import { TabNav } from "@/app/components/Tabs";
 import LiveRefresh from "@/app/live/LiveRefresh";
 import { inviteValid } from "@/lib/invite";
 import { cachedLive, LIVE_REFRESH_S } from "@/lib/live";
-import { portalMachines, portalPrice } from "@/lib/portal";
+import { portalMachines, portalPrice, portalToken, type PortalToken } from "@/lib/portal";
+import { tokenReadiness } from "@/lib/token-research";
 import { idrPerUsdc } from "@/lib/costing";
 import { jakartaToday, studioOnline } from "@/lib/customer";
 import OrderForm from "./OrderForm";
 import MyOrders from "./MyOrders";
-import { MachinesTab, PORTAL_TABS, PriceTab, portalTab } from "./Portal";
+import { MachinesTab, PORTAL_TABS, PriceTab, TokenTab, portalTab } from "./Portal";
 
 // Read at every request: the printers report every few seconds (the Live studio data is kept a few seconds per language).
 export const dynamic = "force-dynamic";
@@ -29,9 +30,9 @@ const BASE = "/customer";
 
 /**
  * The customer portal behind the private invite link: the order form (opens first), the orders sent from this
- * browser, the studio's printers and the price calculator. Open without the operator password (src/proxy.ts);
- * everything here is read-only except the order form, which posts to /api/c with the same code. A wrong code shows one
- * sentence: no tabs, no data. (The token research is on the Live studio page, /live.)
+ * browser, the studio's printers, the price calculator and the token research (the same read-only tab as on /live).
+ * Open without the operator password (src/proxy.ts); everything here is read-only except the order form, which posts
+ * to /api/c with the same code. A wrong code shows one sentence: no tabs, no data.
  */
 export default async function OrderPage({ params, searchParams }: { params: Promise<{ code: string }>; searchParams: Promise<Search> }) {
   const { code } = await params;
@@ -49,6 +50,15 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
   }
   const search = await searchParams;
   const tab = portalTab(search.tab);
+  // Read from the store only when its tab is open, as on /live.
+  let token: PortalToken | null = null;
+  if (tab === "token") {
+    try {
+      token = portalToken(tokenReadiness(t));
+    } catch {
+      token = null; // the tab says it could not be read
+    }
+  }
   return (
     <div className="cust portal" lang={locale}>
       <CustTop home={BASE}>{t("Customer portal")}</CustTop>
@@ -65,6 +75,9 @@ export default async function OrderPage({ params, searchParams }: { params: Prom
           </>
         )}
         {tab === "price" && <PriceTab p={portalPrice(search)} action={BASE} t={t} />}
+        {tab === "token" && (token
+          ? <TokenTab k={token} t={t} />
+          : <section className="card"><p className="muted" style={{ margin: 0 }}>{t("The token research could not be read right now.")}</p></section>)}
       </main>
     </div>
   );

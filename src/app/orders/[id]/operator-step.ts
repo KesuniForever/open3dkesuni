@@ -84,7 +84,7 @@ const N = {
   N3a: "The Chief is making the price. Nothing to do now.",
   N3b: "Make the price from the slice.",
   N3c: "Price sent. Waiting for the customer to agree.",
-  N3d: "Waiting for the customer to pay. Do not print yet.",
+  N3d: "Waiting for the customer's payment. Printing opens once it is in escrow.",
   // CREATED, priced, within the budget: no plan yet, so the customer does not see the price.
   N3e: "Price made. The Chief picks the plan next; then the customer sees the price. Nothing to do now.",
   N3f: "Price made. Press Run agent in step 3 so it picks the plan; then the customer sees the price.",

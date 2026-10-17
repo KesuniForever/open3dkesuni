@@ -9,7 +9,8 @@ import { tLib } from "@/lib/lib-text";
 const when = (iso: string, locale: Locale) =>
   new Date(iso).toLocaleString(dateLocale(locale), { timeZone: "Asia/Jakarta", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
-/** Updates shown on the customer's page ("Kabar dari Kesuni"), by the Chief (AI) or a person. */
+/** Updates shown on the customer's page ("Kabar dari Kesuni"), by the Chief (AI) or a person. The customer reads the
+ *  Indonesian text when their page is in Indonesian and the message has one, else the English. */
 export default function MessagesPanel({ order, messages, busy, onChange }: {
   order: Order;
   messages: CustomerMessage[];
@@ -19,6 +20,7 @@ export default function MessagesPanel({ order, messages, busy, onChange }: {
   const t = useT();
   const locale = useLocale();
   const [text, setText] = useState("");
+  const [textId, setTextId] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<{ text: string; reasons?: string[] } | null>(null);
 
@@ -27,10 +29,10 @@ export default function MessagesPanel({ order, messages, busy, onChange }: {
     setError(null);
     try {
       const res = await fetch(`/api/orders/${order.id}/messages`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, by: "human" }),
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text, textId, by: "human" }),
       });
       const data = await res.json();
-      if (res.ok) setText(""); // keep the text when refused, so it can be fixed
+      if (res.ok) { setText(""); setTextId(""); } // keep the texts when refused, so they can be fixed
       else setError({ text: data.error, reasons: data.reasons });
       onChange();
     } catch {
@@ -50,6 +52,7 @@ export default function MessagesPanel({ order, messages, busy, onChange }: {
             <li key={m.id}>
               <span className={`badge ${m.by === "agent" ? "" : "ok"}`}>{m.by === "agent" ? t("Chief (AI)") : t("Person")}</span>{" "}
               {m.text} <span className="muted" style={{ fontSize: 13 }}>· {when(m.at, locale)}</span>
+              {m.textId && <div className="muted" style={{ fontSize: 13.5 }}>{t("In Indonesian:")} <span lang="id">{m.textId}</span></div>}
             </li>
           ))}
         </ul>
@@ -58,6 +61,9 @@ export default function MessagesPanel({ order, messages, busy, onChange }: {
         <label>{t('Write to the customer (simple English; shown on their page as "from the Kesuni team")')}
           <textarea value={text} onChange={(e) => setText(e.target.value)} maxLength={500} rows={2}
             placeholder={t("Example: Printing is under way; we will send photos of the result tomorrow afternoon.")} disabled={disabled} />
+        </label>
+        <label>{t("The same in Indonesian (optional)")}
+          <textarea value={textId} onChange={(e) => setTextId(e.target.value)} maxLength={500} rows={2} lang="id" disabled={disabled} />
         </label>
         {error && (
           <div className="alert bad" role="status">

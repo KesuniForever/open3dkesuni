@@ -133,6 +133,8 @@ const id: Record<string, string> = {
   // The example stays English on purpose: the label asks for simple English, and messages are stored as written.
   "Example: Printing is under way; we will send photos of the result tomorrow afternoon.":
     "Contoh: Printing is under way; we will send photos of the result tomorrow afternoon.",
+  "The same in Indonesian (optional)": "Pesan yang sama dalam bahasa Indonesia (opsional)",
+  "In Indonesian:": "Dalam bahasa Indonesia:",
   "Posting…": "Mengirim…",
   "Post message": "Kirim pesan",
   "no links, wallet addresses, phone numbers or emails (checked in code).": "tanpa tautan, alamat wallet, nomor telepon, atau email (dicek oleh kode).",

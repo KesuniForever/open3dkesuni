@@ -4,7 +4,7 @@ import { emptySnapshot, hmsUrl, type AmsTray, type PrinterSnapshot } from "@/lib
 import { SLICER_NAME } from "@/lib/slice-rules";
 import { LocaleProvider } from "@/i18n/client";
 import type { Locale } from "@/i18n/core";
-import type { Attachment, Order, OrderStatus, Printer, SliceJob, ThreeMfInfo } from "@/lib/types";
+import type { Attachment, EscrowState, Order, OrderStatus, Printer, SliceJob, ThreeMfInfo } from "@/lib/types";
 import PrintPanel from "./PrintPanel";
 import PrinterPanel from "./PrinterPanel";
 import type { SliceData } from "./SlicePanel";
@@ -39,9 +39,9 @@ const order = (over: Partial<Order> = {}): Order => ({
   status: "CREATED", label: "simulated", ...over,
 });
 const noSlices: SliceData = { jobs: [], slicer: null, reload() {} };
-const render = (o: Order, attachments: Attachment[], locale: Locale = "en", slices: SliceData = noSlices) => renderToStaticMarkup(
+const render = (o: Order, attachments: Attachment[], locale: Locale = "en", slices: SliceData = noSlices, escrowState: EscrowState | null = null) => renderToStaticMarkup(
   <LocaleProvider locale={locale}>
-    <PrintPanel order={o} attachments={attachments} printers={printers} paid={false} issueTexts={{}} slices={slices} busy={false} act={async () => {}} onChange={() => {}} />
+    <PrintPanel order={o} attachments={attachments} printers={printers} escrowState={escrowState} issueTexts={{}} slices={slices} busy={false} act={async () => {}} onChange={() => {}} />
   </LocaleProvider>,
 );
 const panel = (o: Order, attachments: Attachment[], locale: Locale = "en", slices: SliceData = noSlices) => text(render(o, attachments, locale, slices));
@@ -167,7 +167,7 @@ describe("order page: who prints (the agent line)", () => {
   const withAgent = (autoPrint: Parameters<typeof PrintPanel>[0]["autoPrint"], locale: Locale = "en") => text(renderToStaticMarkup(
     <LocaleProvider locale={locale}>
       <PrintPanel order={order({ status: "PLAN_CHOSEN", label: "real" })} attachments={[file("kesuni-benchy.gcode.3mf", benchy)]} printers={printers}
-        paid issueTexts={{}} autoPrint={autoPrint} slices={noSlices} busy={false} act={async () => {}} onChange={() => {}} />
+        escrowState="FUNDED" issueTexts={{}} autoPrint={autoPrint} slices={noSlices} busy={false} act={async () => {}} onChange={() => {}} />
     </LocaleProvider>,
   ));
   const line = {
@@ -214,6 +214,41 @@ describe("order page: who prints (the agent line)", () => {
     expect(withAgent({ on: false, line, runsSet: false }, "id")).toMatch(/^ Anda yang memulai cetakan ini di sini\. Cetak oleh agen sedang mati\./);
     expect(withAgent({ on: true, line: { ...line, runsNeeded: 0 }, runsSet: true }, "id")).toMatch(/^ Anda yang memulai cetakan ini di sini\. Agen tidak mencetak pesanan ini \(0 cetakan\)\./);
     expect(withAgent({ on: true, line, runsSet: false }, "id")).toMatch(/Opsi lainnya Ubah cetakan agen/);
+  });
+});
+
+describe("order page: no print before the payment on a real order", () => {
+  const benchyFile = [file("kesuni-benchy.gcode.3mf", benchy)];
+  const real = order({ status: "PLAN_CHOSEN", label: "real" });
+
+  it("unpaid: the reason in plain words first, the start area shown but disabled, the button closed", () => {
+    for (const state of [null, "AWAITING_DEPOSIT"] as const) {
+      const html = render(real, benchyFile, "en", noSlices, state);
+      expect(text(html), String(state)).toMatch(/^ The customer has not paid yet\. Printing opens once the payment is in escrow\. Ready-to-print file/);
+      expect(html).toMatch(/<fieldset class="pp-lock" disabled="">/);
+      expect(html).toMatch(/<button class="primary" disabled="">Start print<\/button><span class="muted pp-hint">The customer has not paid yet\./);
+      // The payment is a block, not a warning to tick.
+      expect(text(html)).not.toMatch(/has not paid into escrow yet|I checked the warnings above/);
+    }
+    expect(text(render(real, benchyFile, "id", noSlices, null))).toMatch(/^ Pelanggan belum membayar\. Baru bisa dicetak setelah pembayaran masuk escrow\. File siap cetak/);
+    // No file yet: the reason, and slicing in step 2 stays open.
+    expect(text(render(real, [{ ...file("part.stl"), mime: "model/stl" }], "en", noSlices, null)))
+      .toMatch(/^ The customer has not paid yet\. Printing opens once the payment is in escrow\. No ready-to-print file yet\. Slice the model in step 2/);
+  });
+
+  it("paid (escrow FUNDED): the start area is open; a test order never waits for a payment", () => {
+    for (const html of [render(real, benchyFile, "en", noSlices, "FUNDED"), render(order({ status: "PLAN_CHOSEN" }), benchyFile, "en", noSlices, null)]) {
+      expect(text(html)).not.toMatch(/has not paid/);
+      expect(html).toMatch(/<fieldset class="pp-lock">/);
+      expect(text(html)).toMatch(/Start print Tick the boxes above first\./);
+    }
+  });
+
+  it("after the payment left the escrow, a real order does not print again", () => {
+    expect(text(render(order({ status: "PAID", label: "real" }), benchyFile, "en", noSlices, "RELEASED")))
+      .toMatch(/Start another print The payment has left the escrow \(released or refunded\): this order does not print again\./);
+    expect(text(render(order({ status: "PAID", label: "real" }), benchyFile, "id", noSlices, "REFUNDED")))
+      .toMatch(/Pembayaran sudah keluar dari escrow \(dilepas atau dikembalikan\): pesanan ini tidak bisa dicetak lagi\./);
   });
 });
 

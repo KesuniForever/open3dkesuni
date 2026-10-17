@@ -41,18 +41,19 @@ const TOKEN: PortalToken = {
 };
 
 describe("customer portal tabs", () => {
-  it("menu: the order form first, then my orders, machines, price calculator; no token research (it is on /live)", () => {
+  it("menu: the order form first, then my orders, machines, price calculator, token research (also on /live)", () => {
     const html = render("en", (t) => <TabNav tabs={PORTAL_TABS} active="price" basePath="/customer" t={t} />);
-    expect(text(html)).toBe(" New order My orders Machines Price calculator ");
+    expect(text(html)).toBe(" New order My orders Machines Price calculator Token research ");
+    expect(html).toContain('href="/customer?tab=token"');
     expect(html).toContain('href="/customer"');
     expect(html).toContain('href="/customer?tab=orders"');
     expect(html).toMatch(/class="tab on" aria-current="page" href="\/customer\?tab=price"|href="\/customer\?tab=price"[^>]*class="tab on"/);
     expect(text(render("id", (t) => <TabNav tabs={PORTAL_TABS} active="order" basePath="/customer" t={t} />)))
-      .toBe(" Pesanan baru Pesanan saya Mesin Kalkulator harga ");
+      .toBe(" Pesanan baru Pesanan saya Mesin Kalkulator harga Riset token ");
     expect(portalTab(undefined)).toBe("order");
     expect(portalTab("machines")).toBe("machines");
     expect(portalTab("admin")).toBe("order");
-    expect(portalTab("token")).toBe("order"); // an old link to the token tab opens the order form
+    expect(portalTab("token")).toBe("token");
     expect(portalTab(["price", "machines"])).toBe("price");
   });
 

@@ -13,7 +13,7 @@ import type { Fail } from "../actions";
 import { matchJob, type JobMatch } from "../colors";
 import {
   canStartPrint, COMMAND_EXPIRY_MS, COMMAND_GAP_MS, COMMAND_KINDS, commandReasons, CONFIRM_KINDS, CONTROL_KINDS, isPersonName,
-  JOB_PICKUP_MS, sdFileName, SENT_TIMEOUT_MS, START_CONFIRM_MS, START_GAP_MS, subtaskName, UPLOAD_TIMEOUT_MS,
+  JOB_PICKUP_MS, paymentBlock, sdFileName, SENT_TIMEOUT_MS, START_CONFIRM_MS, START_GAP_MS, subtaskName, UPLOAD_TIMEOUT_MS,
 } from "./control";
 import { clearBed, createTask, linkPrinter, printerName, printerRef } from "./actions";
 import { AGENT_OPTIONS, agentFileProblem, agentSpoolProblem, autoPrintOn, expectedTrays, orderGate, pairing, printerGate } from "./autoprint";
@@ -138,9 +138,9 @@ const inFlight = (printerId: string) => store.listPrintJobs({ printerId }).filte
 const is3mf = (a: Attachment) => a.filename.toLowerCase().endsWith(".3mf");
 
 /**
- * A person starts a real print: checks the printer, the sliced file, the AMS mapping and the colours, then queues it
- * for the bridge. The person's confirmation that the bed is empty clears the bed flag, and the printer is linked to
- * the order (when its status allows) so the print's progress becomes evidence on the order.
+ * A person starts a real print: checks the payment of a real order, the printer, the sliced file, the AMS mapping and
+ * the colours, then queues it for the bridge. The person's confirmation that the bed is empty clears the bed flag, and
+ * the printer is linked to the order (when its status allows) so the print's progress becomes evidence on the order.
  */
 export function createPrintJob(input: PrintJobInput, now = Date.now()):
   { ok: true; job: PrintJob; warnings: string[]; match: JobMatch } | (Fail & { warnings?: string[]; match?: JobMatch }) {
@@ -183,8 +183,9 @@ export function createPrintJob(input: PrintJobInput, now = Date.now()):
       if (t && !t.empty && best && best.deltaE > 10) warnings.push(`Filament ${f.id}: the file asks for ${f.color}, the spool is ${t.color}`);
     }
   }
-  const escrow = store.getEscrow(orderId);
-  if (order.label === "real" && escrow?.state !== "FUNDED") warnings.push("The customer has not paid into escrow yet");
+  // No print before the payment on a real order, as for the agent's (autoprint.ts): a block, not a warning to tick.
+  const unpaid = paymentBlock(order.label === "real", store.getEscrow(orderId)?.state);
+  if (unpaid) reasons.push(unpaid);
   if (warnings.length && input.warningsChecked !== true && !reasons.includes("Check the warnings and tick \"I checked this\"")) {
     reasons.push("Check the warnings and tick \"I checked this\"");
   }
@@ -399,22 +400,25 @@ export function updateQueueItem(id: string, input: { state: unknown; error?: unk
     if (!JOB_NEXT[j.state].includes(state as PrintJobState)) return fail(409, `The job is ${j.state}; it cannot become ${state || "that"}`);
     // "sent" is the last gate before the printer starts: the person's bed confirmation must still hold. An agent print
     // also needs the switch still on, the bed confirmation it used still its own (not voided by another print) and the
-    // spools it was queued with (nobody is at the printer to see a swapped spool).
+    // spools it was queued with (nobody is at the printer to see a swapped spool). Either print of a real order also
+    // needs its payment still in escrow: a release or refund since it was queued ends the order's prints.
     if (state === "sent") {
       const late = now - Date.parse(j.createdAt) > START_CONFIRM_MS;
       const printer = store.getPrinter(j.printerId);
       const bed = printer?.bedOccupiedBy;
       const check = printer?.bedCheck;
+      const order = j.orderId ? store.getOrder(j.orderId) : undefined;
+      const unpaid = order ? paymentBlock(order.label === "real", store.getEscrow(order.id)?.state) : null;
       const agentStop = j.actor !== "agent" ? null
         : !autoPrintOn() ? "Agent prints were turned off: nothing was sent."
           : !j.bedCheckId || check?.id !== j.bedCheckId || check.usedBy !== j.id || check.voidedAt
             ? "The bed confirmation this agent print used is no longer valid: nothing was sent. A person confirms the bed again."
             : agentSpoolProblem(j, printer);
-      if (late || bed || agentStop) {
+      if (late || bed || unpaid || agentStop) {
         const error = late
           ? "The bed was confirmed more than 10 min ago: nothing was sent. Check the bed again and start again."
           : bed ? "A print ended on this printer after the bed was confirmed: nothing was sent. Clear the bed and start again."
-            : agentStop!;
+            : unpaid ?? agentStop!;
         updateQueueItem(id, { state: "failed", error }, now);
         return fail(409, error);
       }

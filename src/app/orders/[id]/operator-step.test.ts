@@ -54,7 +54,7 @@ describe("the Now line and the step cards", () => {
     expect(row(facts({ weighed: true, priced: true, overBudget: true }))).toEqual({
       now: "price:wait:Price sent. Waiting for the customer to agree.", cards: cards("done", "done", "wait", "later", "later", "later"),
     });
-    expect(nextStep(facts({ weighed: true, priced: true, agreed: true })).text).toBe("Waiting for the customer to pay. Do not print yet.");
+    expect(nextStep(facts({ weighed: true, priced: true, agreed: true })).text).toBe("Waiting for the customer's payment. Printing opens once it is in escrow.");
   });
 
   it("the status in words: a plan is chosen before the customer agrees", () => {
@@ -63,10 +63,13 @@ describe("the Now line and the step cards", () => {
     expect(statusWord("CREATED", true)).toBe("Being priced");
   });
 
-  it("ORD-006: plan chosen, real, unpaid: do not print yet", () => {
-    expect(row(facts({ status: "PLAN_CHOSEN", weighed: true, priced: true, agreed: true }))).toEqual({
-      now: "price:wait:Waiting for the customer to pay. Do not print yet.", cards: cards("done", "done", "wait", "later", "later", "later"),
-    });
+  it("ORD-006: plan chosen, real, unpaid: waiting for the payment, whatever the files (printing opens once it is in escrow)", () => {
+    const waiting = { now: "price:wait:Waiting for the customer's payment. Printing opens once it is in escrow.", cards: cards("done", "done", "wait", "later", "later", "later") };
+    expect(row(facts({ status: "PLAN_CHOSEN", weighed: true, priced: true, agreed: true }))).toEqual(waiting);
+    // A file ready to print, or the agent on: still the payment first, never "Ready to print".
+    expect(row(facts({ status: "PLAN_CHOSEN", weighed: true, priced: true, agreed: true, printFile: true }))).toEqual(waiting);
+    expect(row(facts({ status: "IN_PRODUCTION", weighed: true, priced: true, agreed: true, printFile: true, agent: { done: 0, needed: 1 }, agentPrints: true })).now)
+      .toBe(waiting.now);
   });
 
   it("paid with only the weighing slice: slice in the customer's colour; slicing; then a person or the agent prints", () => {

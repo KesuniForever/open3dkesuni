@@ -12,8 +12,8 @@ const SHAPE: Record<string, string> = {
   status: "[A-Z_]+", state: "[A-Z_]+", from: "[A-Z_]+", to: "[A-Z_]+",
   order: "[A-Z]+-[\\w-]+|a print without an order",
 };
-/** Values that are words themselves (a status, a printer state, "2 min", a colour name): translated too. */
-const WORD_VARS = new Set(["status", "state", "order", "kind", "ext", "rating", "every", "name", "level"]);
+/** Values that are words themselves (a status, a printer state, "2 min", a colour name) or a whole reason: translated too. */
+const WORD_VARS = new Set(["status", "state", "order", "kind", "ext", "rating", "every", "name", "level", "rule"]);
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

@@ -510,20 +510,29 @@ export const TOOLS: Tool[] = [
   },
   {
     name: "message_customer",
-    description: "Customer skill: post a short update on the customer's order page. Short (1-3 sentences), polite, " +
-      "simple English, facts only. No payment instructions, no links, contacts or addresses. At most one message per event. " +
-      "Code refuses links, wallet addresses, phone numbers, emails, a repeat of the last message, any rupiah or USDC " +
-      "amount other than the order's price (by weight, or the chosen or owner-approved quote), the words free, gratis, " +
-      "discount, diskon, promo or refund, and more than one message per order every 10 minutes (2 minutes once the " +
-      "order's status or payment changed since your last message).",
+    description: "Customer skill: post a short update on the customer's order page, in English (text) and in natural " +
+      "Indonesian with the same meaning (textId); the page shows the customer's language. Short (1-3 sentences), " +
+      "polite, simple, facts only. No payment instructions, no links, contacts or addresses. At most one message per " +
+      "event. Code checks both texts and refuses links, wallet addresses, phone numbers, emails, a repeat of the last " +
+      "message, any rupiah or USDC amount other than the order's price (by weight, or the chosen or owner-approved " +
+      "quote), the words free, gratis, discount, diskon, promo or refund (and Indonesian refund words such as " +
+      "dikembalikan or uang kembali), and more than one message per order every 10 minutes (2 minutes once the " +
+      "order's status or payment changed since your last message). Amounts in textId are read the Indonesian way.",
     inputSchema: {
       type: "object",
-      properties: { orderId: { type: "string" }, text: { type: "string", description: "The message, in English, at most 500 characters" } },
-      required: ["orderId", "text"],
+      properties: {
+        orderId: { type: "string" },
+        text: { type: "string", description: "The message in simple English, at most 500 characters" },
+        textId: {
+          type: "string",
+          description: "The same message in natural Indonesian, at most 500 characters; amounts the Indonesian way (Rp450.000, 28,125 USDC)",
+        },
+      },
+      required: ["orderId", "text", "textId"],
     },
     run: (i) => {
-      const r = postCustomerMessage(str(i.orderId), str(i.text), "agent");
-      if (r.ok) return { ok: true, data: { messageId: r.message.id, text: r.message.text } };
+      const r = postCustomerMessage(str(i.orderId), { text: str(i.text), textId: str(i.textId) }, "agent");
+      if (r.ok) return { ok: true, data: { messageId: r.message.id, text: r.message.text, textId: r.message.textId ?? null } };
       return { ok: false, data: { error: r.error, reasons: r.reasons, ...(r.retryAfter ? { retryAfter: r.retryAfter } : {}) } };
     },
   },

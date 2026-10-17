@@ -26,7 +26,7 @@ import * as store from "../store";
 import { colorsCheckedNow, deltaE, matchJob, MATCH_MAX_DELTA_E, nameOf, normalizeHex, type JobMatch } from "../colors";
 import { orderMaterial, toMaterial } from "../pricing";
 import { sliceSourceCheck } from "../slice-rules";
-import { canStartPrint, START_FRESH_MS, START_GAP_MS } from "./control";
+import { canStartPrint, paymentBlock, START_FRESH_MS, START_GAP_MS } from "./control";
 import { blockingFault, printerName } from "./actions";
 import { AUTO_PRINT_META, bedState, bedWhy, type Why } from "./autoprint-rules";
 import type { Attachment, BedCheck, Order, Printer, PrintJob, PrintOptions, ThreeMfInfo, ThreeMfPlate } from "../types";
@@ -156,7 +156,7 @@ export function orderGate(o: Order, opts: { finishing?: boolean } = {}): OrderGa
   if (o.printDoneDebug) return no({ key: "Marked printed for testing: the agent does not print it" });
   if (!real && !o.autoPrint) return no({ key: "Not a real order: a person sets its runs to let the agent print it" });
   if (need === 0) return no({ key: "A person set 0 runs: the agent does not print it" });
-  if (real && store.getEscrow(o.id)?.state !== "FUNDED") return no({ key: "Waiting for the customer's payment" });
+  if (paymentBlock(real, store.getEscrow(o.id)?.state)) return no({ key: "Waiting for the customer's payment" });
   if (runsDone >= need) return no({ key: "All runs printed ({done} of {needed})", vars: { done: runsDone, needed: need } });
   if (runsActive > 0) return no({ key: "Run {n} of {needed} is on the printer", vars: { n: Math.min(need, runsDone + 1), needed: need } });
   const open = store.listTasks(o.id).filter((t) => t.status === "open");

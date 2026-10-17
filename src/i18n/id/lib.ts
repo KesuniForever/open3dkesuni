@@ -372,6 +372,13 @@ const id: Dict = {
   "No phone numbers in customer messages": "Tidak boleh ada nomor telepon di pesan ke pelanggan",
   "Message refused": "Pesan ditolak",
   "Same text as the last message": "Teks sama dengan pesan terakhir",
+  "In the Indonesian text: {rule}": "Di teks bahasa Indonesia: {rule}",
+  "Write the message in Indonesian too (textId)": "Tulis pesannya juga dalam bahasa Indonesia (textId)",
+  "textId must be the message in Indonesian, not the English text again": "textId harus berisi pesan dalam bahasa Indonesia, bukan teks bahasa Inggris yang sama",
+  "Amounts must be the order's price ({allowed}); not {bad}": "Jumlah uang harus harga pesanan ({allowed}); bukan {bad}",
+  "The Chief may not write \"{word}\": price changes, discounts and refunds are for people":
+    "Chief tidak boleh menulis \"{word}\": perubahan harga, diskon, dan refund diputuskan orang",
+  "This order has no price yet: name no amount": "Pesanan ini belum punya harga: jangan sebut jumlah uang",
   "The Chief has already written {n} messages on this order; a person writes from now on": "Chief sudah menulis {n} pesan di pesanan ini; selanjutnya orang yang menulis",
   "The Chief may write at most one message per order every 10 minutes": "Chief hanya boleh menulis satu pesan per pesanan tiap 10 menit",
   "Operators write as \"human\"; only the Chief writes as \"agent\"": "Operator menulis sebagai \"human\"; hanya Chief yang menulis sebagai \"agent\"",
@@ -595,6 +602,9 @@ const id: Dict = {
   "Only a sliced Bambu Studio file (.gcode.3mf) can be printed": "Hanya file hasil slice Bambu Studio (.gcode.3mf) yang bisa dicetak",
   "Filament {id}: the file asks for {want}, the spool is {have}": "Filamen {id}: file meminta {want}, spool-nya {have}",
   "The customer has not paid into escrow yet": "Pelanggan belum membayar ke escrow",
+  "The customer has not paid yet. Printing opens once the payment is in escrow.": "Pelanggan belum membayar. Baru bisa dicetak setelah pembayaran masuk escrow.",
+  "The payment has left the escrow (released or refunded): this order does not print again.":
+    "Pembayaran sudah keluar dari escrow (dilepas atau dikembalikan): pesanan ini tidak bisa dicetak lagi.",
   "One print start per printer per minute": "Satu kali mulai cetak per printer per menit",
   "The print cannot start": "Cetakan tidak bisa dimulai",
   "Not linked to {order}: {error}": "Tidak terhubung ke {order}: {error}",

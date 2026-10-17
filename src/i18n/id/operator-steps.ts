@@ -40,7 +40,7 @@ const id: Record<string, string> = {
   "The Chief is making the price. Nothing to do now.": "Chief sedang menghitung harga. Belum ada yang perlu dikerjakan.",
   "Make the price from the slice.": "Buat harganya dari hasil slice.",
   "Price sent. Waiting for the customer to agree.": "Harga sudah dikirim. Menunggu pelanggan setuju.",
-  "Waiting for the customer to pay. Do not print yet.": "Menunggu pelanggan membayar. Jangan cetak dulu.",
+  "Waiting for the customer's payment. Printing opens once it is in escrow.": "Menunggu pembayaran pelanggan. Baru bisa dicetak setelah pembayaran masuk escrow.",
   "Price made. The Chief picks the plan next; then the customer sees the price. Nothing to do now.":
     "Harga sudah dibuat. Chief memilih rencananya berikutnya; setelah itu pelanggan bisa melihat harganya. Belum ada yang perlu dikerjakan.",
   "Price made. Press Run agent in step 3 so it picks the plan; then the customer sees the price.":

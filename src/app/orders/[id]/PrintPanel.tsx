@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { Attachment, Order, PrintJob, PrintJobState, PrintOptions, Printer, ThreeMfPlate } from "@/lib/types";
-import { canStartPrint } from "@/lib/printer/control";
+import type { Attachment, EscrowState, Order, PrintJob, PrintJobState, PrintOptions, Printer, ThreeMfPlate } from "@/lib/types";
+import { canStartPrint, paymentBlock } from "@/lib/printer/control";
 import { deltaE, matchJob, MATCH_MAX_DELTA_E, nameOf, normalizeHex } from "@/lib/colors";
 import { toMaterial } from "@/lib/pricing";
 import { duration } from "@/lib/machines";
@@ -51,16 +51,17 @@ const when = (iso: string, locale: Locale) =>
 /**
  * Step 4 · Print: who prints this order (a person here, or the agent), the ready-to-print file (plates, filaments, the
  * slicer's time and grams), which printer can print it with which AMS slot for each filament, and the person's start:
- * bed empty, at the printer, warnings checked, name. The LAN bridge uploads the file and starts the print. The Chief
+ * bed empty, at the printer, warnings checked, name; a real order only once its payment is in escrow (the start area
+ * stays closed until then). The LAN bridge uploads the file and starts the print. The Chief
  * (Claude) has no way to start a print; with agent prints on, code may (AgentPrintRow). While a print of this order is
  * on its way its jobs come first; after QC the print history shows, and a reprint and the printers stay folded.
  */
-export default function PrintPanel({ order, attachments, printers, paid, issueTexts, autoPrint, slices, busy, act, onChange, onJobs }: {
+export default function PrintPanel({ order, attachments, printers, escrowState = null, issueTexts, autoPrint, slices, busy, act, onChange, onJobs }: {
   order: Order;
   attachments: Attachment[];
   printers: Printer[];
-  /** The customer paid into escrow (a real order that is not paid is a warning, not a block). */
-  paid: boolean;
+  /** The order's escrow state, or null without one: a real order prints only while it is FUNDED (as on the server). */
+  escrowState?: EscrowState | null;
   issueTexts: IssueTexts;
   /** Agent prints for this order (GET /api/orders/:id autoPrint). */
   autoPrint?: OrderAutoPrintView | null;
@@ -214,13 +215,15 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   const canDebug = canMarkPrintDoneDebug(order);
 
   const blocked = picked ? picked.verdict.reasons : [];
-  // Same rule as the server: a real order the customer has not paid for yet is a warning the person accepts. The page
-  // adds its own warnings (a weighing file, not the customer's colour, no agreed price): each only asks for the tick.
+  // Same rule as the server: a real order prints only once the customer's payment is in escrow, so the start area is
+  // closed until then (slicing in step 2 stays open). The page adds its own warnings (a weighing file, not the customer's
+  // colour, no agreed price): each only asks for the tick.
+  const unpaid = paymentBlock(order.label === "real", escrowState);
   const wanted = order.preferredColors ?? [];
   const only = plate?.filaments.length === 1 ? plate.filaments[0] : null;
   const onlyHex = only ? normalizeHex(only.color) : null;
   const warnings = [
-    ...[...(picked?.warnings ?? []), ...(order.label === "real" && !paid ? ["The customer has not paid into escrow yet"] : [])].map((w) => tLib(t, w)),
+    ...(picked?.warnings ?? []).map((w) => tLib(t, w)),
     ...(file && forPrice(file) ? [t("This file was sliced only to weigh the model, in any colour. Slice it in the customer's colour first (step 2).")] : []),
     ...(only && wanted.length && !wanted.some((c) => c.type === toMaterial(only.type) && onlyHex && deltaE(c.color, onlyHex) <= MATCH_MAX_DELTA_E)
       ? [t("Not the customer's colour: they chose {wanted}, this file prints {got}.", {
@@ -228,7 +231,7 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
       })] : []),
     ...(order.status === "CREATED" ? [t("The customer has not agreed to the price yet. Print now only if the owner says so.")] : []),
   ];
-  const ready = Boolean(picked && plate && blocked.length === 0 && bedEmpty && atPrinter && (warnings.length === 0 || checked));
+  const ready = Boolean(!unpaid && picked && plate && blocked.length === 0 && bedEmpty && atPrinter && (warnings.length === 0 || checked));
   const bed = bedTypeLabel(plate?.bedType);
   const slots = picked ? amsSlots(picked.p.snapshot) : [];
   const ext = picked?.p.snapshot?.externalSpool;
@@ -244,7 +247,8 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
     const code = FAULT_REASON.exec(reason)?.[1];
     return code && issueTexts[code] ? `${tLib(t, reason)} · ${issueTexts[code]}` : tLib(t, reason);
   };
-  const why = blocked.length > 1 ? t("Can't start yet: {reason} (+{n} more above)", { reason: firstReason(blocked[0]), n: blocked.length - 1 })
+  const why = unpaid ? tLib(t, unpaid)
+    : blocked.length > 1 ? t("Can't start yet: {reason} (+{n} more above)", { reason: firstReason(blocked[0]), n: blocked.length - 1 })
     : blocked.length === 1 ? t("Can't start yet: {reason}", { reason: firstReason(blocked[0]) })
       : !ready ? t("Tick the boxes above first.") : null;
   const fileText = (f: Attachment) => `${f.filename} · ${when(f.at, locale)}${forPrice(f) ? ` · ${t("for the price only")}` : ""}`;
@@ -286,7 +290,9 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
   // After QC: what was printed first; a reprint (a failed QC, a rejection) and the printers stay reachable, folded.
   const afterQc = AFTER_PRINT.includes(order.status);
 
-  const startArea = files.length === 0 ? (
+  // Unpaid real order: the reason first, everything below it shown but disabled.
+  const unpaidNote = unpaid && <p className="pp-warn pp-unpaid" role="status"><b>{tLib(t, unpaid)}</b></p>;
+  const startBody = files.length === 0 ? (
     <div className="pp-empty">
       {canSlice
         ? <b>{t("No ready-to-print file yet. Slice the model in step 2, or upload a .gcode.3mf from Bambu Studio in step 1.")}</b>
@@ -295,7 +301,7 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
       <StepLink id={canSlice ? "slice" : "model"}>{t("Go to step {n}", { n: canSlice ? 2 : 1 })}</StepLink>
     </div>
   ) : (
-    <>
+    <fieldset className="pp-lock" disabled={Boolean(unpaid)}>
       <div className="row fields pp-pick">
         {files.length > 1 && (
           <label style={{ flex: "2 1 220px" }}>{t("Ready-to-print file")}
@@ -398,8 +404,9 @@ export default function PrintPanel({ order, attachments, printers, paid, issueTe
           )}
         </>
       )}
-    </>
+    </fieldset>
   );
+  const startArea = <>{unpaidNote}{startBody}</>;
 
   const another = (
     <details className="fold pp-another">

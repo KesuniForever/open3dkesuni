@@ -5,6 +5,7 @@ import { addAttachment, setFileStore, type FileStore } from "../files";
 import { fake3mf } from "../threemf.test-helper";
 import { ingestReport } from "./actions";
 import { mergeReport, type PrinterSnapshot } from "./bambu";
+import type { Escrow } from "../types";
 import {
   bridgeQueue, cameraFrame, cancelPrintJob, clearCameraFrames, createPrintJob, createPrinterCommand, expireStale, saveCameraFrame,
   updateQueueItem, type PrintJobInput,
@@ -84,11 +85,34 @@ describe("starting a print (people only)", () => {
     expect(start({ amsMapping: [2, -1], warningsChecked: true }).ok).toBe(true);
   });
 
-  it("warns when a real order is not paid yet", () => {
-    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real" });
-    expect(start().ok).toBe(false);
-    const r = start({ warningsChecked: true });
-    expect(r.ok && r.warnings).toEqual(["The customer has not paid into escrow yet"]);
+  it("a real order prints only once the customer's payment is in escrow (FUNDED): a block, never a warning to tick", () => {
+    const real = { ...store.getOrder(ORDER)!, label: "real" as const };
+    store.saveOrder(real);
+    const escrow = (state: Escrow["state"]) => store.saveEscrow({
+      orderId: ORDER, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state, txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: new Date().toISOString(),
+    });
+    const unpaid = "The customer has not paid yet. Printing opens once the payment is in escrow.";
+    expect(start({ warningsChecked: true })).toMatchObject({ ok: false, status: 409, reasons: [unpaid], warnings: [] });
+    escrow("AWAITING_DEPOSIT");
+    expect(start({ warningsChecked: true })).toMatchObject({ ok: false, reasons: [unpaid] });
+    for (const state of ["RELEASED", "REFUNDED"] as const) {
+      escrow(state);
+      expect(start({ warningsChecked: true })).toMatchObject({
+        ok: false, reasons: ["The payment has left the escrow (released or refunded): this order does not print again."],
+      });
+    }
+    expect(store.listPrintJobs()).toEqual([]);
+    expect(store.listLog(ORDER).some((e) => e.tool === "start_print")).toBe(false);
+    escrow("FUNDED");
+    const r = start();
+    expect(r.ok && r.warnings).toEqual([]);
+  });
+
+  it("a test order prints without a payment, as before", () => {
+    expect(store.getOrder(ORDER)!.label).not.toBe("real");
+    expect(store.getEscrow(ORDER)).toBeUndefined();
+    expect(start()).toMatchObject({ ok: true, warnings: [] });
   });
 
   it("refuses a printer with a fatal fault, a file that is not sliced, and a file of another order", async () => {
@@ -186,6 +210,30 @@ describe("the bridge's side", () => {
     store.savePrinter({ ...store.getPrinter("a1")!, bedOccupiedBy: "a print without an order" });
     expect(updateQueueItem(id2, { state: "sent" }, now + 12 * 60_000)).toMatchObject({ ok: false, status: 409 });
     expect(store.getPrintJob(id2)!.error).toMatch(/^A print ended on this printer after the bed was confirmed/);
+  });
+
+  it("a real order's print is not sent once its payment left the escrow after it was queued", () => {
+    store.saveOrder({ ...store.getOrder(ORDER)!, label: "real" });
+    const escrow = (state: Escrow["state"]) => store.saveEscrow({
+      orderId: ORDER, amountMicro: 30_000_000, escrowWalletId: "w1", escrowAddress: "0xe", customerWalletId: "w2", customerAddress: "0xc",
+      state, txs: [], network: "ARC-TESTNET", label: "testnet", createdAt: new Date().toISOString(),
+    });
+    escrow("FUNDED");
+    const now = Date.now();
+    const r = start({}, now);
+    const id = r.ok ? r.job.id : "";
+    updateQueueItem(id, { state: "uploading" }, now + 1000);
+    escrow("RELEASED");
+    const paidOut = "The payment has left the escrow (released or refunded): this order does not print again.";
+    expect(updateQueueItem(id, { state: "sent" }, now + 2000)).toMatchObject({ ok: false, status: 409, error: paidOut });
+    expect(store.getPrintJob(id)).toMatchObject({ state: "failed", error: paidOut });
+    // Still FUNDED when the bridge sends it: it goes.
+    escrow("FUNDED");
+    store.savePrinter({ ...store.getPrinter("a1")!, lastSeen: new Date(now + 70_000).toISOString() });
+    const r2 = start({}, now + 70_000);
+    const id2 = r2.ok ? r2.job.id : "";
+    updateQueueItem(id2, { state: "uploading" }, now + 71_000);
+    expect(updateQueueItem(id2, { state: "sent" }, now + 72_000).ok).toBe(true);
   });
 
   it("a job stuck uploading (30 min) or sent but never started (15 min) fails, so it never blocks the printer", () => {

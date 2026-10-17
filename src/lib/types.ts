@@ -509,7 +509,10 @@ export interface SliceJob {
 export interface CustomerMessage {
   id: string;
   orderId: string;
+  /** In English: the page shows it unless the customer reads in Indonesian and textId is set. */
   text: string;
+  /** The same message in Indonesian. The Chief always writes it; a person may (older messages have none). */
+  textId?: string;
   by: "agent" | "human";
   at: string;
   /** The order's status and escrow state when the Chief wrote it ("PLAN_CHOSEN/FUNDED"): a new one lets it write sooner. */

@@ -1,7 +1,7 @@
-// The customer portal's tabs besides the order form (/request/<code>?tab=…): the studio's printers and the price
-// calculator, each read-only and shaped on the server by src/lib/portal.ts. No hooks, so the server renders them and
-// the tests render them the same way. "My orders" lives in the browser (MyOrders.tsx). The token research (TokenTab) is
-// not a portal tab: the Live studio page shows it.
+// The customer portal's tabs besides the order form (/request/<code>?tab=…): the studio's printers, the price
+// calculator and the token research, each read-only and shaped on the server by src/lib/portal.ts. No hooks, so the
+// server renders them and the tests render them the same way. "My orders" lives in the browser (MyOrders.tsx). The Live
+// studio page (/live) shows the same TokenTab.
 import Form from "next/form";
 import Link from "next/link";
 import Icon from "@/app/components/Icon";
@@ -16,14 +16,15 @@ import { dateLocale, type Locale, type T } from "@/i18n/core";
 import "../../machines/machines.css";
 import "./portal.css";
 
-/** The menu under the header: one row on a phone. The order form first: /customer without ?tab opens it. */
+/** The menu under the header (two rows on a phone). The order form first: /customer without ?tab opens it. */
 export const PORTAL_TABS: Tab[] = [
   { id: "order", label: "New order" },
   { id: "orders", label: "My orders" },
   { id: "machines", label: "Machines" },
   { id: "price", label: "Price calculator" },
+  { id: "token", label: "Token research" },
 ];
-export type PortalTab = "order" | "orders" | "machines" | "price";
+export type PortalTab = "order" | "orders" | "machines" | "price" | "token";
 /** ?tab= as given; anything else (missing, unknown, repeated) opens the order form. */
 export const portalTab = (wanted: string | string[] | undefined): PortalTab => pickTab(PORTAL_TABS, wanted) as PortalTab;
 

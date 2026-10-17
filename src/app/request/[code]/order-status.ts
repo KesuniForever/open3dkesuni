@@ -42,7 +42,7 @@ export function orderStatus(
   if (s === "CREATED") return v.design?.state === "weighing" ? status("weighing", "Weighing your design", "") : status("preparing", "Preparing your price", "");
   if (v.paying && !funded) return status("paying", "Processing payment", "testnet");
   if (!funded && s === "PLAN_CHOSEN") return status("price", "Price ready", "warn", true);
-  // Production may start before the payment (a person can print an unpaid order): the stage follows the order, and the
+  // A test order may print before the payment (a real one prints only once paid): the stage follows the order, and the
   // payment stays the customer's turn. Accepting waits for it, so an unpaid finished item reads "Payment still open".
   const pay = !funded;
   if (s === "EVIDENCE_SUBMITTED") return pay ? status("unpaid", "Payment still open", "warn", true) : status("check", "Your turn: check the item", "warn", true);

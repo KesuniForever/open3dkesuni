@@ -7,6 +7,11 @@
 .pp-pick { margin-bottom: 8px; }
 .pp-pick > label, .pp-pick select { min-width: 0; }
 .pp-file { margin: 0 0 10px; font-size: 13.5px; overflow-wrap: anywhere; }
+/* A real order the customer has not paid: the reason, then the start area shown but closed. Only the controls dim: the
+   file link, the plate, printer faults and their guides stay readable. */
+.pp-unpaid { margin: 0 0 12px; }
+.pp-lock { border: 0; padding: 0; margin: 0; min-width: 0; }
+.pp-lock:disabled :is(select, .pp-printers, .pp-map, .pp-options, .pp-must, .pp-go) { opacity: 0.55; }
 
 /* customer's colours */
 .pp-wish { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 14px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }

@@ -126,6 +126,20 @@ export interface StartCheck {
 
 export interface StartVerdict { ok: boolean; reasons: string[]; warnings: string[] }
 
+export const UNPAID_TEXT = "The customer has not paid yet. Printing opens once the payment is in escrow.";
+export const PAID_OUT_TEXT = "The payment has left the escrow (released or refunded): this order does not print again.";
+
+/**
+ * Why this order may not print for its payment, or null. A real order prints only while its escrow holds the
+ * customer's payment (FUNDED), whoever starts it: a person (jobs.ts createPrintJob) or the agent (autoprint.ts
+ * orderGate), and again when the bridge sends either to the printer (jobs.ts updateQueueItem). Any other order
+ * (simulated, a test) prints without one. Slicing never waits for the payment.
+ */
+export function paymentBlock(real: boolean, escrowState: string | null | undefined): string | null {
+  if (!real || escrowState === "FUNDED") return null;
+  return escrowState === "RELEASED" || escrowState === "REFUNDED" ? PAID_OUT_TEXT : UNPAID_TEXT;
+}
+
 /** "slot 3" for global tray 2 of AMS 0 (the printer counts slots from 1). */
 export const slotLabel = (tray: number): string => (tray >> 2 === 0 ? `slot ${(tray & 3) + 1}` : `AMS ${(tray >> 2) + 1} slot ${(tray & 3) + 1}`);
 

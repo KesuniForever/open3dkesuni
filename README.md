@@ -11,7 +11,7 @@ Built for the Tameion Agents Hackathon (October 2026).
   - `/`: what it is, with live counts.
   - `/live`: read-only, no login. The printers, the agent at work (with its limits and last nightly report), money on
     Arc, and the token research.
-  - `/customer`: the customer portal, where a real customer places an order.
+  - `/customer`: the customer portal, where a real customer places an order (the token research is there too).
 - **Demo video:** linked from the landing page once it is set (`DEMO_VIDEO_URL`).
 
 ## What is real and what is simulated
@@ -52,11 +52,11 @@ Claude proposes; code checks every step and has the last word:
 | `price_by_weight` | Kesuni's price from the slicer grams | Only grams a person or the studio's slicer entered; PLA and PETG only; rupiah per gram and rounding from config; never under the owner's margin; only before a plan is chosen |
 | `estimate_cost` | A check with the long cost calculator | Saves nothing |
 | `check_vendor_policy`, `choose_plan` | Picks the production quote | Policy engine: the customer's budget mandate, the owner's rules (minimum order, approval limit, partner minimum, margin) and the deadline. Only the owner can lift an owner rule |
-| `choose_printer` | Links a ready printer | Only after the escrow is funded; printer online, idle, bed empty |
+| `choose_printer` | Links a ready printer | Only after the escrow is funded; printer online, idle, bed empty. A person cannot start a print of an unpaid real order either |
 | `request_dispatch` | Asks the print dispatcher to look now | The dispatcher is code: it prints only with the switch on and a person's "Bed is empty", one print per confirmation |
 | `create_operator_task` | Asks a person for physical work | Three task kinds (filament, printer check, collect and QC); no reprint decisions |
 | `request_human_decision` | Hands a question to the owner or operator | Opens a task for a person |
-| `message_customer` | A short update on the customer's page | At most 500 characters; no links, wallet addresses, phone numbers, emails or repeats; rate-limited |
+| `message_customer` | A short update on the customer's page, in English and Indonesian (the page shows the customer's language) | Both texts checked: at most 500 characters each; no links, wallet addresses, phone numbers, emails or repeats; no amount but the order's price, no free, discount or refund words in either language; rate-limited |
 
 **No money tool.** Claude gets 13 tools and none of them moves money; a test fails if one looks like it could. Release
 and refund run in code after the customer accepts or rejects on their own page, through the policy engine (accepted,

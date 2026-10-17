@@ -100,7 +100,7 @@ export default async function ChiefPage() {
   const now = new Date();
   const a = chiefAuthority(now);
   const today = a.today;
-  const feed = chiefFeed(allLog(), listOrders(), 10, t);
+  const feed = chiefFeed(allLog(), listOrders(), 10, t, locale);
   const payment = a.limitedByCode.find((l) => l.id === "no_payment_tool");
   const limits = a.limitedByCode.filter((l) => l.id !== "no_payment_tool");
   const agentPrints = autoPrintSetting();

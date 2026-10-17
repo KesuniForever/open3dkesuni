@@ -160,7 +160,7 @@ function MoneyTab({ view, t }: { view: TagFilter; t: T }) {
 function AuditTab({ filter, all, now, t, locale }: { filter: TagFilter; all: boolean; now: Date; t: T; locale: Locale }) {
   const events = auditEvents({
     orders: store.listOrders(), log: allLog(), decisions: store.listAllDecisions(), tasks: store.listAllTasks(), escrows: store.listEscrows(),
-  }, t);
+  }, t, locale);
   const count = (f: TagFilter) => events.filter((e) => matchesFilter(e.order.tag, f)).length;
   const shown = events.filter((e) => matchesFilter(e.order.tag, filter));
   const base = "/operations?tab=audit";

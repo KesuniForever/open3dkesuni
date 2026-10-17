@@ -11,6 +11,7 @@ import { agreementHash } from "./agreement";
 import { skillOf, type Skill } from "./agent/skills";
 import { nameOf } from "./colors";
 import { whyLine as whyInPage } from "./printer/why-text";
+import { messageText } from "./text";
 import type { AgentLogEntry, ChainTx, Decision, Escrow, OperatorTask, Order, Quote } from "./types";
 import { dateLocale, makeT, type Locale, type T } from "../i18n/core";
 
@@ -22,6 +23,11 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object"
 const str = (v: unknown): string => (typeof v === "string" ? v : v === undefined || v === null ? "" : String(v));
 /** Display texts go through `t`, the visitor's translator that the page passes in. Without one they stay English. */
 const EN: T = makeT("en", {});
+/** A row's text: a message to the customer as the customer reads it in this language (src/lib/text.ts messageText). */
+const rowText = (e: AgentLogEntry, locale: Locale): string => {
+  const i = obj(e.input);
+  return e.tool === "message_customer" ? messageText({ text: str(i.text), textId: str(i.textId) }, locale) : str(i.text);
+};
 
 /** Markdown-free text: no bold, code ticks or heading marks. Line breaks are kept. */
 export function plain(text: string): string {
@@ -107,8 +113,9 @@ function detail(raw: string, max?: number): { line: string; text?: string } {
 }
 
 /** A short title and an optional one-line detail for one decision-log row. Stored text (reasons, notes, questions,
- *  summaries) stays as written; only the fixed words around it go through `t`. */
-export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
+ *  summaries) stays as written; only the fixed words around it go through `t`. A message to the customer shows in the
+ *  page's language (locale) when it was written in it. */
+export function describeEntry(e: AgentLogEntry, t: T = EN, locale: Locale = "en"): Described {
   const i = obj(e.input);
   const o = obj(e.output);
   const reasons = Array.isArray(o.reasons) ? (o.reasons as unknown[]).map(str).join("; ") : str(o.error);
@@ -150,7 +157,7 @@ export function describeEntry(e: AgentLogEntry, t: T = EN): Described {
       return { title: t("Suggested a reroute"), line: `${t("{printer} failed", { printer: str(i.failed) })}${o.suggestion ? `; ${t("try {printer}", { printer: str(o.suggestion) })}` : ""}` };
     case "create_operator_task": return { title: t("Task for the operator"), ...detail(str(i.text)) };
     case "request_human_decision": return { title: t("Asked a person"), ...detail(str(i.question) || str(o.question)) };
-    case "message_customer": return { title: t("Messaged the customer"), ...detail(str(i.text)) };
+    case "message_customer": return { title: t("Messaged the customer"), ...detail(rowText(e, locale)) };
     case "heartbeat": {
       const f = Array.isArray(o.findings) ? (o.findings as unknown[]).map((x) => str(obj(x).text)) : [];
       return { title: t(f.length === 1 ? "Heartbeat noticed {n} problem" : "Heartbeat noticed {n} problems", { n: f.length }), line: f[0] ? oneLine(f[0]) : undefined };
@@ -300,7 +307,7 @@ const BOOKKEEPING = new Set(["agent_start", "agent_thought", "agent_summary"]);
 
 type Group = { item: FeedItem; rows: AgentLogEntry[]; last: number; closed: boolean };
 
-function finish(g: Group, t: T): FeedItem {
+function finish(g: Group, t: T, locale: Locale): FeedItem {
   const it = g.item;
   let down = false;
   const steps = new Map<string, Step>();
@@ -349,10 +356,10 @@ function finish(g: Group, t: T): FeedItem {
       it.line = bad ? t("{n} not confirmed on Arc", { n: bad }) : t("All match on Arc");
     } else {
       const main = g.rows.find((e) => !e.ok) ?? g.rows[g.rows.length - 1];
-      const d = describeEntry(main, t);
+      const d = describeEntry(main, t, locale);
       it.title = d.title;
-      it.line = d.line ?? (g.rows.length > 1 ? g.rows.map((e) => describeEntry(e, t).title).join(" · ") : "");
-      const long = g.rows.map((e) => str(obj(e.input).text) || str(obj(e.output).text)).filter(Boolean);
+      it.line = d.line ?? (g.rows.length > 1 ? g.rows.map((e) => describeEntry(e, t, locale).title).join(" · ") : "");
+      const long = g.rows.map((e) => rowText(e, locale) || str(obj(e.output).text)).filter(Boolean);
       const full = plain(long.join("\n\n"));
       if (full && full !== it.line) it.text = full;
     }
@@ -367,13 +374,13 @@ function finish(g: Group, t: T): FeedItem {
  * grouped), rule-planner runs, heartbeat findings and code actions (tasks, printer picks, Arc checks, settlements).
  * People's own rows (actor "human") are left out: they are not the Chief's decisions.
  */
-export function chiefFeed(log: AgentLogEntry[], orders: Order[], limit = 15, t: T = EN): FeedItem[] {
+export function chiefFeed(log: AgentLogEntry[], orders: Order[], limit = 15, t: T = EN, locale: Locale = "en"): FeedItem[] {
   const ref = orderTagger(orders);
   const groups: Group[] = [];
   const openRun = new Map<string, Group>();
   let prev: Group | undefined;
   const start = (kind: FeedItem["kind"], e: AgentLogEntry, mode?: FeedItem["mode"]): Group => {
-    const d = describeEntry(e, t);
+    const d = describeEntry(e, t, locale);
     const g: Group = {
       item: {
         id: `log-${e.id}`, kind, mode, order: ref(e.orderId), at: e.at, title: d.title, line: d.line ?? "",
@@ -420,7 +427,7 @@ export function chiefFeed(log: AgentLogEntry[], orders: Order[], limit = 15, t: 
     }
     prev = start("action", e);
   }
-  const items = groups.sort((a, b) => b.item.at.localeCompare(a.item.at) || b.rows[0].id - a.rows[0].id).map((g) => finish(g, t));
+  const items = groups.sort((a, b) => b.item.at.localeCompare(a.item.at) || b.rows[0].id - a.rows[0].id).map((g) => finish(g, t, locale));
   return collapseRepeats(items).slice(0, limit);
 }
 
@@ -450,12 +457,12 @@ const FINAL: ChainTx["state"][] = ["COMPLETE", ...FAILED];
 
 export function auditEvents(rows: {
   orders: Order[]; log: AgentLogEntry[]; decisions: Decision[]; tasks: OperatorTask[]; escrows: Escrow[];
-}, t: T = EN): AuditEvent[] {
+}, t: T = EN, locale: Locale = "en"): AuditEvent[] {
   const ref = orderTagger(rows.orders);
   const out: AuditEvent[] = [];
   // A rule-planner run that ends in a plan decision is shown once, as the decision.
   const decided = (f: FeedItem) => rows.decisions.some((d) => d.orderId === f.order.id && Math.abs(Date.parse(d.at) - Date.parse(f.at)) <= 2_000);
-  for (const f of chiefFeed(rows.log, rows.orders, Number.MAX_SAFE_INTEGER, t)) {
+  for (const f of chiefFeed(rows.log, rows.orders, Number.MAX_SAFE_INTEGER, t, locale)) {
     if (f.kind === "run" && f.mode === "rules" && decided(f)) continue;
     const full = f.text ?? f.questions.join("\n\n");
     out.push({
@@ -467,7 +474,7 @@ export function auditEvents(rows: {
   }
   for (const e of rows.log) {
     if (e.actor !== "human") continue;
-    const d = describeEntry(e, t);
+    const d = describeEntry(e, t, locale);
     out.push({ id: `log-${e.id}`, seq: e.id, at: e.at, kind: "person", order: ref(e.orderId), title: d.title, line: d.line, text: d.text, ok: e.ok, repeats: 1 });
   }
   rows.decisions.forEach((d, i) => {

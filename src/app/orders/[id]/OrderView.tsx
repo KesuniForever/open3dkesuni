@@ -22,11 +22,11 @@ import type { PublicNetwork } from "@/lib/network";
 import SkillChip from "@/app/components/SkillChip";
 import Info from "@/app/components/Info";
 import MoreText from "@/app/components/MoreText";
-import { oneLine } from "@/lib/text";
+import { messageText, oneLine } from "@/lib/text";
 import { duration } from "@/lib/machines";
 import { skillOf } from "@/lib/agent/skills";
 import { useLocale, useT } from "@/i18n/client";
-import { dateLocale, type T } from "@/i18n/core";
+import { dateLocale, type Locale, type T } from "@/i18n/core";
 import { rich, units } from "./rich";
 import { tLib } from "@/lib/lib-text";
 import { taskText, type IssueTexts } from "@/app/machines/printer-details";
@@ -339,7 +339,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
           <StepCard id="print" state={states.print} summary={printSummary}
             explain={t("Start the print at the printer. Pause or stop it on My machines.")}>
             {collectStep === "print" && collectRows}
-            <PrintPanel order={order} attachments={data.attachments} printers={data.printers} paid={escrow?.state === "FUNDED"} issueTexts={issueTexts} autoPrint={data.autoPrint}
+            <PrintPanel order={order} attachments={data.attachments} printers={data.printers} escrowState={escrow?.state ?? null} issueTexts={issueTexts} autoPrint={data.autoPrint}
               slices={slices} busy={busy} act={act} onChange={load} onJobs={setPrintJobs} />
           </StepCard>
 
@@ -561,6 +561,7 @@ const outText = (e: AgentLogEntry) => String((e.output as { text?: string } | un
 /** One line per step; long texts (Claude's summary, all heartbeat findings) open in a fold, without markdown marks. */
 function DecisionLog({ log }: { log: AgentLogEntry[] }) {
   const t = useT();
+  const locale = useLocale();
   // The Chief's last thought is usually its summary word for word: show that text once.
   const summaries = new Set(log.filter((e) => e.tool === "agent_summary").map(outText));
   const rows = log.filter((e) => !(e.tool === "agent_thought" && summaries.has(outText(e))));
@@ -569,7 +570,7 @@ function DecisionLog({ log }: { log: AgentLogEntry[] }) {
       <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>{t("Decision log")}</h3>
       <ol className="log">
         {rows.map((e) => {
-          const text = summarize(e, t);
+          const text = summarize(e, t, locale);
           return (
             <li key={e.id}>
               <SkillChip skill={skillOf(e.tool, e.input)} />{" "}
@@ -585,8 +586,9 @@ function DecisionLog({ log }: { log: AgentLogEntry[] }) {
   );
 }
 
-/** The step in plain words. Paragraphs (blank lines) after the first one only show in the fold. */
-function summarize(e: AgentLogEntry, t: T): string {
+/** The step in plain words. Paragraphs (blank lines) after the first one only show in the fold. A message to the
+ *  customer is quoted in the page's language, as the customer reads it. */
+function summarize(e: AgentLogEntry, t: T, locale: Locale): string {
   const out = e.output as Record<string, unknown> | undefined;
   if (!e.ok && out) {
     const reasons = (out.reasons as string[] | undefined) ?? [];
@@ -638,7 +640,10 @@ function summarize(e: AgentLogEntry, t: T): string {
   if (e.tool === "print_job") return t("sent to {printer}", { printer: String(out?.printer ?? "") });
   if (e.tool === "print_done_debug") return `${t("print marked done for testing (no real print)")} · ${t("by {name}", { name: String(input.by ?? "") })}`;
   if (e.tool === "remove_file") return t("{name} removed {file}", { name: String(input.by ?? ""), file: String(input.filename ?? "") });
-  if (e.tool === "message_customer") return t("wrote to the customer: “{text}”", { text: String(input.text ?? "") });
+  if (e.tool === "message_customer") {
+    const said = { text: String(input.text ?? ""), textId: typeof input.textId === "string" ? input.textId : undefined };
+    return t("wrote to the customer: “{text}”", { text: messageText(said, locale) });
+  }
   if (e.tool === "customer_decision") return (input.accepted ? t("customer accepted") : t("customer rejected"));
   if (e.tool === "release_escrow" || e.tool === "refund_escrow") return t("sent on the agent's own, after the policy check");
   return "";

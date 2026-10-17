@@ -12,6 +12,7 @@ import DesignPicker, { DesignInfo } from "../DesignPicker";
 import { WhatsAppButton, waShareLink } from "../whatsapp";
 import Info from "@/app/components/Info";
 import { tLib } from "@/lib/lib-text";
+import { messageText } from "@/lib/text";
 import { finishingText } from "@/lib/spec-choices";
 import { duration } from "@/lib/machines";
 import { rememberIfNew } from "../my-orders";
@@ -46,7 +47,7 @@ const orderUrl = (token: string) => `${window.location.origin}/c/${token}`;
 
 type Status = Pick<View, "order" | "escrow" | "paying" | "printing" | "printedOn">;
 const funded = (v: Pick<View, "escrow">) => Boolean(v.escrow && v.escrow.state !== "AWAITING_DEPOSIT");
-/** Production may start before the payment (a person can print an unpaid order): the payment stays open past "Price". */
+/** A test order may print before it is paid (a real one never does): the payment stays open past "Price". */
 const paymentOpen = (v: Status) => !funded(v) && v.order.status !== "CREATED" && !CLOSED.includes(v.order.status);
 /** Every transfer of the payment failed and none is under way (the server tells the team): tap the button again. */
 const paymentFailed = (v: Status) =>
@@ -360,22 +361,7 @@ export default function CustomerView({ token, whatsapp = null }: { token: string
         ))}
       </ol>
 
-      {v.messages.length > 0 && (
-        <section className="card">
-          <h2>{t("Messages from Kesuni")}</h2>
-          <ul className="cust-list">
-            {[...v.messages].reverse().map((m) => (
-              <li key={m.at + m.text}>
-                <span className="tick">{m.by === "agent" ? "AI" : "K"}</span>
-                <div>
-                  <div style={{ whiteSpace: "pre-line" }}>{m.text}</div>
-                  <div className="muted" style={{ fontSize: 13 }}>{m.by === "agent" ? t("written by the Chief (AI)") : t("from the Kesuni team")} · {when(m.at)}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <MessagesCard messages={v.messages} t={t} locale={locale} />
 
       {v.updates.length > 0 && (
         <section className="card">
@@ -473,6 +459,29 @@ export default function CustomerView({ token, whatsapp = null }: { token: string
           : t("Your address and phone number are not stored on this page. Your money only moves when you accept or reject.")}</p>
       </footer>
     </main>
+  );
+}
+
+/** "Messages from Kesuni", newest first, each in the page's language (the EN | ID switch; messageText): an English one
+ *  on an Indonesian page says so with lang, for screen readers. Nothing when there are none. */
+export function MessagesCard({ messages, t, locale }: { messages: View["messages"]; t: T; locale: Locale }) {
+  if (messages.length === 0) return null;
+  const when = whenIn(locale);
+  return (
+    <section className="card">
+      <h2>{t("Messages from Kesuni")}</h2>
+      <ul className="cust-list">
+        {[...messages].reverse().map((m) => (
+          <li key={m.at + m.text}>
+            <span className="tick">{m.by === "agent" ? "AI" : "K"}</span>
+            <div>
+              <div lang={locale === "id" && m.textId ? "id" : "en"} style={{ whiteSpace: "pre-line" }}>{messageText(m, locale)}</div>
+              <div className="muted" style={{ fontSize: 13 }}>{m.by === "agent" ? t("written by the Chief (AI)") : t("from the Kesuni team")} · {when(m.at)}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
