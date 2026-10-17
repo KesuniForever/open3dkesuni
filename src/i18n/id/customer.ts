@@ -157,8 +157,9 @@ const id: Record<string, string> = {
 
   // ---------- the order page, plain words (17 Oct bug hunt) ----------
   // a way out and a way to reach Kesuni
-  "We can't find this order. The link may be cut off, or the order was cancelled.":
-    "Pesanan ini tidak ditemukan. Mungkin link-nya terpotong atau pesanan sudah dibatalkan.",
+  "We can't find this order. The link may be cut off or replaced by a new one, or the order was cancelled.":
+    "Pesanan ini tidak ditemukan. Mungkin link-nya terpotong atau sudah diganti link baru, atau pesanan sudah dibatalkan.",
+  "My order link does not work.": "Link pesanan saya tidak bisa dibuka.",
   "Chat Kesuni on WhatsApp": "Chat Kesuni di WhatsApp",
   "Order {id}": "Pesanan {id}",
   "Order sent! Save this link so you can open your order later.": "Pesanan terkirim! Simpan link ini supaya pesanan bisa dibuka lagi.",

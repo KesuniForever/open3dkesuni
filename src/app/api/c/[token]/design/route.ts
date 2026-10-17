@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import * as store from "@/lib/store";
 import { orderForToken } from "@/lib/customer";
 import { readAttachment } from "@/lib/files";
 import { clientIp, fail } from "@/lib/http";
@@ -73,12 +72,12 @@ export async function POST(req: Request, ctx: Ctx) {
   if (mediaType(req) !== "multipart/form-data") return fail(400, UNREADABLE);
   if (!take(designTries, ip, now, DESIGNS_PER_IP_PER_HOUR)) return fail(429, TOO_MANY_DESIGNS);
   // The slot is held until the file is stored (it is measured then): the design stays in memory until that point.
-  const res = await readingDesign(() => receive(req, order.id));
+  const res = await readingDesign(() => receive(req, token, order.id));
   return res === "busy" ? fail(503, BUSY_READING) : res;
 }
 
-/** Read, check and store the design of this order, then wake the Chief. */
-async function receive(req: Request, orderId: string): Promise<Response> {
+/** Read, check and store the design of this order (found by this link), then wake the Chief. */
+async function receive(req: Request, token: string, orderId: string): Promise<Response> {
   const form = await readFormCapped(req, MAX_CUSTOMER_DESIGN_BYTES + FORM_SLACK);
   if (form === "too-large") return fail(413, DESIGN_TOO_BIG);
   const file = form?.get("design");
@@ -86,9 +85,11 @@ async function receive(req: Request, orderId: string): Promise<Response> {
   const design = { filename: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
   const problem = customerDesignContentProblem(design.filename, design.bytes);
   if (problem) return fail(400, "Your design cannot be used", [problem]);
-  // Again right before it is stored: Kesuni may have priced the order while the file arrived. No await from here to the lock.
-  const current = store.getOrder(orderId);
-  const stillClosed = current ? customerDesignClosed(current) : "Order not found";
+  // Again right before it is stored, by the link: Kesuni may have priced the order, or made a new customer link
+  // (replaceCustomerToken), while the file arrived. No await from here to the lock.
+  const current = orderForToken(token);
+  if (current?.id !== orderId) return fail(404, "Order not found");
+  const stillClosed = customerDesignClosed(current);
   if (stillClosed) return fail(409, stillClosed);
   if (adding.has(orderId)) return fail(409, "Your design is still being received. Wait a moment, then reload the page.");
   adding.add(orderId);

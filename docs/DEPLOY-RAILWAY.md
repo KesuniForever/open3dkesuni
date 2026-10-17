@@ -206,5 +206,10 @@ feature) or the allowlist must be off.
   equal to `BODY_LIMIT_MB` in `src/lib/deploy.ts`). Design files up to 50 MB upload fine. The import script sends
   the database and each file up to 58 MB packed; a database above that stops the script before anything is sent.
 - Customer links change domain: `/c/<token>` keeps the same token on the new address, so resend the links.
+- **New link** on the order page (`replaceCustomerToken`, `POST /api/orders/:id/customer-link`) changes the token in
+  Railway's database only. The frozen studio-PC database keeps the tokens of the import, so on that copy a replaced
+  link (the two in the demo video among them) still opens its order, with Accept and Reject on the same real escrow
+  wallets (the PC has the same Circle keys). Keep the studio PC site off. If it is ever served again (a bridge test, a
+  fallback while Railway is down), press New link there too for those orders before the tunnel starts.
 - Expected start-up warnings in the log: `ExperimentalWarning: SQLite is an experimental feature` and
   `MODULE_TYPELESS_PACKAGE_JSON` (Node loading `src/lib/deploy.ts` for the start guard).

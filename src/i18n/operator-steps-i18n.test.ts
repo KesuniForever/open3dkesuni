@@ -19,7 +19,7 @@ const SAME = ["Status", "offline", "timelapse", "Plate", "Plate {n}", "Nozzle", 
 
 describe("the order page's steps in Indonesian", () => {
   it("every t(\"…\") on the banner, the step cards and the panels, every Now line and every status word", () => {
-    const files = ["Steps.tsx", "OrderView.tsx", "PrintPanel.tsx", "WeightPricePanel.tsx", "PrinterPanel.tsx", "AgentPrintRow.tsx", "SlicePanel.tsx", "FilesPanel.tsx"];
+    const files = ["Steps.tsx", "OrderView.tsx", "PrintPanel.tsx", "WeightPricePanel.tsx", "PrinterPanel.tsx", "AgentPrintRow.tsx", "SlicePanel.tsx", "FilesPanel.tsx", "CustomerLinkPanel.tsx"];
     const keys = [...files.flatMap(literals), ...NOW_TEXTS, ...Object.values(STATUS_WORDS), ...Object.values(STEP_TITLE)];
     expect(keys.length).toBeGreaterThan(250);
     expect([...new Set(keys)].filter((k) => !(k in ID) && !SAME.includes(k))).toEqual([]);

@@ -163,6 +163,28 @@ function SavedLink({ token }: { token: string }) {
   );
 }
 
+/**
+ * The link finds no order (GET /api/c/<token> is 404): cut off, replaced by a new link from Kesuni (the old one stops
+ * working at once), or the order is gone. The WhatsApp chat starts with a fixed line, never this dead link: a replaced
+ * link (one seen in a video) must not look like proof of who is asking. Kesuni knows the customer by their number.
+ */
+export function OrderNotFound({ whatsapp }: { whatsapp?: string | null }) {
+  const t = useT();
+  const locale = useLocale();
+  return (
+    <main className="cust" lang={locale}>
+      <CustTop home={PORTAL} />
+      <section className="cust-hero">
+        <p style={{ marginTop: 0 }}>{t("We can't find this order. The link may be cut off or replaced by a new one, or the order was cancelled.")}</p>
+        <div className="cust-actions">
+          <a className="btn-link" href={`${PORTAL}?tab=orders`}>{t("My orders")}</a>
+          <WhatsAppButton number={whatsapp} text={t("My order link does not work.")} label={t("Chat Kesuni on WhatsApp")} />
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export default function CustomerView({ token, whatsapp = null }: { token: string; whatsapp?: string | null }) {
   const t = useT();
   const locale = useLocale();
@@ -221,18 +243,7 @@ export default function CustomerView({ token, whatsapp = null }: { token: string
     }
   }
 
-  if (missing) return (
-    <main className="cust" lang={locale}>
-      <CustTop home={PORTAL} />
-      <section className="cust-hero">
-        <p style={{ marginTop: 0 }}>{t("We can't find this order. The link may be cut off, or the order was cancelled.")}</p>
-        <div className="cust-actions">
-          <a className="btn-link" href={`${PORTAL}?tab=orders`}>{t("My orders")}</a>
-          <WhatsAppButton number={whatsapp} text={window.location.href} label={t("Chat Kesuni on WhatsApp")} />
-        </div>
-      </section>
-    </main>
-  );
+  if (missing) return <OrderNotFound whatsapp={whatsapp} />;
   if (!v) return <main className="cust" lang={locale}><p className="muted">{t("Loading your order…")}</p></main>;
 
   const h = headline(v, t);

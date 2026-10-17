@@ -219,6 +219,8 @@ export function describeEntry(e: AgentLogEntry, t: T = EN, locale: Locale = "en"
     // The order page's real / simulated switch (src/lib/order-label.ts): a person, never the Chief.
     case "order_label":
       return { title: t("Marked {label} by {name}", { label: t(str(i.label)), name: str(i.by) }), line: `${t(str(o.from))} → ${t(str(o.to))}` };
+    // "New link" on the order page (replaceCustomerToken in src/lib/actions.ts): a person, never the Chief. No token.
+    case "new_customer_link": return { title: t("New customer link made by {name}", { name: str(i.by) }), line: t("The old link stopped working") };
     case "request_dispatch": return { title: t("Asked the dispatcher to look"), line: oneLine(str(o.thisOrder)) || undefined };
     case "agent_start": return { title: triggerTitle(str(i.trigger), t), ...detail(str(i.trigger)) };
     case "agent_thought": case "agent_summary": return { title: t("Chief summary"), ...detail(str(o.text)) };

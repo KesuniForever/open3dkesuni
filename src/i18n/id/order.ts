@@ -79,6 +79,17 @@ const id: Record<string, string> = {
   "Copied": "Tersalin",
   "Copy customer link": "Salin tautan pelanggan",
   "Open as customer": "Buka sebagai pelanggan",
+  // a new customer link (replaceCustomerToken in src/lib/actions.ts)
+  "New link": "Tautan baru",
+  "The old link stops working.": "Tautan lama langsung tidak berlaku.",
+  "Use this if the link was shown to others, like in a video or a screenshot. The order, payment and files stay the same. Only the new link opens the order. Send the new link only to the customer's own WhatsApp number, never to someone who asks with the old link.":
+    "Pakai ini kalau tautan sempat terlihat orang lain, misalnya di video atau tangkapan layar. Pesanan, pembayaran, dan file tetap sama. Pesanan hanya bisa dibuka dengan tautan baru. Kirim tautan baru hanya ke nomor WhatsApp pelanggan sendiri, jangan ke orang yang memintanya dengan tautan lama.",
+  "Make new link": "Buat tautan baru",
+  "Making…": "Membuat…",
+  "New link made. Send it only to the customer's own WhatsApp.": "Tautan baru dibuat. Kirim hanya ke WhatsApp pelanggan sendiri.",
+  "new customer link: the old one stopped working": "tautan pelanggan baru: tautan lama tidak berlaku lagi",
+  "New customer link made by {name}": "Tautan pelanggan baru dibuat oleh {name}",
+  "The old link stopped working": "Tautan lama tidak berlaku lagi",
 
   // escrow
   "Customer payment (escrow on {network} via Circle)": "Pembayaran pelanggan (escrow di {network} via Circle)",

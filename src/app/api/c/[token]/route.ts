@@ -15,7 +15,10 @@ export async function GET(_req: Request, ctx: Ctx) {
   const order = orderForToken(token);
   if (!order) return fail(404, "Order not found");
   await refreshPayment(order.id).catch(() => undefined); // Circle hiccup: show the last known state
-  return NextResponse.json(customerView(orderForToken(token)!, token));
+  // Again after the wait: a new customer link made meanwhile (replaceCustomerToken) stops this one too.
+  const current = orderForToken(token);
+  if (!current) return fail(404, "Order not found");
+  return NextResponse.json(customerView(current, token));
 }
 
 // POST { action: "agree", by } | { action: "pay", agree?: true, by? } | { action: "accept", by, note, checked: true }
@@ -35,6 +38,8 @@ export async function POST(req: Request, ctx: Ctx) {
   // At most 64 KB: this route is outside the proxy, so nothing else limits the body (src/lib/request-body.ts).
   const b = await readJsonCapped(req, 64 * 1024);
   if (b === "too-large") return fail(413, "The request is too long");
+  // Again after the body arrived: a new customer link made while it did stops this one too (replaceCustomerToken).
+  if (orderForToken(token)?.id !== order.id) return fail(404, "Order not found");
   const action = str(b?.action);
   if (action === "agree" || (action === "pay" && b?.agree === true)) {
     const a = customerAgree(order.id, str(b?.by));

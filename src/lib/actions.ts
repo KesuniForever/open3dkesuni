@@ -10,6 +10,7 @@ import { idrPerUsdc } from "./costing";
 import { idrBudget, type Budget } from "./budget";
 import { wakeChief } from "./agent/chief";
 import { runCount } from "./printer/actions";
+import { isPersonName } from "./printer/control";
 import type { Acceptance, Evidence, Label, Material, Order, PaymentIntent, Quote } from "./types";
 
 export type Fail = { ok: false; status: number; error: string; reasons?: string[] };
@@ -80,6 +81,30 @@ export function ensureCustomerToken(orderId: string): string | undefined {
   const customerToken = newCustomerToken();
   store.saveOrder({ ...order, customerToken });
   return customerToken;
+}
+
+/** The decision-log tool of a new customer link (actor "human"). */
+export const NEW_CUSTOMER_LINK_TOOL = "new_customer_link";
+
+/**
+ * A person gives the order a new customer link, for one that was seen where it should not be (a video, a screenshot).
+ * Every customer route finds the order by its current token, so the old link stops working at once. People only, on
+ * the operator order page (POST /api/orders/:id/customer-link, behind the operator password): no agent tool. It moves
+ * no money and no printer. A name is required; the decision-log row keeps who and when, never a token.
+ */
+export function replaceCustomerToken(orderId: string, input: { by: unknown }, now = Date.now()):
+  { ok: true; customerToken: string } | Fail {
+  return store.transaction(() => {
+    const order = store.getOrder(orderId);
+    if (!order) return fail(404, "Order not found");
+    if (!isPersonName(input.by)) return fail(400, "A person's name is required");
+    const customerToken = newCustomerToken();
+    store.saveOrder({ ...order, customerToken });
+    store.addLog({
+      orderId, actor: "human", tool: NEW_CUSTOMER_LINK_TOOL, input: { by: input.by.trim() }, ok: true, output: {}, at: new Date(now).toISOString(),
+    });
+    return { ok: true as const, customerToken };
+  });
 }
 
 export function addQuote(

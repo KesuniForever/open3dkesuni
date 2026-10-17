@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { microToUsdc } from "@/lib/policy";
 import type {
   Acceptance, AgentLogEntry, Attachment, CustomerMessage, Decision, Escrow, Evidence, OperatorTask, Order, PaymentIntent, PrintJob, Printer, Quote, Vendor,
@@ -15,6 +15,7 @@ import AgreementPanel from "./AgreementPanel";
 import ActualPanel from "./ActualPanel";
 import WeightPricePanel from "./WeightPricePanel";
 import MessagesPanel from "./MessagesPanel";
+import CustomerLinkPanel from "./CustomerLinkPanel";
 import { NowBanner, nowText, StepCard, StepLink } from "./Steps";
 import { nextStep, printFileOf, sliceGrams, STATUS_WORDS, statusWord, stepFacts, stepStates, weighedPlate } from "./operator-step";
 import type { PricingConfig } from "@/lib/pricing";
@@ -312,7 +313,7 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
             </dl>
           </section>
 
-          <CustomerLink path={data.customerLink} name={order.customerName} note={order.customerNote} />
+          <CustomerLinkPanel orderId={order.id} path={data.customerLink} name={order.customerName} note={order.customerNote} onChange={load} />
           <EscrowPanel order={order} escrow={escrow} network={data.network} hasPlan={Boolean(chosen)} busy={busy} act={act} onChange={load} />
           <MessagesPanel order={order} messages={data.messages ?? []} busy={busy} onChange={load} />
         </div>
@@ -487,24 +488,6 @@ export default function OrderView({ id, issueTexts = {} }: { id: string; issueTe
 
 const rp = (n: number) => `Rp${Math.round(n).toLocaleString("id-ID")}`;
 
-function CustomerLink({ path, name, note }: { path: string; name?: string; note?: string }) {
-  const t = useT();
-  const [copied, setCopied] = useState(false);
-  const origin = useSyncExternalStore(() => () => {}, () => window.location.origin, () => "");
-  const url = origin + path;
-  return (
-    <section className="card">
-      <h2>{t("Customer")}{name && `: ${name}`} <Info>{t("Send this link to the customer (WhatsApp). They can pay into escrow, follow the print live, and accept or reject. Anyone with the link can see this order.")}</Info></h2>
-      {note && <p style={{ marginTop: 0 }}>“{note}”</p>}
-      <div className="row">
-        <code style={{ flex: "1 1 260px", overflowWrap: "anywhere" }}>{url}</code>
-        <button onClick={async () => { await navigator.clipboard.writeText(url); setCopied(true); }}>{copied ? t("Copied") : t("Copy customer link")}</button>
-        <a href={path} target="_blank" rel="noreferrer">{t("Open as customer")}</a>
-      </div>
-    </section>
-  );
-}
-
 function OwnerRules({ data, busy, act }: { data: OrderData; busy: boolean; act: (url: string, body: unknown, success: string) => Promise<void> }) {
   const t = useT();
   const { order, ownerRules: r, ownerChecks } = data;
@@ -639,6 +622,7 @@ function summarize(e: AgentLogEntry, t: T, locale: Locale): string {
   if (e.tool === "printer_command") return `${String(input.kind ?? "")} · ${t("by {name}", { name: String(input.by ?? "") })}`;
   if (e.tool === "print_job") return t("sent to {printer}", { printer: String(out?.printer ?? "") });
   if (e.tool === "print_done_debug") return `${t("print marked done for testing (no real print)")} · ${t("by {name}", { name: String(input.by ?? "") })}`;
+  if (e.tool === "new_customer_link") return `${t("new customer link: the old one stopped working")} · ${t("by {name}", { name: String(input.by ?? "") })}`;
   if (e.tool === "remove_file") return t("{name} removed {file}", { name: String(input.by ?? ""), file: String(input.filename ?? "") });
   if (e.tool === "message_customer") {
     const said = { text: String(input.text ?? ""), textId: typeof input.textId === "string" ? input.textId : undefined };

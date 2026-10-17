@@ -50,10 +50,11 @@ export interface Traction {
 
 const volume = (micro: number): Volume => ({ micro, usdc: microToUsdc(micro) });
 
-/** Identity for counting distinct customers; never returned. */
+/** Identity for counting distinct customers; never returned. Without a name, the order's id: a new customer link
+ *  (replaceCustomerToken) never changes the count. */
 function customerKey(o: Order): string {
   const name = o.customerName?.trim().toLowerCase().replace(/\s+/g, " ");
-  return name ? `name:${name}` : `order:${o.customerToken ?? o.id}`;
+  return name ? `name:${name}` : `order:${o.id}`;
 }
 
 export function traction(opts: { now?: Date; last?: number } = {}): Traction {
