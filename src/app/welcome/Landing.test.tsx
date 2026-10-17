@@ -72,7 +72,7 @@ describe("Landing page", () => {
     expect(none).not.toContain("lp-video");
     const yt = render("en", videoEmbed(YT));
     expect(text(yt)).toContain("Watch the demo");
-    expect(text(yt)).toContain("(shown in the video)");
+    expect(text(yt)).not.toContain("(shown in the video)"); // the video shows the real flow, not the practice scenarios
     expect(yt).toContain('<iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"');
     const mp4 = render("en", videoEmbed("https://files.example.com/demo.mp4"));
     expect(mp4).toMatch(/<video src="https:\/\/files\.example\.com\/demo\.mp4"[^>]*controls/);

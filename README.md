@@ -12,7 +12,7 @@ Built for the Tameion Agents Hackathon (October 2026).
   - `/live`: read-only, no login. The printers, the agent at work (with its limits and last nightly report), money on
     Arc, and the token research.
   - `/customer`: the customer portal, where a real customer places an order (the token research is there too).
-- **Demo video:** linked from the landing page once it is set (`DEMO_VIDEO_URL`).
+- **Demo video:** https://www.youtube.com/watch?v=pJ69_hUfkww (also on the landing page, under "See it work").
 
 ## What is real and what is simulated
 

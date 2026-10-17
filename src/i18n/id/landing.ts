@@ -101,7 +101,6 @@ const id: Record<string, string> = {
   "See it work": "Lihat cara kerjanya",
   "Open3DKesuni demo video": "Video demo Open3DKesuni",
   "{n} scenarios we test": "{n} skenario yang kami uji",
-  "(shown in the video)": "(ditampilkan di video)",
   "Each one runs the real rules engine on a practice order, labelled simulated and never counted.":
     "Masing-masing menjalankan mesin aturan yang sebenarnya pada pesanan latihan, diberi label simulasi dan tidak pernah dihitung.",
   "Priced and planned": "Harga dan rencana jadi",

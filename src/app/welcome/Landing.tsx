@@ -190,7 +190,7 @@ export default function Landing({ t, stats, video }: { t: T; stats: LandingStats
 
         {/* The practice page itself is for the team (/demo needs the operator password): here only what each one shows. */}
         <h3 className="lp-sub">
-          {t("{n} scenarios we test", { n: DEMO_SCENARIOS.length })}{video && <small> {t("(shown in the video)")}</small>}
+          {t("{n} scenarios we test", { n: DEMO_SCENARIOS.length })}
         </h3>
         <p className="lp-small">{t("Each one runs the real rules engine on a practice order, labelled simulated and never counted.")}</p>
         <ul className="lp-grid three lp-scenarios">
