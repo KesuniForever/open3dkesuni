@@ -110,6 +110,8 @@ export function proxy(req: NextRequest) {
 // The customer API (/api/c, /api/c/<token>) is left out: it is open anyway (OPEN above), and with the proxy Next.js
 // buffers every request body in memory (up to proxyClientMaxBodySize, 60 MB) before the route runs. Without it the
 // route refuses a wrong invite or a too-big design before reading the body (src/lib/request-body.ts).
+// The site icons (src/app/favicon.ico, icon.png, apple-icon.png) are left out too: a browser fetches them on every
+// page, the customer's and the landing page too, so they must never ask for the operator password.
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/c/|api/c$).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|api/c/|api/c$).*)"],
 };

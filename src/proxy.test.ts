@@ -292,4 +292,7 @@ describe("proxy: which paths it runs on", () => {
       expect(runs(p), p).toBe(true);
     }
   });
+  it("leaves the site icons out, so the browser tab and a phone's home screen get the logo without a password", () => {
+    for (const p of ["/favicon.ico", "/icon.png", "/apple-icon.png"]) expect(runs(p), p).toBe(false);
+  });
 });
